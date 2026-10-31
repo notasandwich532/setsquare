@@ -345,29 +345,29 @@ Polygon polygon(Sketch& s, Id center, Vec2 at, int sides, PolygonKind kind)
 
     Polygon p;
     p.center = center;
-    if (kind == PolygonKind::Inscribed) {
-        for (int k = 0; k < sides; ++k) {
-            p.vertices.push_back(point(s, polar(c, dist, a0 + k * step)));
-        }
-        p.circle = s.addCircle(center, dist);
+    // Regularity always comes from "corners on a circle + equal sides". (Equal sides tangent to
+    // a circle is not enough for an even count: a rhombus fits that and isn't a square.)
+    double cornerRadius = dist;
+    double firstAngle = a0;
+    if (kind == PolygonKind::Circumscribed) {
+        // `at` is the middle of side 0, so the corners sit half a step either side of it.
+        cornerRadius = dist / std::cos(kPi / sides);
+        firstAngle = a0 - step / 2;
     }
-    else {
-        // `at` is the middle of side 0, so vertices sit half a step either side of it.
-        const double corner = dist / std::cos(kPi / sides);
-        for (int k = 0; k < sides; ++k) {
-            p.vertices.push_back(point(s, polar(c, corner, a0 - step / 2 + k * step)));
-        }
-        p.circle = s.addCircle(center, dist);
+    for (int k = 0; k < sides; ++k) {
+        p.vertices.push_back(point(s, polar(c, cornerRadius, firstAngle + k * step)));
     }
+    p.circle = s.addCircle(center, cornerRadius);
     s.entity(p.circle).construction = true;
     closePolygon(s, p);
-    for (size_t i = 0; i < p.vertices.size(); ++i) {
-        if (kind == PolygonKind::Inscribed) {
-            s.addConstraint(CT::Coincident, {p.vertices[i], p.circle});
-        }
-        else {
-            s.addConstraint(CT::Tangent, {p.sides[i], p.circle});
-        }
+    for (Id v : p.vertices) {
+        s.addConstraint(CT::Coincident, {v, p.circle});
+    }
+    if (kind == PolygonKind::Circumscribed) {
+        // The inscribed circle too (across-flats size), touching one side; the rest follow.
+        p.innerCircle = s.addCircle(center, dist);
+        s.entity(p.innerCircle).construction = true;
+        s.addConstraint(CT::Tangent, {p.sides[0], p.innerCircle});
     }
     return p;
 }

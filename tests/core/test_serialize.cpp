@@ -1,7 +1,11 @@
 // .dsk file format round-trips, error handling, and the origin point.
 
+#include <core/Geometry.h>
 #include <core/Serialize.h>
 #include <core/Solver.h>
+
+#include <cmath>
+#include <numbers>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -109,6 +113,41 @@ TEST_CASE("Bad files are rejected with a readable error", "[serialize]")
                     SketchError);
 }
 
+TEST_CASE("Axes: fixed lines you can constrain and dimension against", "[origin][axes]")
+{
+    Sketch s;
+    s.ensureOrigin();
+    const Id x = s.xAxis(), y = s.yAxis();
+    REQUIRE(x != kNoId);
+    REQUIRE(y != kNoId);
+    CHECK(s.isReference(x));
+    CHECK_THROWS_AS(s.remove(x), SketchError);
+
+    // A free line, rotated to 30 degrees from the X axis and pinned 5 from the Y axis.
+    const Id l = s.addLine(2, 1, 12, 4);
+    s.addConstraint(CT::Angle, {x, l}, 30.0);
+    s.addConstraint(CT::Distance, {s.line(l).p1, y}, 5.0);
+    REQUIRE(solve(s).ok);
+    const Point& a = s.point(s.line(l).p1);
+    const Point& b = s.point(s.line(l).p2);
+    CHECK(std::atan2(b.y - a.y, b.x - a.x) * 180 / std::numbers::pi == Approx(30.0).margin(1e-6));
+    CHECK(a.x == Approx(5.0).margin(1e-9));
+    CHECK(s.point(s.line(x).p2).x == 1.0);  // the axis didn't move
+
+    // Picking: the axis is found anywhere along it, but real geometry on it wins.
+    PickOptions opt;
+    opt.tolerance = 0.5;
+    CHECK(pick(s, {500, 0.2}, opt) == x);
+    const Id onAxis = s.addLine(100, 0, 200, 0);
+    CHECK(pick(s, {150, 0.2}, opt) == onAxis);
+
+    // Round trip keeps them.
+    const Sketch loaded = fromJson(toJson(s));
+    CHECK(loaded.xAxis() == x);
+    CHECK(loaded.yAxis() == y);
+    CHECK(loaded.isHiddenReference(s.line(x).p2));
+}
+
 TEST_CASE("The origin is a fixed point that can't be deleted", "[origin]")
 {
     Sketch s;
@@ -120,7 +159,7 @@ TEST_CASE("The origin is a fixed point that can't be deleted", "[origin]")
     const Id l = s.addLine(origin, s.addPoint(10, 5));
     s.remove(l);  // the line's other end goes, the origin stays
     CHECK(s.hasEntity(origin));
-    CHECK(s.entities().size() == 1);
+    CHECK(s.entities().size() == 5);  // origin + axes + their hidden ends
     CHECK_THROWS_AS(s.remove(origin), SketchError);
 
     // Geometry constrained to the origin moves to it; the origin doesn't move.

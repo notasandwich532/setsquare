@@ -96,6 +96,7 @@ signals:
     void toolChanged(ToolKind kind);
     void selectionChanged();
     void message(const QString& text);
+    void polygonSidesChanged(int sides);
 
 protected:
     void paintEvent(QPaintEvent* event) override;

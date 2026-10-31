@@ -74,4 +74,11 @@ l1, l2 = s.line((0, 0), (10, 0)), s.line((20, 3), (30, 5))
 l1.fixed = True
 s.collinear(l1, l2)
 assert isclose(l2.p1.y, 0, abs_tol=1e-9) and isclose(l2.p2.y, 0, abs_tol=1e-9)
+# Angle to the X axis (e.g. to set a polygon's rotation) and distance from the Y axis.
+fresh()
+hexagon = s.polygon((20, 0), (30, 0), sides=6, circumscribed=True)
+s.angle(s.x_axis, hexagon[0], value=90)
+s.distance(hexagon[0].p1, s.y_axis, value=25)
+assert isclose(abs(hexagon[0].p1.x - hexagon[0].p2.x), 0, abs_tol=1e-6)  # side 0 now vertical
+
 print("shapes ok")

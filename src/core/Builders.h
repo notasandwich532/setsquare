@@ -49,7 +49,8 @@ enum class PolygonKind
 struct Polygon
 {
     Id center = kNoId;
-    Id circle = kNoId;  // construction
+    Id circle = kNoId;       // construction, through the corners
+    Id innerCircle = kNoId;  // construction, touching the sides (circumscribed only)
     std::vector<Id> vertices;
     std::vector<Id> sides;
 };

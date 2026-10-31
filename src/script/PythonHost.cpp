@@ -498,7 +498,8 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
         return [kind](const SketchH&) {
             std::vector<Id> ids;
             for (const auto& [id, e] : sketch().entities()) {
-                if (!kind || e.kind() == *kind) {
+                // The origin and axes are reachable as s.origin / s.x_axis / s.y_axis.
+                if ((!kind || e.kind() == *kind) && !sketch().isReference(id)) {
                     ids.push_back(id);
                 }
             }
@@ -508,6 +509,9 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
 
     py::class_<SketchH>(m, "Sketch")
         .def_property_readonly("origin", [](const SketchH&) { return wrap(sketch().origin()); })
+        .def_property_readonly("x_axis", [](const SketchH&) { return wrap(sketch().xAxis()); },
+                               "The fixed X axis (a line), for constraints and dimensions.")
+        .def_property_readonly("y_axis", [](const SketchH&) { return wrap(sketch().yAxis()); })
         .def("__getitem__", [](const SketchH&, Id id) {
             if (!sketch().hasEntity(id) && !sketch().hasConstraint(id)) {
                 throw py::key_error("no item " + std::to_string(id));

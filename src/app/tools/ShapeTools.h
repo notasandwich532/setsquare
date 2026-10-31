@@ -4,6 +4,7 @@
 
 #include <core/Builders.h>
 
+#include <QElapsedTimer>
 #include <QObject>
 
 #include <functional>
@@ -105,11 +106,24 @@ protected:
     void build(Editor& ed, const std::vector<Snap>& clicks) override;
 };
 
-class PolygonTool : public StepTool
+// Typing a number (or +/-) while placing a polygon sets its side count, shown at the cursor.
+class PolygonSidesTool : public StepTool
+{
+public:
+    using StepTool::StepTool;
+    bool keyPress(int key, const QString& text) override;
+    void paintOverlay(QPainter& painter) override;
+
+private:
+    QString m_typed;
+    QElapsedTimer m_typedClock;
+};
+
+class PolygonTool : public PolygonSidesTool
 {
 public:
     PolygonTool(SketchView& view, core::build::PolygonKind kind)
-        : StepTool(view)
+        : PolygonSidesTool(view)
         , m_kind(kind)
     {}
 
@@ -124,10 +138,10 @@ private:
     core::build::PolygonKind m_kind;
 };
 
-class PolygonEdgeTool : public StepTool
+class PolygonEdgeTool : public PolygonSidesTool
 {
 public:
-    using StepTool::StepTool;
+    using PolygonSidesTool::PolygonSidesTool;
 
 protected:
     int steps() const override { return 3; }

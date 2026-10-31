@@ -117,6 +117,9 @@ std::string toJson(const Sketch& sketch)
     if (sketch.origin() != kNoId) {
         doc["origin"] = sketch.origin();
     }
+    if (sketch.xAxis() != kNoId) {
+        doc["axes"] = {sketch.xAxis(), sketch.yAxis()};
+    }
     doc["entities"] = std::move(entities);
     doc["constraints"] = std::move(constraints);
     return doc.dump(2) + "\n";
@@ -152,6 +155,10 @@ Sketch fromJson(const std::string& text)
         }
         if (doc.contains("origin")) {
             sketch.setOrigin(doc.at("origin").get<Id>());
+            if (doc.contains("axes")) {
+                const auto& axes = doc.at("axes");
+                sketch.setAxes(axes.at(0).get<Id>(), axes.at(1).get<Id>());
+            }
         }
         for (const json& j : doc.at("constraints")) {
             sketch.insertConstraint(constraintFromJson(j));

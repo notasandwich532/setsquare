@@ -8,7 +8,7 @@
 // and scripts can refer to things by id.
 //
 // {
-//   "format": "drawing_app.sketch", "version": 1, "origin": 1,
+//   "format": "drawing_app.sketch", "version": 1, "origin": 1, "axes": [4, 5],
 //   "entities": [ {"id": 1, "type": "point", "x": 0, "y": 0, "fixed": true},
 //                 {"id": 4, "type": "line", "p1": 2, "p2": 3, "construction": true}, ... ],
 //   "constraints": [ {"id": 9, "type": "distance", "refs": [4], "value": 40, "label": [0, 8]}, ... ]

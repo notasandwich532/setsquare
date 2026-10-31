@@ -339,7 +339,10 @@ void MainWindow::createActions()
         group->addAction(action);
         menu->addAction(action);
         const ToolKind kind = t.kind;
-        connect(action, &QAction::triggered, this, [this, kind] { m_view->setTool(kind); });
+        connect(action, &QAction::triggered, this, [this, kind] {
+            m_view->setTool(kind);
+            m_view->setFocus();  // so typed input (e.g. polygon sides) reaches the canvas
+        });
         m_toolActions[kind] = action;
         return action;
     };
@@ -412,6 +415,10 @@ void MainWindow::createActions()
     sidesBox->setPrefix(tr("Sides: "));
     sidesBox->setToolTip(tr("Number of polygon sides"));
     connect(sidesBox, &QSpinBox::valueChanged, m_view, &SketchView::setPolygonSides);
+    connect(m_view, &SketchView::polygonSidesChanged, sidesBox, [sidesBox](int sides) {
+        const QSignalBlocker block(sidesBox);  // typed on the canvas: just mirror it
+        sidesBox->setValue(sides);
+    });
     toolbar->addSeparator();
     QAction* sidesAction = toolbar->addWidget(sidesBox);
     sidesAction->setVisible(false);
@@ -449,7 +456,7 @@ void MainWindow::createActions()
         m_view->tryEdit(tr("Construction"), [&](Editor& ed) {
             for (core::Id id : selection) {
                 const core::Sketch& s = ed.sketch();
-                if (s.hasEntity(id) && s.entity(id).kind() != core::EntityKind::Point) {
+                if (s.hasEntity(id) && s.entity(id).kind() != core::EntityKind::Point && !s.isReference(id)) {
                     ed.setConstruction(id, !s.entity(id).construction);
                 }
             }

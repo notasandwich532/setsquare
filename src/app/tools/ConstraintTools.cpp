@@ -120,13 +120,13 @@ ConstraintTool::Outcome ConstraintTool::tryApply(const std::vector<Id>& refs)
 
     if (m_kind == ToolKind::Fix) {
         const std::vector<Id> ids = refs;
-        if (std::ranges::all_of(ids, [&](Id id) { return s.isOrigin(id); })) {
-            emit view().message(QObject::tr("The origin is always fixed"));
+        if (std::ranges::all_of(ids, [&](Id id) { return s.isReference(id); })) {
+            emit view().message(QObject::tr("The origin and axes are always fixed"));
             return Outcome::Rejected;
         }
         view().tryEdit(QObject::tr("Fix"), [&](Editor& ed) {
             for (Id id : ids) {
-                if (!ed.sketch().isOrigin(id)) {
+                if (!ed.sketch().isReference(id)) {
                     ed.setFixed(id, !ed.sketch().entity(id).fixed);
                 }
             }

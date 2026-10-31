@@ -18,6 +18,12 @@ QString Editor::name(const core::Sketch& s, Id id)
     if (s.isOrigin(id)) {
         return QStringLiteral("s.origin");
     }
+    if (id == s.xAxis()) {
+        return QStringLiteral("s.x_axis");
+    }
+    if (id == s.yAxis()) {
+        return QStringLiteral("s.y_axis");
+    }
     if (s.hasConstraint(id)) {
         return (core::isDimension(s.constraint(id).type) ? QStringLiteral("d") : QStringLiteral("k"))
             + QString::number(id);

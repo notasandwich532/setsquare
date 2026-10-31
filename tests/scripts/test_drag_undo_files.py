@@ -26,7 +26,7 @@ count = len(s.entities)
 doc.save(path)
 assert doc.path == path and not doc.modified
 doc.new()
-assert len(s.entities) == 1  # just the origin
+assert len(s.entities) == 0  # (the origin and axes aren't listed)
 doc.open(path)
 assert len(s.entities) == count
 assert isclose(s[arm.id].length, 10)

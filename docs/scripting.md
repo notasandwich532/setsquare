@@ -106,6 +106,11 @@ p.move_to(x, y)
 s.drag_edge(circle, (x, y), dx, dy)   # grab a rim: resizes a free circle
 ```
 
+### Origin and axes
+`s.origin`, `s.x_axis` and `s.y_axis` are fixed and permanent. Use them like any point or line:
+`s.angle(s.x_axis, l, value=30)`, `s.distance(p, s.y_axis, value=5)`, `s.coincident(p, s.x_axis)`.
+They aren't included in `s.entities` and the other lists.
+
 ### Reading
 ```python
 s.origin, s[12], s.points, s.lines, s.circles, s.arcs, s.entities, s.constraints, s.dimensions

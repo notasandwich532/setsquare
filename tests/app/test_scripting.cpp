@@ -176,14 +176,14 @@ TEST_CASE("A script is one undo step; console commands are separate steps", "[sc
     Document doc;
     ScriptScope scope(doc);
     REQUIRE(script::runSource("s.rectangle((0, 0), (10, 10))\ns.circle((5, 5), 2)\ns.point(20, 20)").ok);
-    CHECK(doc.sketch().entities().size() == 1 + 8 + 2 + 1);
+    CHECK(doc.sketch().entities().size() == 5 + 8 + 2 + 1);  // 5: origin and axes
     doc.undo();
-    CHECK(doc.sketch().entities().size() == 1);
+    CHECK(doc.sketch().entities().size() == 5);
     CHECK_FALSE(doc.canUndo());
 
     REQUIRE(script::runConsole("s.point(1, 1)\ns.point(2, 2)").ok);
     doc.undo();
-    CHECK(doc.sketch().entities().size() == 2);  // origin + first point
+    CHECK(doc.sketch().entities().size() == 6);  // origin, axes + first point
 }
 
 TEST_CASE("Errors come back as Python exceptions with a traceback", "[scripting][errors]")

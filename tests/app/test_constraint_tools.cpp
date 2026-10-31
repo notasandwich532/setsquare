@@ -324,7 +324,7 @@ TEST_CASE("A fully dimensioned bracket is fully constrained", "[dimension][showc
     dimension({{-10, -30}}, {-10, -38});         // bottom width
     dimension({{20, -20}}, {28, -20});           // right height
     dimension({{-30, 30}}, {-30, 37});           // top width
-    dimension({{-40, 0}}, {-48, 0});             // left height
+    dimension({{-40, 5}}, {-48, 5});             // left height (off the X axis)
     dimension({{-25, 15}}, {-15, 22});           // hole diameter
     dimension({{-30, 15}, {-40, 15}}, {-35, 20});  // hole centre to left edge
     dimension({{-30, 15}, {-30, 30}}, {-25, 25});  // hole centre to top edge
@@ -342,13 +342,13 @@ TEST_CASE("Nearly horizontal and vertical lines get H/V constraints", "[inferenc
 {
     Fixture f;
     f.view.setTool(ToolKind::Line);
-    f.click(0, 0);
-    f.move(20, 0.5);
-    f.click(20, 0.5);  // ~1.4 degrees off: snaps horizontal
-    f.move(20.5, 20);
-    f.click(20.5, 20);  // snaps vertical
-    f.move(5, 35);
-    f.click(5, 35);  // clearly diagonal: nothing
+    f.click(10, 10);  // (away from the axes, which would snap the ends onto them instead)
+    f.move(30, 10.5);
+    f.click(30, 10.5);  // ~1.4 degrees off: snaps horizontal
+    f.move(30.5, 30);
+    f.click(30.5, 30);  // snaps vertical
+    f.move(15, 45);
+    f.click(15, 45);  // clearly diagonal: nothing
     f.key(Qt::Key_Escape);
 
     CHECK(f.constraintsOfType(CT::Horizontal).size() == 1);

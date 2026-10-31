@@ -149,19 +149,29 @@ public:
     void remove(Id id);
     void clear();
 
-    // --- origin ---
-    // A fixed point at (0, 0) that geometry can snap to and be constrained against. Created on
-    // demand; a sketch has at most one, and it can't be moved, unfixed or deleted.
-    Id ensureOrigin();
+    // --- origin and axes ---
+    // A fixed point at (0, 0) plus fixed X and Y axis lines through it, which geometry can snap
+    // to and be constrained/dimensioned against (e.g. an angle to the X axis). Created on
+    // demand; they can't be moved, unfixed or deleted. Each axis is an ordinary line from the
+    // origin to a hidden fixed point at (1, 0) / (0, 1); the UI draws it as infinite.
+    Id ensureOrigin();  // also creates the axes
     Id origin() const { return m_origin; }
+    Id xAxis() const { return m_axes[0]; }
+    Id yAxis() const { return m_axes[1]; }
     bool isOrigin(Id id) const { return id != kNoId && id == m_origin; }
+    bool isAxis(Id id) const { return id != kNoId && (id == m_axes[0] || id == m_axes[1]); }
+    // Origin, axes and the axes' hidden end points: permanent, not user geometry.
+    bool isReference(Id id) const;
+    // The axes' hidden end points: never shown or picked.
+    bool isHiddenReference(Id id) const { return id != kNoId && (id == m_axisEnds[0] || id == m_axisEnds[1]); }
 
     // --- loading ---
     // Insert items with known ids (e.g. from a file). Points must go in before the curves that
     // use them, and geometry before constraints. Throws SketchError on bad references.
     void insertEntity(const Entity& entity);
     void insertConstraint(const Constraint& constraint);
-    void setOrigin(Id point);  // marks an existing point as the origin
+    void setOrigin(Id point);           // marks an existing point as the origin
+    void setAxes(Id xAxis, Id yAxis);   // marks existing lines (from the origin) as the axes
 
     // --- lookup ---
     bool hasEntity(Id id) const { return m_entities.contains(id); }
@@ -207,6 +217,8 @@ private:
     std::map<Id, Constraint> m_constraints;
     Id m_nextId = 1;
     Id m_origin = kNoId;
+    std::array<Id, 2> m_axes{kNoId, kNoId};
+    std::array<Id, 2> m_axisEnds{kNoId, kNoId};
 };
 
 }  // namespace core

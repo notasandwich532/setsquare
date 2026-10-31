@@ -82,6 +82,9 @@ public:
     // otherwise the view falls back to the select tool.
     virtual bool cancel() { return false; }
 
+    // Other keys go to the tool first; return true if it used the key.
+    virtual bool keyPress(int /*key*/, const QString& /*text*/) { return false; }
+
     // Called once per frame before painting. Tools defer expensive work (like the drag solve)
     // to here so it runs at most once per displayed frame, with the newest input.
     virtual void beforePaint() {}

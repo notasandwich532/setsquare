@@ -111,6 +111,9 @@ bool circumcircle(Vec2 a, Vec2 b, Vec2 c, Vec2& center, double& radius)
 
 double distanceTo(const Sketch& sketch, Id id, Vec2 p)
 {
+    if (sketch.isAxis(id)) {
+        return id == sketch.xAxis() ? std::abs(p.y) : std::abs(p.x);  // infinite lines
+    }
     const Entity& e = sketch.entity(id);
     switch (e.kind()) {
         case EntityKind::Point: return len(pos(sketch, id), p);
@@ -137,6 +140,9 @@ double distanceTo(const Sketch& sketch, Id id, Vec2 p)
 
 Vec2 closestPoint(const Sketch& sketch, Id id, Vec2 p)
 {
+    if (sketch.isAxis(id)) {
+        return id == sketch.xAxis() ? Vec2{p.x, 0.0} : Vec2{0.0, p.y};  // infinite lines
+    }
     const Entity& e = sketch.entity(id);
     switch (e.kind()) {
         case EntityKind::Point: return pos(sketch, id);
@@ -176,7 +182,7 @@ Id pick(const Sketch& sketch, Vec2 p, const PickOptions& options)
     Id bestPoint = kNoId, bestCurve = kNoId;
     double pointDist = options.tolerance, curveDist = options.tolerance;
     for (const auto& [id, e] : sketch.entities()) {
-        if (options.exclude.contains(id)) {
+        if (options.exclude.contains(id) || sketch.isHiddenReference(id) || sketch.isAxis(id)) {
             continue;
         }
         const bool isPoint = e.kind() == EntityKind::Point;
@@ -193,7 +199,26 @@ Id pick(const Sketch& sketch, Vec2 p, const PickOptions& options)
             bestCurve = id;
         }
     }
-    return bestPoint != kNoId ? bestPoint : bestCurve;
+    if (bestPoint != kNoId) {
+        return bestPoint;
+    }
+    if (bestCurve != kNoId || !options.curves) {
+        return bestCurve;
+    }
+    // The axes are infinite and come last, so geometry drawn along them stays pickable.
+    Id bestAxis = kNoId;
+    double axisDist = options.tolerance;
+    for (Id axis : {sketch.xAxis(), sketch.yAxis()}) {
+        if (axis == kNoId || options.exclude.contains(axis)) {
+            continue;
+        }
+        const double d = axis == sketch.xAxis() ? std::abs(p.y) : std::abs(p.x);
+        if (d <= axisDist) {
+            axisDist = d;
+            bestAxis = axis;
+        }
+    }
+    return bestAxis;
 }
 
 std::vector<Vec2> sample(const Sketch& sketch, Id id, int segments)
@@ -233,6 +258,9 @@ std::vector<Id> boxSelect(const Sketch& sketch, Vec2 c1, Vec2 c2, bool crossing)
     const Box box{std::min(c1.x, c2.x), std::min(c1.y, c2.y), std::max(c1.x, c2.x), std::max(c1.y, c2.y)};
     std::vector<Id> out;
     for (const auto& [id, e] : sketch.entities()) {
+        if (sketch.isReference(id)) {
+            continue;  // origin and axes aren't box-selected (they'd only get in the way)
+        }
         const std::vector<Vec2> pts = sample(sketch, id);
         bool hit = false;
         if (pts.size() == 1) {

@@ -74,9 +74,19 @@ QString ConstraintPanel::describe(const core::Constraint& c) const
         text += QStringLiteral("  ") + m_view.formatDimension(c);
     }
     QStringList refs;
+    const core::Sketch& s = m_doc.sketch();
     for (core::Id r : c.refs) {
-        if (m_doc.sketch().hasEntity(r)) {
-            refs << QStringLiteral("%1 %2").arg(QString::fromLatin1(core::toString(m_doc.sketch().entity(r).kind()))).arg(r);
+        if (s.isOrigin(r)) {
+            refs << tr("origin");
+        }
+        else if (r == s.xAxis()) {
+            refs << tr("X axis");
+        }
+        else if (r == s.yAxis()) {
+            refs << tr("Y axis");
+        }
+        else if (s.hasEntity(r)) {
+            refs << QStringLiteral("%1 %2").arg(QString::fromLatin1(core::toString(s.entity(r).kind()))).arg(r);
         }
     }
     return text + QStringLiteral("   (") + refs.join(QStringLiteral(", ")) + QLatin1Char(')');

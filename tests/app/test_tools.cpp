@@ -60,7 +60,7 @@ struct Fixture
     {
         std::vector<Id> out;
         for (const auto& [id, e] : sketch().entities()) {
-            if (e.kind() == kind) {
+            if (e.kind() == kind && !sketch().isReference(id)) {  // not the origin/axes
                 out.push_back(id);
             }
         }
@@ -86,7 +86,7 @@ TEST_CASE("Line tool draws a connected chain until Esc", "[tools][line]")
     f.key(Qt::Key_Escape);
 
     REQUIRE(f.ofKind(EntityKind::Line).size() == 2);
-    CHECK(f.ofKind(EntityKind::Point).size() == 3);  // middle point is shared
+    CHECK(f.ofKind(EntityKind::Point).size() == 2);  // started on the origin; middle point shared
 
     // Esc ended the chain: the next click starts a new one instead of adding a segment.
     f.click(50, 50);
@@ -108,7 +108,7 @@ TEST_CASE("Clicking the first point closes the loop", "[tools][line]")
     f.click(20, 20);
     f.click(0.5, 0.5);  // within snap distance of the start
     CHECK(f.ofKind(EntityKind::Line).size() == 3);
-    CHECK(f.ofKind(EntityKind::Point).size() == 3);
+    CHECK(f.ofKind(EntityKind::Point).size() == 2);  // plus the origin
 
     f.click(40, 40);  // chain ended: this only starts a new one
     CHECK(f.ofKind(EntityKind::Line).size() == 3);
@@ -138,7 +138,7 @@ TEST_CASE("Rectangle tool adds four constrained sides", "[tools][rectangle]")
     f.click(40, 30);
 
     CHECK(f.ofKind(EntityKind::Line).size() == 4);
-    CHECK(f.ofKind(EntityKind::Point).size() == 5);  // 4 corners + the origin
+    CHECK(f.ofKind(EntityKind::Point).size() == 4);
     CHECK(f.sketch().constraints().size() == 4);
     const SolveResult& r = f.doc.solveResult();
     CHECK(r.ok);
@@ -155,14 +155,14 @@ TEST_CASE("Geometry drawn from the origin is anchored to it", "[tools][origin]")
     f.view.setTool(ToolKind::Rectangle);
     f.click(0.5, -0.5);  // snaps onto the origin
     f.click(30, 20);
-    CHECK(f.ofKind(EntityKind::Point).size() == 4);  // the origin is one of the corners
+    CHECK(f.ofKind(EntityKind::Point).size() == 3);  // the origin is the fourth corner
     CHECK(f.doc.solveResult().dof == 2);             // only width and height left
 
     // The origin survives deleting everything.
     f.view.setTool(ToolKind::Select);
     f.view.selectAll();
     f.key(Qt::Key_Delete);
-    CHECK(f.sketch().entities().size() == 1);
+    CHECK(f.sketch().entities().size() == 5);  // origin, axes and their hidden ends
     CHECK(f.sketch().hasEntity(origin));
 }
 
@@ -240,7 +240,7 @@ TEST_CASE("Esc abandons a shape in progress", "[tools]")
     f.click(0, 0);
     f.key(Qt::Key_Escape);
     f.click(30, 20);  // starts a fresh rectangle rather than finishing the old one
-    CHECK(f.sketch().entities().size() == 1);  // just the origin
+    CHECK(f.sketch().entities().size() == 5);  // just the origin and axes
 }
 
 TEST_CASE("Select, delete and undo", "[tools][select]")

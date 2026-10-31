@@ -202,6 +202,47 @@ void Circle3Tool::build(Editor& ed, const std::vector<Snap>& c)
     }
 }
 
+bool PolygonSidesTool::keyPress(int key, const QString& text)
+{
+    if (key == Qt::Key_Plus || key == Qt::Key_Equal || text == QLatin1String("+")) {
+        view().setPolygonSides(view().polygonSides() + 1);
+        m_typed.clear();
+        return true;
+    }
+    if (key == Qt::Key_Minus || key == Qt::Key_Underscore || text == QLatin1String("-")) {
+        view().setPolygonSides(view().polygonSides() - 1);
+        m_typed.clear();
+        return true;
+    }
+    if (text.size() == 1 && text[0].isDigit()) {
+        // Digits typed in quick succession form one number ("1", "2" -> 12); a digit that would
+        // overshoot the maximum starts a new number ("8", "1", "2" -> 8, then 12).
+        if (!m_typedClock.isValid() || m_typedClock.elapsed() > 1200 || (m_typed + text).toInt() > 64) {
+            m_typed.clear();
+        }
+        m_typed += text;
+        m_typedClock.restart();
+        const int n = m_typed.toInt();
+        if (n >= 3) {
+            view().setPolygonSides(n);
+        }
+        refresh();
+        return true;
+    }
+    return false;
+}
+
+void PolygonSidesTool::paintOverlay(QPainter& painter)
+{
+    StepTool::paintOverlay(painter);
+    const QString waiting = m_typed.size() == 1 && m_typed.toInt() < 3 && m_typedClock.isValid()
+            && m_typedClock.elapsed() <= 1200
+        ? QStringLiteral(" (%1_)").arg(m_typed)
+        : QString();
+    view().drawLabel(painter, m_cursor.pos,
+                     QObject::tr("%1 sides%2  - type a number, or +/-").arg(view().polygonSides()).arg(waiting));
+}
+
 QString PolygonTool::hintFor(size_t step) const
 {
     if (step == 0) {
@@ -451,7 +492,7 @@ void ArcTangentTool::press(const ToolEvent& e)
                                 && (s.line(ent.id).p1 == snap.point || s.line(ent.id).p2 == snap.point))
                 || (ent.kind() == core::EntityKind::Arc
                     && (s.arc(ent.id).start == snap.point || s.arc(ent.id).end == snap.point));
-            if (isEnd && !ent.construction) {
+            if (isEnd && !ent.construction && !s.isReference(ent.id)) {
                 m_curve = ent.id;
                 m_start = snap.point;
                 break;

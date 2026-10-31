@@ -12,7 +12,9 @@
 
 #include <QTest>
 
+#include <algorithm>
 #include <cmath>
+#include <numbers>
 
 using namespace core;
 using Catch::Approx;
@@ -43,7 +45,7 @@ struct Fixture
     {
         size_t n = 0;
         for (const auto& [id, e] : sketch().entities()) {
-            n += e.kind() == kind && e.construction == construction;
+            n += e.kind() == kind && e.construction == construction && !sketch().isReference(id);
         }
         return n;
     }
@@ -66,7 +68,7 @@ TEST_CASE("Point tool places points, constrained where they snap", "[shapes]")
     f.view.setTool(ToolKind::Point);
     f.click(-20, 20);  // free
     f.click(25, 10.3);  // on the line
-    CHECK(f.count(EntityKind::Point) == 1 + 2 + 2);  // origin + line ends + two new
+    CHECK(f.count(EntityKind::Point) == 2 + 2);  // line ends + two new
     REQUIRE(f.sketch().constraints().size() == 1);
     CHECK(f.sketch().constraints().begin()->second.refs[1] == line);
 }
@@ -109,6 +111,42 @@ TEST_CASE("Polygon tools use the side count option", "[shapes]")
     f.requireClean(8);
 }
 
+TEST_CASE("Typing a number sets the polygon's side count", "[shapes]")
+{
+    Fixture f;
+    f.view.setTool(ToolKind::PolygonCircumscribed);
+    QTest::keyClick(&f.view, Qt::Key_8);
+    CHECK(f.view.polygonSides() == 8);
+    QTest::keyClicks(&f.view, "12");  // two digits in quick succession
+    CHECK(f.view.polygonSides() == 12);
+    QTest::keyClick(&f.view, Qt::Key_Minus);
+    CHECK(f.view.polygonSides() == 11);
+    QTest::keyClick(&f.view, Qt::Key_Plus);
+    QTest::keyClick(&f.view, Qt::Key_Plus);
+    CHECK(f.view.polygonSides() == 13);
+    f.click(0, 0);
+    f.click(10, 0);
+    CHECK(f.count(EntityKind::Line) == 13);
+    f.requireClean(2);  // centred on the origin: size and rotation left
+}
+
+TEST_CASE("Dimension the angle to the X axis", "[shapes][dimension][axes]")
+{
+    Fixture f;
+    Id l = kNoId;
+    f.doc.modify("line", [&](Sketch& s) { l = s.addLine(20, 10, 40, 20); });
+    f.view.setTool(ToolKind::Dimension);
+    f.click(30, 15);   // the line
+    f.click(-60, 0);   // the X axis, well away from anything else
+    f.click(45, 12);   // place
+    const auto& cs = f.sketch().constraints();
+    REQUIRE(cs.size() == 1);
+    const Constraint& c = cs.begin()->second;
+    CHECK(c.type == ConstraintType::Angle);
+    CHECK(std::ranges::find(c.refs, f.sketch().xAxis()) != c.refs.end());
+    CHECK(c.value == Approx(std::atan2(10.0, 20.0) * 180 / std::numbers::pi));
+}
+
 TEST_CASE("Slot tools: straight and arc", "[shapes]")
 {
     Fixture f;
@@ -120,13 +158,13 @@ TEST_CASE("Slot tools: straight and arc", "[shapes]")
     CHECK(f.count(EntityKind::Arc) == 2);
     f.requireClean(5);
 
-    f.view.setTool(ToolKind::SlotArcCenter);
-    f.click(-30, 0);
-    f.click(-10, 0);
-    f.move(-16, 14);
-    f.move(-30, 20);
-    f.click(-30, 20);
-    f.click(-30, 23);  // width 6
+    f.view.setTool(ToolKind::SlotArcCenter);  // (off the X axis, which would snap the centre)
+    f.click(-30, 5);
+    f.click(-10, 5);
+    f.move(-16, 19);
+    f.move(-30, 25);
+    f.click(-30, 25);
+    f.click(-30, 28);  // width 6
     CHECK(f.count(EntityKind::Arc) == 2 + 4);
     CHECK(f.count(EntityKind::Arc, true) == 1);  // the centreline
     f.requireClean(11);

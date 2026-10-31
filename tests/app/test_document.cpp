@@ -91,5 +91,5 @@ TEST_CASE("Files without an origin get one when opened", "[document][files]")
     Document doc;
     REQUIRE(doc.open(path));
     CHECK(doc.sketch().origin() != kNoId);
-    CHECK(doc.sketch().entities().size() == 2);
+    CHECK(doc.sketch().entities().size() == 6);  // the point, plus origin and axes
 }

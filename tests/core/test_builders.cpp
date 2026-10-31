@@ -182,6 +182,42 @@ TEST_CASE("Polygons: regular, DOF 4, every variant", "[builders]")
     }
 }
 
+TEST_CASE("Polygons stay regular however they're dragged", "[builders][drag]")
+{
+    // Regression: circumscribed polygons with an even side count could be dragged into a
+    // rhombus-like shape (equal sides tangent to a circle don't force regularity).
+    auto irregularity = [](const Sketch& s, const build::Polygon& p) {
+        double minR = 1e300, maxR = 0, minL = 1e300, maxL = 0;
+        const Vec2 c = pos(s, p.center);
+        for (Id v : p.vertices) {
+            const double r = dist(pos(s, v), c);
+            minR = std::min(minR, r);
+            maxR = std::max(maxR, r);
+        }
+        for (Id side : p.sides) {
+            minL = std::min(minL, length(s, side));
+            maxL = std::max(maxL, length(s, side));
+        }
+        return std::max(maxR - minR, maxL - minL);
+    };
+    for (auto kind : {build::PolygonKind::Inscribed, build::PolygonKind::Circumscribed}) {
+        for (int sides : {3, 4, 5, 6, 8}) {
+            Sketch s;
+            const build::Polygon p = build::polygon(s, s.addPoint(0, 0), {10, 0}, sides, kind);
+            requireClean(s, 4);
+            for (auto [dx, dy] : {std::pair{7.0, 3.0}, {-5.0, 9.0}, {12.0, -4.0}, {3.0, 15.0}}) {
+                Solver solver(s);
+                solver.beginDrag({p.vertices[1]});
+                solver.dragTo(dx, dy);
+                solver.endDrag();
+                solver.writeBack(s);
+                INFO("sides " << sides << (kind == build::PolygonKind::Inscribed ? " inscribed" : " circumscribed"));
+                CHECK(irregularity(s, p) < 1e-6);
+            }
+        }
+    }
+}
+
 TEST_CASE("Straight slots: DOF 5, sides tangent to equal caps", "[builders]")
 {
     auto check = [](Sketch& s, const build::Slot& slot, double width) {

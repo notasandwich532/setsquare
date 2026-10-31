@@ -190,7 +190,7 @@ Snap SketchView::snap(QPointF screen) const
 
     // Line midpoints.
     for (const auto& [id, e] : sketch.entities()) {
-        if (const auto* l = std::get_if<core::Line>(&e.geom)) {
+        if (const auto* l = std::get_if<core::Line>(&e.geom); l && !sketch.isAxis(id)) {
             const core::Point& a = sketch.point(l->p1);
             const core::Point& b = sketch.point(l->p2);
             const core::Vec2 m{(a.x + b.x) / 2, (a.y + b.y) / 2};
@@ -236,7 +236,7 @@ void SketchView::selectAll()
 {
     std::set<core::Id> all;
     for (const auto& [id, e] : m_doc.sketch().entities()) {
-        if (!m_doc.sketch().isOrigin(id)) {
+        if (!m_doc.sketch().isReference(id)) {
             all.insert(id);
         }
     }
@@ -246,7 +246,7 @@ void SketchView::selectAll()
 void SketchView::deleteSelection()
 {
     std::set<core::Id> doomed = m_selection;
-    std::erase_if(doomed, [&](core::Id id) { return m_doc.sketch().isOrigin(id); });  // permanent
+    std::erase_if(doomed, [&](core::Id id) { return m_doc.sketch().isReference(id); });  // permanent
     if (doomed.empty()) {
         return;
     }
@@ -270,6 +270,9 @@ void SketchView::fitAll()
         maxY = std::max(maxY, p.y);
     };
     for (const auto& [id, e] : s.entities()) {
+        if (s.isReference(id)) {
+            continue;
+        }
         for (const core::Vec2& p : core::sample(s, id, 32)) {
             include(p);
         }
@@ -494,9 +497,27 @@ void SketchView::drawSketch(QPainter& painter) const
         return pen;
     };
 
+    // The axes are drawn with the grid; here they only light up when hovered or selected.
+    for (core::Id axis : {sketch.xAxis(), sketch.yAxis()}) {
+        if (axis == core::kNoId || !(m_selection.contains(axis) || axis == m_hovered)) {
+            continue;
+        }
+        painter.setPen(QPen(m_selection.contains(axis) ? colors.selection : colors.hover, kHighlightWidth));
+        const QPointF o = toScreen({0, 0});
+        if (axis == sketch.xAxis()) {
+            painter.drawLine(QPointF(0, o.y()), QPointF(width(), o.y()));
+        }
+        else {
+            painter.drawLine(QPointF(o.x(), 0), QPointF(o.x(), height()));
+        }
+    }
+
     // Curves first, points on top.
     painter.setBrush(Qt::NoBrush);
     for (const auto& [id, e] : sketch.entities()) {
+        if (sketch.isAxis(id)) {
+            continue;
+        }
         switch (e.kind()) {
             case core::EntityKind::Point: break;
             case core::EntityKind::Line: {
@@ -525,7 +546,7 @@ void SketchView::drawSketch(QPainter& painter) const
     drawAnnotations(painter);
 
     for (const auto& [id, e] : sketch.entities()) {
-        if (e.kind() != core::EntityKind::Point) {
+        if (e.kind() != core::EntityKind::Point || sketch.isHiddenReference(id)) {
             continue;
         }
         const core::Point& p = std::get<core::Point>(e.geom);
@@ -580,7 +601,11 @@ void SketchView::setShowConstraints(bool show)
 
 void SketchView::setPolygonSides(int sides)
 {
-    m_polygonSides = std::clamp(sides, 3, 64);
+    const int clamped = std::clamp(sides, 3, 64);
+    if (clamped != m_polygonSides) {
+        m_polygonSides = clamped;
+        emit polygonSidesChanged(clamped);
+    }
     refreshTool();
 }
 
@@ -733,6 +758,9 @@ void SketchView::mouseDoubleClickEvent(QMouseEvent* event)
 
 void SketchView::keyPressEvent(QKeyEvent* event)
 {
+    if (event->key() != Qt::Key_Escape && m_tool->keyPress(event->key(), event->text())) {
+        return;
+    }
     switch (event->key()) {
         case Qt::Key_Escape:
             if (!m_tool->cancel()) {

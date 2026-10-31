@@ -72,7 +72,39 @@ Id Sketch::ensureOrigin()
         m_origin = addPoint(0.0, 0.0);
         m_entities.at(m_origin).fixed = true;
     }
+    if (m_axes[0] == kNoId) {
+        for (int i = 0; i < 2; ++i) {
+            m_axisEnds[i] = addPoint(i == 0 ? 1.0 : 0.0, i == 0 ? 0.0 : 1.0);
+            m_entities.at(m_axisEnds[i]).fixed = true;
+            m_axes[i] = addLine(m_origin, m_axisEnds[i]);
+            m_entities.at(m_axes[i]).fixed = true;
+            m_entities.at(m_axes[i]).construction = true;
+        }
+    }
     return m_origin;
+}
+
+bool Sketch::isReference(Id id) const
+{
+    return isOrigin(id) || isAxis(id) || isHiddenReference(id);
+}
+
+void Sketch::setAxes(Id xAxis, Id yAxis)
+{
+    const std::array<Id, 2> axes{xAxis, yAxis};
+    for (int i = 0; i < 2; ++i) {
+        const Line& l = line(axes[i]);  // throws if it isn't a line
+        if (l.p1 != m_origin) {
+            throw SketchError("an axis must start at the origin");
+        }
+        m_axes[i] = axes[i];
+        m_axisEnds[i] = l.p2;
+        Entity& end = m_entities.at(l.p2);
+        end.fixed = true;
+        end.geom = Point{i == 0 ? 1.0 : 0.0, i == 0 ? 0.0 : 1.0};
+        m_entities.at(axes[i]).fixed = true;
+        m_entities.at(axes[i]).construction = true;
+    }
 }
 
 void Sketch::setOrigin(Id point)
@@ -431,8 +463,8 @@ void Sketch::remove(Id id)
     if (!hasEntity(id)) {
         throw SketchError("unknown id " + std::to_string(id));
     }
-    if (isOrigin(id)) {
-        throw SketchError("the origin can't be deleted");
+    if (isReference(id)) {
+        throw SketchError(isOrigin(id) ? "the origin can't be deleted" : "the axes can't be deleted");
     }
 
     std::set<Id> doomed{id};
@@ -456,7 +488,7 @@ void Sketch::remove(Id id)
         }
     }
     for (Id p : candidates) {
-        if (isOrigin(p)) {
+        if (isReference(p)) {
             continue;  // curves ending on the origin don't take it with them
         }
         const bool used = std::ranges::any_of(m_entities, [&](const auto& kv) {
@@ -480,6 +512,8 @@ void Sketch::clear()
     m_entities.clear();
     m_constraints.clear();
     m_origin = kNoId;
+    m_axes = {kNoId, kNoId};
+    m_axisEnds = {kNoId, kNoId};
 }
 
 // ---------------------------------------------------------------------------------------------
