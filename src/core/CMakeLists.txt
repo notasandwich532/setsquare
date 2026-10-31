@@ -1,4 +1,6 @@
 add_library(drawcore STATIC
+    Geometry.cpp
+    Geometry.h
     Sketch.cpp
     Sketch.h
     Solver.cpp

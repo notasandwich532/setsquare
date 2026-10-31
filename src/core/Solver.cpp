@@ -420,6 +420,36 @@ void Solver::beginDrag(const std::vector<Id>& pointIds)
     d->dragging = true;
 }
 
+void Solver::beginDragEdge(Id id, double x, double y)
+{
+    endDrag();
+    if (!d->circles.contains(id) && !d->arcs.contains(id)) {
+        return;
+    }
+    GCS::Circle& c = d->round(id);
+
+    // If the radius can still change, hold the centre so the drag resizes the circle (as in
+    // Fusion). Otherwise the rim pull moves the whole circle.
+    d->sys.invalidatedDiagnosis();
+    d->sys.initSolution(GCS::DogLeg);
+    GCS::VEC_pD dependent;
+    d->sys.getDependentParams(dependent);
+    const bool radiusFree = std::ranges::find(d->unknowns, c.rad) != d->unknowns.end()
+        && (d->sys.isEmptyDiagnoseMatrix() || std::ranges::find(dependent, c.rad) != dependent.end());
+    if (radiusFree) {
+        GCS::Point hold(d->alloc(*c.center.x), d->alloc(*c.center.y));
+        d->sys.addConstraintP2PCoincident(c.center, hold, GCS::DefaultTemporaryConstraint);
+    }
+
+    Impl::DragTarget t{x, y, d->alloc(x), d->alloc(y)};
+    GCS::Point target(t.x, t.y);
+    d->sys.addConstraintP2PDistance(c.center, target, c.rad, GCS::DefaultTemporaryConstraint);
+    d->dragTargets.push_back(t);
+    d->sys.invalidatedDiagnosis();
+    d->sys.initSolution(GCS::DogLeg);
+    d->dragging = true;
+}
+
 bool Solver::dragTo(double dx, double dy)
 {
     if (!d->dragging) {

@@ -1,0 +1,62 @@
+#pragma once
+
+#include <core/Geometry.h>
+
+#include <QPointF>
+#include <QString>
+#include <Qt>
+
+class Document;
+class QPainter;
+class SketchView;
+
+enum class ToolKind
+{
+    Select,
+    Line,
+    Rectangle,
+    Circle,
+    ArcCenter,
+    Arc3Point,
+};
+
+struct ToolEvent
+{
+    QPointF screen;
+    core::Vec2 world;
+    Qt::MouseButton button = Qt::NoButton;  // the button that changed (press/release)
+    Qt::MouseButtons buttons;               // buttons held
+    Qt::KeyboardModifiers modifiers;
+};
+
+// An interaction mode of the sketch view. The view forwards input here and calls
+// paintOverlay() after drawing the sketch, so tools can show previews.
+class Tool
+{
+public:
+    explicit Tool(SketchView& view)
+        : m_view(view)
+    {}
+    virtual ~Tool() = default;
+
+    virtual QString hint() const = 0;
+
+    virtual void press(const ToolEvent&) {}
+    virtual void move(const ToolEvent&) {}
+    virtual void release(const ToolEvent&) {}
+    virtual void doubleClick(const ToolEvent&) {}
+
+    // Esc. Return true when the tool consumed it (e.g. abandoned a shape in progress);
+    // otherwise the view falls back to the select tool.
+    virtual bool cancel() { return false; }
+
+    virtual void paintOverlay(QPainter&) {}
+
+protected:
+    SketchView& view() const { return m_view; }
+    Document& doc() const;
+    void refresh() const;  // repaint and re-publish the hint
+
+private:
+    SketchView& m_view;
+};

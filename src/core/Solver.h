@@ -39,6 +39,9 @@ public:
     // Interactive dragging: the given points are pulled towards their start position plus an
     // offset with low priority, so real constraints always win. Fixed points are ignored.
     void beginDrag(const std::vector<Id>& points);
+    // Drags the rim of a circle or arc: the curve is pulled through the grabbed position
+    // (x, y) + offset, so a free circle grows/shrinks about its centre.
+    void beginDragEdge(Id roundEntity, double x, double y);
     bool dragTo(double dx, double dy);  // returns false if the solver could not converge
     void endDrag();
 

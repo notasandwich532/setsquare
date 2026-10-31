@@ -1,30 +1,72 @@
 #pragma once
 
+#include "tools/DrawTools.h"
+#include "tools/Tool.h"
+
+#include <core/Geometry.h>
+
 #include <QPointF>
 #include <QWidget>
 
+#include <functional>
+#include <memory>
+#include <set>
+
+class Document;
 class QPainter;
 
-// The sketch canvas. World coordinates are in millimetres with +Y up; the view keeps a
-// world->screen transform made of a pan offset and a uniform zoom factor.
+// The sketch canvas. World coordinates are millimetres with +Y up; the view keeps a
+// world->screen transform made of a pan offset and a uniform zoom factor. Input is forwarded to
+// the active tool; the view itself handles panning (middle mouse), zooming (wheel) and keys.
 class SketchView : public QWidget
 {
     Q_OBJECT
 
 public:
-    explicit SketchView(QWidget* parent = nullptr);
+    explicit SketchView(Document& document, QWidget* parent = nullptr);
+    ~SketchView() override;
 
-    QPointF worldToScreen(QPointF world) const;
-    QPointF screenToWorld(QPointF screen) const;
+    Document& document() const { return m_doc; }
 
-    // Pixels per world unit.
-    double zoom() const { return m_zoom; }
-
-    // Centres the view on the origin at the default zoom.
+    // --- transform ---
+    QPointF toScreen(core::Vec2 world) const;
+    core::Vec2 toWorld(QPointF screen) const;
+    double zoom() const { return m_zoom; }  // pixels per world unit
     void resetView();
+
+    // --- tools ---
+    void setTool(ToolKind kind);
+    ToolKind toolKind() const { return m_toolKind; }
+    QString hint() const;
+    void refreshTool();  // repaint and re-publish the tool's hint
+
+    // --- picking ---
+    core::Id pickAt(QPointF screen) const;  // points first, then curves
+    Snap snap(QPointF screen) const;        // existing point near the cursor, else the cursor
+
+    // --- selection ---
+    const std::set<core::Id>& selection() const { return m_selection; }
+    void setSelection(std::set<core::Id> ids);
+    void setHovered(core::Id id);
+    void selectAll();
+    void deleteSelection();
+
+    // Runs a document edit; on failure shows the error and returns false.
+    bool tryModify(const QString& label, const std::function<void(core::Sketch&)>& edit);
+
+    // --- overlay drawing helpers for tools ---
+    void drawPreviewLine(QPainter& painter, core::Vec2 a, core::Vec2 b) const;
+    void drawPreviewCircle(QPainter& painter, core::Vec2 center, double radius) const;
+    void drawPreviewArc(QPainter& painter, const core::ArcShape& arc) const;
+    void drawSnapMarker(QPainter& painter, const Snap& snap) const;
+    void drawLabel(QPainter& painter, core::Vec2 at, const QString& text) const;
 
 signals:
     void cursorMoved(QPointF world);
+    void hintChanged(const QString& hint);
+    void toolChanged(ToolKind kind);
+    void selectionChanged();
+    void message(const QString& text);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -32,14 +74,29 @@ protected:
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
+    void mouseDoubleClickEvent(QMouseEvent* event) override;
+    void keyPressEvent(QKeyEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
+    void leaveEvent(QEvent* event) override;
 
 private:
-    void drawGrid(QPainter& painter);
+    void drawGrid(QPainter& painter) const;
+    void drawSketch(QPainter& painter) const;
+    void drawArcPath(QPainter& painter, const core::ArcShape& arc) const;
+    ToolEvent makeEvent(const QMouseEvent* event) const;
+    void onDocumentChanged();
 
-    QPointF m_pan;          // screen position of the world origin
-    double m_zoom = 4.0;    // pixels per world unit
+    Document& m_doc;
+
+    QPointF m_pan;        // screen position of the world origin
+    double m_zoom = 4.0;  // pixels per world unit
     bool m_panning = false;
     QPointF m_lastMouse;
     bool m_initialised = false;
+
+    std::unique_ptr<Tool> m_tool;
+    ToolKind m_toolKind = ToolKind::Select;
+
+    std::set<core::Id> m_selection;
+    core::Id m_hovered = core::kNoId;
 };
