@@ -31,6 +31,8 @@ add_library(drawapp_lib STATIC
     tools/DrawTools.h
     tools/SelectTool.cpp
     tools/SelectTool.h
+    tools/ShapeTools.cpp
+    tools/ShapeTools.h
     tools/Tool.h
 )
 target_include_directories(drawapp_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

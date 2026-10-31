@@ -26,6 +26,7 @@ QString typeName(core::ConstraintType type)
         case T::Midpoint: return QObject::tr("Midpoint");
         case T::Concentric: return QObject::tr("Concentric");
         case T::Symmetric: return QObject::tr("Symmetric");
+        case T::Collinear: return QObject::tr("Collinear");
         case T::Distance: return QObject::tr("Distance");
         case T::HorizontalDistance: return QObject::tr("Horizontal distance");
         case T::VerticalDistance: return QObject::tr("Vertical distance");

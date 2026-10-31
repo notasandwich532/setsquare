@@ -78,6 +78,16 @@ public:
     void drawPreviewCircle(QPainter& painter, core::Vec2 center, double radius) const;
     void drawPreviewArc(QPainter& painter, const core::ArcShape& arc) const;
     void drawSnapMarker(QPainter& painter, const Snap& snap) const;
+    // Draws the entities of `sketch` with ids above `after`, in the preview style.
+    void drawPreviewSketch(QPainter& painter, const core::Sketch& sketch, core::Id after) const;
+
+    // --- tool options ---
+    int polygonSides() const { return m_polygonSides; }
+    void setPolygonSides(int sides);
+
+    // Constraint symbols on the canvas (dimensions are always shown).
+    bool showConstraints() const { return m_showConstraints; }
+    void setShowConstraints(bool show);
     void drawLabel(QPainter& painter, core::Vec2 at, const QString& text) const;
 
 signals:
@@ -127,6 +137,8 @@ private:
 
     std::set<core::Id> m_selection;
     core::Id m_hovered = core::kNoId;
+    int m_polygonSides = 6;
+    bool m_showConstraints = true;
 
     // Constraint symbols and dimension labels, laid out in screen space. Computed on demand for
     // both painting and picking, so picking never sees a stale layout.

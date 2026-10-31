@@ -79,6 +79,37 @@ struct Solver::Impl
         return arcs.at(id);
     }
 
+    GCS::Curve& curve(Id id)
+    {
+        if (auto it = lines.find(id); it != lines.end()) {
+            return it->second;
+        }
+        return round(id);
+    }
+
+    // A point that is an end of both curves (line ends, arc start/end), if any.
+    static Id sharedEndpoint(const Sketch& s, Id a, Id b)
+    {
+        auto ends = [&](Id id) -> std::vector<Id> {
+            const Entity& e = s.entity(id);
+            if (const auto* l = std::get_if<Line>(&e.geom)) {
+                return {l->p1, l->p2};
+            }
+            if (const auto* arc = std::get_if<Arc>(&e.geom)) {
+                return {arc->start, arc->end};
+            }
+            return {};
+        };
+        for (Id p : ends(a)) {
+            for (Id q : ends(b)) {
+                if (p == q) {
+                    return p;
+                }
+            }
+        }
+        return kNoId;
+    }
+
     void build(const Sketch& sketch);
     void addConstraint(const Sketch& sketch, const Constraint& c);
 };
@@ -223,7 +254,18 @@ void Solver::Impl::addConstraint(const Sketch& sketch, const Constraint& c)
         case ConstraintType::Perpendicular: sys.addConstraintPerpendicular(ln(r[0]), ln(r[1]), tag); break;
 
         case ConstraintType::Tangent:
-            if (kind(0) == EntityKind::Line) {
+            if (const Id joint = sharedEndpoint(sketch, r[0], r[1]); joint != kNoId) {
+                // Curves joined end to end: "meet at 0 or 180 degrees at the joint". The
+                // distance-based form below is only satisfied at a minimum when the curves share
+                // a point, which leaves the solver's Jacobian rank-deficient there (reported as
+                // redundant, with the wrong DOF). Same approach as FreeCAD.
+                GCS::Curve& c1 = curve(r[0]);
+                GCS::Curve& c2 = curve(r[1]);
+                GCS::Point& p = pt(joint);
+                const double current = sys.calculateAngleViaPoint(c1, c2, p);
+                sys.addConstraintAngleViaPoint(c1, c2, p, alloc(std::cos(current) >= 0.0 ? 0.0 : kPi), tag);
+            }
+            else if (kind(0) == EntityKind::Line) {
                 GCS::Line& l = ln(r[0]);
                 GCS::Circle& circ = round(r[1]);
                 sys.addConstraintTangent(l, circ, isLeftOf(circ.center, l), tag);
@@ -255,6 +297,14 @@ void Solver::Impl::addConstraint(const Sketch& sketch, const Constraint& c)
         case ConstraintType::Symmetric:
             sys.addConstraintP2PSymmetric(pt(r[0]), pt(r[1]), ln(r[2]), tag);
             break;
+
+        case ConstraintType::Collinear: {
+            // Both ends of the second line lie on the first.
+            GCS::Line& l2 = ln(r[1]);
+            sys.addConstraintPointOnLine(l2.p1, ln(r[0]), tag);
+            sys.addConstraintPointOnLine(l2.p2, ln(r[0]), tag);
+            break;
+        }
 
         case ConstraintType::Distance:
             if (r.size() == 1) {

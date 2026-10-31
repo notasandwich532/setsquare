@@ -5,6 +5,7 @@
 #include "Theme.h"
 #include "tools/ConstraintTools.h"
 #include "tools/SelectTool.h"
+#include "tools/ShapeTools.h"
 
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -110,6 +111,28 @@ void SketchView::setTool(ToolKind kind)
         case ToolKind::Circle: m_tool = std::make_unique<CircleTool>(*this); break;
         case ToolKind::ArcCenter: m_tool = std::make_unique<CenterArcTool>(*this); break;
         case ToolKind::Arc3Point: m_tool = std::make_unique<ThreePointArcTool>(*this); break;
+        case ToolKind::Point: m_tool = std::make_unique<PointTool>(*this); break;
+        case ToolKind::Rectangle3Point: m_tool = std::make_unique<Rectangle3Tool>(*this); break;
+        case ToolKind::RectangleCenter: m_tool = std::make_unique<RectangleCenterTool>(*this); break;
+        case ToolKind::Circle2Point: m_tool = std::make_unique<Circle2Tool>(*this); break;
+        case ToolKind::Circle3Point: m_tool = std::make_unique<Circle3Tool>(*this); break;
+        case ToolKind::CircleTangent2: m_tool = std::make_unique<CircleTangentTool>(*this, 2); break;
+        case ToolKind::CircleTangent3: m_tool = std::make_unique<CircleTangentTool>(*this, 3); break;
+        case ToolKind::ArcTangent: m_tool = std::make_unique<ArcTangentTool>(*this); break;
+        case ToolKind::PolygonInscribed:
+            m_tool = std::make_unique<PolygonTool>(*this, core::build::PolygonKind::Inscribed);
+            break;
+        case ToolKind::PolygonCircumscribed:
+            m_tool = std::make_unique<PolygonTool>(*this, core::build::PolygonKind::Circumscribed);
+            break;
+        case ToolKind::PolygonEdge: m_tool = std::make_unique<PolygonEdgeTool>(*this); break;
+        case ToolKind::SlotCenterToCenter:
+            m_tool = std::make_unique<SlotTool>(*this, SlotTool::Kind::CenterToCenter);
+            break;
+        case ToolKind::SlotOverall: m_tool = std::make_unique<SlotTool>(*this, SlotTool::Kind::Overall); break;
+        case ToolKind::SlotCenterPoint: m_tool = std::make_unique<SlotTool>(*this, SlotTool::Kind::CenterPoint); break;
+        case ToolKind::SlotArc3Point: m_tool = std::make_unique<ArcSlotTool>(*this, true); break;
+        case ToolKind::SlotArcCenter: m_tool = std::make_unique<ArcSlotTool>(*this, false); break;
         case ToolKind::Dimension: m_tool = std::make_unique<DimensionTool>(*this); break;
         default: m_tool = std::make_unique<ConstraintTool>(*this, kind); break;
     }
@@ -547,6 +570,53 @@ void SketchView::drawPreviewArc(QPainter& painter, const core::ArcShape& arc) co
     painter.setPen(QPen(theme::canvas().underConstrained, kCurveWidth, Qt::DashLine));
     painter.setBrush(Qt::NoBrush);
     drawArcPath(painter, arc);
+}
+
+void SketchView::setShowConstraints(bool show)
+{
+    m_showConstraints = show;
+    scheduleRepaint();
+}
+
+void SketchView::setPolygonSides(int sides)
+{
+    m_polygonSides = std::clamp(sides, 3, 64);
+    refreshTool();
+}
+
+void SketchView::drawPreviewSketch(QPainter& painter, const core::Sketch& sketch, core::Id after) const
+{
+    const QColor color = theme::canvas().underConstrained;
+    QColor faint = theme::canvas().construction;
+    painter.setBrush(Qt::NoBrush);
+    for (auto it = sketch.entities().upper_bound(after); it != sketch.entities().end(); ++it) {
+        const core::Entity& e = it->second;
+        painter.setPen(e.construction ? QPen(faint, 1.0, Qt::DashLine) : QPen(color, kCurveWidth, Qt::DashLine));
+        switch (e.kind()) {
+            case core::EntityKind::Point: {
+                const core::Point& p = sketch.point(e.id);
+                painter.setPen(Qt::NoPen);
+                painter.setBrush(color);
+                painter.drawEllipse(toScreen({p.x, p.y}), 2.0, 2.0);
+                painter.setBrush(Qt::NoBrush);
+                break;
+            }
+            case core::EntityKind::Line: {
+                const core::Line& l = sketch.line(e.id);
+                const core::Point& a = sketch.point(l.p1);
+                const core::Point& b = sketch.point(l.p2);
+                painter.drawLine(toScreen({a.x, a.y}), toScreen({b.x, b.y}));
+                break;
+            }
+            case core::EntityKind::Circle: {
+                const core::Circle& c = sketch.circle(e.id);
+                const core::Point& centre = sketch.point(c.center);
+                painter.drawEllipse(toScreen({centre.x, centre.y}), c.radius * m_zoom, c.radius * m_zoom);
+                break;
+            }
+            case core::EntityKind::Arc: drawArcPath(painter, core::arcShape(sketch, e.id)); break;
+        }
+    }
 }
 
 void SketchView::drawSnapMarker(QPainter& painter, const Snap& snap) const

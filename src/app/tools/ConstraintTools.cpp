@@ -69,6 +69,7 @@ ConstraintType typeFor(ToolKind kind)
         case ToolKind::Midpoint: return ConstraintType::Midpoint;
         case ToolKind::Concentric: return ConstraintType::Concentric;
         case ToolKind::Symmetric: return ConstraintType::Symmetric;
+        case ToolKind::Collinear: return ConstraintType::Collinear;
         default: return ConstraintType::Horizontal;  // HorizontalVertical decides per pick
     }
 }
@@ -95,6 +96,7 @@ QString ConstraintTool::hint() const
         case ToolKind::Midpoint: return QObject::tr("Midpoint: pick a point and a line");
         case ToolKind::Concentric: return QObject::tr("Concentric: pick two circles/arcs");
         case ToolKind::Symmetric: return QObject::tr("Symmetric: pick two points, then the line of symmetry");
+        case ToolKind::Collinear: return QObject::tr("Collinear: pick two lines");
         case ToolKind::Fix: return QObject::tr("Fix/Unfix: click geometry to lock or unlock it");
         default: return {};
     }

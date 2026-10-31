@@ -15,6 +15,8 @@
 #include <functional>
 #include <map>
 #include <numbers>
+#include <optional>
+#include <set>
 
 using core::ConstraintType;
 using core::Id;
@@ -45,6 +47,7 @@ QString symbolFor(ConstraintType type)
         case ConstraintType::Midpoint: return QStringLiteral("△");       // △
         case ConstraintType::Concentric: return QStringLiteral("◎");     // ◎
         case ConstraintType::Symmetric: return QStringLiteral("⇔");      // ⇔
+        case ConstraintType::Collinear: return QStringLiteral("⋯");      // ⋯
         default: return {};
     }
 }
@@ -58,6 +61,74 @@ std::vector<Id> symbolTargets(const core::Constraint& c)
         case ConstraintType::Symmetric: return {c.refs[0], c.refs[1]};
         default: return c.refs;
     }
+}
+
+// Where two tangent curves touch (world coordinates).
+std::optional<Vec2> tangentContact(const core::Sketch& s, const core::Constraint& c)
+{
+    auto ends = [&](Id id) -> std::vector<Id> {
+        const core::Entity& e = s.entity(id);
+        if (const auto* l = std::get_if<core::Line>(&e.geom)) {
+            return {l->p1, l->p2};
+        }
+        if (const auto* a = std::get_if<core::Arc>(&e.geom)) {
+            return {a->start, a->end};
+        }
+        return {};
+    };
+    for (Id p : ends(c.refs[0])) {
+        for (Id q : ends(c.refs[1])) {
+            if (p == q) {
+                return Vec2{s.point(p).x, s.point(p).y};
+            }
+        }
+    }
+    auto round = [&](Id id, Vec2& centre, double& r) {
+        const core::Entity& e = s.entity(id);
+        if (const auto* circle = std::get_if<core::Circle>(&e.geom)) {
+            centre = {s.point(circle->center).x, s.point(circle->center).y};
+            r = circle->radius;
+            return true;
+        }
+        if (const auto* arc = std::get_if<core::Arc>(&e.geom)) {
+            centre = {s.point(arc->center).x, s.point(arc->center).y};
+            r = s.arcRadius(id);
+            return true;
+        }
+        return false;
+    };
+    Vec2 c2;
+    double r2 = 0;
+    if (!round(c.refs[1], c2, r2)) {
+        return std::nullopt;
+    }
+    if (s.entity(c.refs[0]).kind() == core::EntityKind::Line) {
+        // Foot of the perpendicular from the centre onto the (infinite) line.
+        const core::Line& l = s.line(c.refs[0]);
+        const Vec2 a{s.point(l.p1).x, s.point(l.p1).y}, b{s.point(l.p2).x, s.point(l.p2).y};
+        const double dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy;
+        if (l2 == 0.0) {
+            return std::nullopt;
+        }
+        const double t = ((c2.x - a.x) * dx + (c2.y - a.y) * dy) / l2;
+        return Vec2{a.x + t * dx, a.y + t * dy};
+    }
+    Vec2 c1;
+    double r1 = 0;
+    if (!round(c.refs[0], c1, r1)) {
+        return std::nullopt;
+    }
+    const double d = std::hypot(c2.x - c1.x, c2.y - c1.y);
+    if (d < 1e-12) {
+        return std::nullopt;
+    }
+    if (d < std::max(r1, r2)) {  // internal: from the big one's centre towards the small one
+        const bool firstBig = r1 >= r2;
+        const Vec2 big = firstBig ? c1 : c2, small = firstBig ? c2 : c1;
+        const double rb = firstBig ? r1 : r2;
+        return Vec2{big.x + (small.x - big.x) / d * rb, big.y + (small.y - big.y) / d * rb};
+    }
+    return Vec2{c1.x + (c2.x - c1.x) / d * r1, c1.y + (c2.y - c1.y) / d * r1};
 }
 
 QString formatNumber(double v)
@@ -193,6 +264,7 @@ std::vector<SketchView::Annotation> SketchView::layoutAnnotations() const
         return {};
     };
 
+    std::set<std::pair<Id, QString>> shownOn;  // (entity, symbol) pairs already drawn
     for (const auto& [id, c] : s.constraints()) {
         if (core::isDimension(c.type)) {
             Annotation a;
@@ -209,21 +281,34 @@ std::vector<SketchView::Annotation> SketchView::layoutAnnotations() const
             continue;
         }
 
+        if (!m_showConstraints) {
+            continue;
+        }
         const QString symbol = symbolFor(c.type);
+        auto glyphAt = [&](QPointF at) {
+            Annotation a{id, false, {}, symbol, {}};
+            a.rect = QRectF(at - QPointF(kGlyphSize / 2, kGlyphSize / 2), QSizeF(kGlyphSize, kGlyphSize));
+            out.push_back(std::move(a));
+        };
         const bool pointPair = (c.type == ConstraintType::Horizontal || c.type == ConstraintType::Vertical)
             && c.refs.size() == 2;
         if (pointPair) {
-            Annotation a{id, false, {}, symbol, {}};
-            const QPointF at = (pos(c.refs[0]) + pos(c.refs[1])) / 2 + QPointF(0, -kGlyphOffset);
-            a.rect = QRectF(at - QPointF(kGlyphSize / 2, kGlyphSize / 2), QSizeF(kGlyphSize, kGlyphSize));
-            out.push_back(std::move(a));
+            glyphAt((pos(c.refs[0]) + pos(c.refs[1])) / 2 + QPointF(0, -kGlyphOffset));
             continue;
         }
+        if (c.type == ConstraintType::Tangent) {
+            // One symbol, at the point where the curves touch.
+            if (const auto touch = tangentContact(s, c)) {
+                glyphAt(toScreen(*touch) + QPointF(kGlyphOffset * 0.8, -kGlyphOffset * 0.8));
+                continue;
+            }
+        }
         for (Id target : symbolTargets(c)) {
-            Annotation a{id, false, {}, symbol, {}};
-            const QPointF at = symbolPos(target);
-            a.rect = QRectF(at - QPointF(kGlyphSize / 2, kGlyphSize / 2), QSizeF(kGlyphSize, kGlyphSize));
-            out.push_back(std::move(a));
+            // An item made equal (say) to five others shows one "=", not five.
+            if (!shownOn.insert({target, symbol}).second) {
+                continue;
+            }
+            glyphAt(symbolPos(target));
         }
     }
     return out;

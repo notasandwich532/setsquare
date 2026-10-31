@@ -1,5 +1,6 @@
 #pragma once
 
+#include <core/Builders.h>
 #include <core/Sketch.h>
 
 #include <QString>
@@ -30,14 +31,21 @@ public:
     core::Id circle(core::Id center, double radius);
     core::Id arc(core::Id center, core::Id start, core::Id end);
 
-    // Axis-aligned rectangle on two opposite corner points: adds the other two corners, four
-    // sides (bottom, right, top, left) and their horizontal/vertical constraints.
-    struct Rectangle
-    {
-        std::array<core::Id, 4> corners;
-        std::array<core::Id, 4> sides;
-    };
-    Rectangle rectangle(core::Id corner, core::Id opposite);
+    // Composite shapes (see core/Builders.h); each records as one Python call.
+    core::build::Rectangle rectangle(core::Id corner, core::Id opposite);
+    core::build::Rectangle rectangle3(core::Id a, core::Id b, core::Vec2 widthPoint);
+    core::build::Rectangle rectangleCenter(core::Id center, core::Vec2 corner);
+    core::Id circle2(core::Vec2 a, core::Vec2 b);
+    core::Id circle3(core::Vec2 a, core::Vec2 b, core::Vec2 c);
+    core::Id circleTangent(const std::vector<core::Id>& curves, core::Vec2 near, double radius);
+    core::Id arcTangent(core::Id curve, core::Id start, core::Id end);
+    core::build::Polygon polygon(core::Id center, core::Vec2 at, int sides, core::build::PolygonKind kind);
+    core::build::Polygon polygonEdge(core::Id a, core::Id b, int sides, bool left);
+    core::build::Slot slot(core::Id center1, core::Id center2, double width);
+    core::build::Slot slotOverall(core::Vec2 end1, core::Vec2 end2, double width);
+    core::build::Slot slotCenterPoint(core::Id center, core::Vec2 capCenter, double width);
+    core::build::Slot arcSlot(core::Id center, core::Vec2 start, core::Vec2 end, double width);
+    core::build::Slot arcSlot3(core::Vec2 start, core::Vec2 end, core::Vec2 through, double width);
 
     // Unchecked (inference while drawing); Document::addConstraint is the checked version.
     core::Id constrain(core::ConstraintType type, std::vector<core::Id> refs, double value = 0.0);
@@ -52,6 +60,7 @@ public:
     static QString function(core::ConstraintType type);            // "horizontal_distance", ...
     // e.g. "d17 = s.distance(l13, value=40, label=(0, 8))"
     static QString constraintCall(const core::Sketch& sketch, core::Id id);
+    static QString pair(core::Vec2 v);  // "(x, y)"
 
 private:
     void log(const QString& line)

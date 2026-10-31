@@ -1,4 +1,6 @@
 add_library(drawcore STATIC
+    Builders.cpp
+    Builders.h
     Dimensions.cpp
     Dimensions.h
     Geometry.cpp

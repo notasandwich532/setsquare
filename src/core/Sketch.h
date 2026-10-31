@@ -89,6 +89,7 @@ enum class ConstraintType
     Midpoint,       // (point, line)
     Concentric,     // (circle|arc, circle|arc)
     Symmetric,      // (point, point, line)
+    Collinear,      // (line, line)
 
     // Dimensions (driving, carry a value)
     Distance,            // (point, point), (point, line), or (line) for its length
@@ -175,6 +176,9 @@ public:
     const Circle& circle(Id id) const;
     Circle& circle(Id id);
     const Arc& arc(Id id) const;
+
+    // The largest id handed out so far; anything added later has a higher id.
+    Id highestId() const { return m_nextId - 1; }
 
     const std::map<Id, Entity>& entities() const { return m_entities; }
     const std::map<Id, Constraint>& constraints() const { return m_constraints; }

@@ -9,6 +9,8 @@
 
 #include <QDesktopServices>
 #include <QMenu>
+#include <QSpinBox>
+#include <QToolButton>
 #include <QUrl>
 
 #include <QAction>
@@ -96,10 +98,27 @@ const QString kFileFilter = QObject::tr("Sketches (*.dsk);;All files (*)");
 const std::pair<ToolKind, const char*> kToolNames[] = {
     {ToolKind::Select, "select"},
     {ToolKind::Line, "line"},
+    {ToolKind::Point, "point"},
     {ToolKind::Rectangle, "rectangle"},
+    {ToolKind::Rectangle3Point, "rectangle_3point"},
+    {ToolKind::RectangleCenter, "rectangle_center"},
     {ToolKind::Circle, "circle"},
+    {ToolKind::Circle2Point, "circle_2point"},
+    {ToolKind::Circle3Point, "circle_3point"},
+    {ToolKind::CircleTangent2, "circle_tangent2"},
+    {ToolKind::CircleTangent3, "circle_tangent3"},
     {ToolKind::ArcCenter, "arc"},
     {ToolKind::Arc3Point, "arc3"},
+    {ToolKind::ArcTangent, "arc_tangent"},
+    {ToolKind::PolygonInscribed, "polygon_inscribed"},
+    {ToolKind::PolygonCircumscribed, "polygon_circumscribed"},
+    {ToolKind::PolygonEdge, "polygon_edge"},
+    {ToolKind::SlotCenterToCenter, "slot"},
+    {ToolKind::SlotOverall, "slot_overall"},
+    {ToolKind::SlotCenterPoint, "slot_center_point"},
+    {ToolKind::SlotArc3Point, "arc_slot_3point"},
+    {ToolKind::SlotArcCenter, "arc_slot"},
+    {ToolKind::Collinear, "collinear"},
     {ToolKind::Dimension, "dimension"},
     {ToolKind::Coincident, "coincident"},
     {ToolKind::HorizontalVertical, "horizontal_vertical"},
@@ -310,31 +329,96 @@ void MainWindow::createActions()
         QString text;
         QKeySequence key;
     };
+    auto makeTool = [&](const ToolDef& t, QMenu* menu) {
+        auto* action = new QAction(t.text, this);
+        action->setCheckable(true);
+        if (!t.key.isEmpty()) {
+            action->setShortcut(t.key);
+            action->setToolTip(QStringLiteral("%1 (%2)").arg(t.text, t.key.toString(QKeySequence::NativeText)));
+        }
+        group->addAction(action);
+        menu->addAction(action);
+        const ToolKind kind = t.kind;
+        connect(action, &QAction::triggered, this, [this, kind] { m_view->setTool(kind); });
+        m_toolActions[kind] = action;
+        return action;
+    };
     auto addTools = [&](QToolBar* bar, std::initializer_list<ToolDef> defs) {
         for (const ToolDef& t : defs) {
-            auto* action = new QAction(t.text, this);
-            action->setCheckable(true);
-            if (!t.key.isEmpty()) {
-                action->setShortcut(t.key);
-                action->setToolTip(QStringLiteral("%1 (%2)").arg(t.text, t.key.toString(QKeySequence::NativeText)));
-            }
-            group->addAction(action);
-            sketchMenu->addAction(action);
-            bar->addAction(action);
-            const ToolKind kind = t.kind;
-            connect(action, &QAction::triggered, this, [this, kind] { m_view->setTool(kind); });
-            m_toolActions[kind] = action;
+            bar->addAction(makeTool(t, sketchMenu));
         }
+    };
+    // A Fusion-style split button: click for the last-used variant, or open the arrow menu.
+    auto addDropdown = [&](QToolBar* bar, const QString& title, std::initializer_list<ToolDef> defs) {
+        QMenu* menu = sketchMenu->addMenu(title);
+        auto* button = new QToolButton(bar);
+        button->setPopupMode(QToolButton::MenuButtonPopup);
+        button->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        button->setMenu(menu);
+        for (const ToolDef& t : defs) {
+            QAction* action = makeTool(t, menu);
+            connect(action, &QAction::triggered, button, [button, action] { button->setDefaultAction(action); });
+            if (!button->defaultAction()) {
+                button->setDefaultAction(action);
+            }
+        }
+        bar->addWidget(button);
     };
 
     addTools(toolbar, {
                           {ToolKind::Select, tr("Select"), QKeySequence(Qt::Key_S)},
                           {ToolKind::Line, tr("Line"), QKeySequence(Qt::Key_L)},
-                          {ToolKind::Rectangle, tr("Rectangle"), QKeySequence(Qt::Key_R)},
-                          {ToolKind::Circle, tr("Circle"), QKeySequence(Qt::Key_C)},
-                          {ToolKind::ArcCenter, tr("Arc"), QKeySequence(Qt::Key_A)},
-                          {ToolKind::Arc3Point, tr("3-Point Arc"), QKeySequence(Qt::SHIFT | Qt::Key_A)},
                       });
+    addDropdown(toolbar, tr("Rectangle"),
+                {
+                    {ToolKind::Rectangle, tr("2-Point Rectangle"), QKeySequence(Qt::Key_R)},
+                    {ToolKind::Rectangle3Point, tr("3-Point Rectangle"), {}},
+                    {ToolKind::RectangleCenter, tr("Center Rectangle"), {}},
+                });
+    addDropdown(toolbar, tr("Circle"),
+                {
+                    {ToolKind::Circle, tr("Center Circle"), QKeySequence(Qt::Key_C)},
+                    {ToolKind::Circle2Point, tr("2-Point Circle"), {}},
+                    {ToolKind::Circle3Point, tr("3-Point Circle"), {}},
+                    {ToolKind::CircleTangent2, tr("2-Tangent Circle"), {}},
+                    {ToolKind::CircleTangent3, tr("3-Tangent Circle"), {}},
+                });
+    addDropdown(toolbar, tr("Arc"),
+                {
+                    {ToolKind::ArcCenter, tr("Center Point Arc"), QKeySequence(Qt::Key_A)},
+                    {ToolKind::Arc3Point, tr("3-Point Arc"), QKeySequence(Qt::SHIFT | Qt::Key_A)},
+                    {ToolKind::ArcTangent, tr("Tangent Arc"), {}},
+                });
+    addDropdown(toolbar, tr("Polygon"),
+                {
+                    {ToolKind::PolygonCircumscribed, tr("Circumscribed Polygon"), {}},
+                    {ToolKind::PolygonInscribed, tr("Inscribed Polygon"), {}},
+                    {ToolKind::PolygonEdge, tr("Edge Polygon"), {}},
+                });
+    addDropdown(toolbar, tr("Slot"),
+                {
+                    {ToolKind::SlotCenterToCenter, tr("Center to Center Slot"), {}},
+                    {ToolKind::SlotOverall, tr("Overall Slot"), {}},
+                    {ToolKind::SlotCenterPoint, tr("Center Point Slot"), {}},
+                    {ToolKind::SlotArc3Point, tr("Three Point Arc Slot"), {}},
+                    {ToolKind::SlotArcCenter, tr("Center Point Arc Slot"), {}},
+                });
+    addTools(toolbar, {{ToolKind::Point, tr("Point"), QKeySequence(Qt::Key_P)}});
+
+    // Tool options: only shown while a tool that uses them is active.
+    auto* sidesBox = new QSpinBox(toolbar);
+    sidesBox->setRange(3, 64);
+    sidesBox->setValue(m_view->polygonSides());
+    sidesBox->setPrefix(tr("Sides: "));
+    sidesBox->setToolTip(tr("Number of polygon sides"));
+    connect(sidesBox, &QSpinBox::valueChanged, m_view, &SketchView::setPolygonSides);
+    toolbar->addSeparator();
+    QAction* sidesAction = toolbar->addWidget(sidesBox);
+    sidesAction->setVisible(false);
+    connect(m_view, &SketchView::toolChanged, sidesAction, [sidesAction](ToolKind kind) {
+        sidesAction->setVisible(kind == ToolKind::PolygonInscribed || kind == ToolKind::PolygonCircumscribed
+                                || kind == ToolKind::PolygonEdge);
+    });
 
     sketchMenu->addSeparator();
     addToolBarBreak();
@@ -353,6 +437,7 @@ void MainWindow::createActions()
                                 {ToolKind::Midpoint, tr("Midpoint"), {}},
                                 {ToolKind::Concentric, tr("Concentric"), {}},
                                 {ToolKind::Symmetric, tr("Symmetric"), {}},
+                                {ToolKind::Collinear, tr("Collinear"), {}},
                                 {ToolKind::Fix, tr("Fix/Unfix"), QKeySequence(Qt::Key_F)},
                             });
 
@@ -442,6 +527,11 @@ void MainWindow::createActions()
     auto* home = viewMenu->addAction(tr("&Fit All"));
     home->setShortcut(Qt::Key_Home);
     connect(home, &QAction::triggered, m_view, &SketchView::fitAll);
+    auto* showConstraints = viewMenu->addAction(tr("Show &Constraints"));
+    showConstraints->setCheckable(true);
+    showConstraints->setChecked(true);
+    showConstraints->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_K));
+    connect(showConstraints, &QAction::toggled, m_view, &SketchView::setShowConstraints);
     auto* stats = viewMenu->addAction(tr("Performance &Stats"));
     stats->setCheckable(true);
     stats->setShortcut(Qt::Key_F12);

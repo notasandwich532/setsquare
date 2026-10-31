@@ -34,6 +34,7 @@ const char* toString(ConstraintType type)
         case ConstraintType::Midpoint: return "midpoint";
         case ConstraintType::Concentric: return "concentric";
         case ConstraintType::Symmetric: return "symmetric";
+        case ConstraintType::Collinear: return "collinear";
         case ConstraintType::Distance: return "distance";
         case ConstraintType::HorizontalDistance: return "horizontalDistance";
         case ConstraintType::VerticalDistance: return "verticalDistance";
@@ -341,6 +342,7 @@ void Sketch::validate(ConstraintType type, const std::vector<Id>& refs, double v
             break;
         case ConstraintType::Parallel:
         case ConstraintType::Perpendicular:
+        case ConstraintType::Collinear:
             if (!kinds({K::Line, K::Line})) {
                 fail("expects (line, line)");
             }

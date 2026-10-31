@@ -57,6 +57,22 @@ bottom, right, top, left = s.rectangle((0, 0), (30, 20))   # sides come H/V cons
 s.delete(l, c)                           # and whatever depends on them
 ```
 
+Shapes come with their constraints, and each returns its outline curves:
+
+```python
+s.rectangle_3point(a, b, width_point)    # rotated
+s.rectangle_center(center, corner)
+s.circle_2point(a, b)                    s.circle_3point(a, b, c)
+s.circle_tangent([l1, l2], near=(x, y), radius=5)     # or three curves, no radius
+s.arc_tangent(line_or_arc, its_end_point, end)
+s.polygon(center, vertex, sides=6)       s.polygon(center, side_mid, sides=6, circumscribed=True)
+s.polygon_edge(a, b, sides=6, left=True)
+s.slot(center1, center2, width)          s.slot_overall(end1, end2, width)
+s.slot_center_point(center, cap_center, width)
+s.arc_slot(center, start, end, width)    # counter-clockwise centreline
+s.arc_slot_3point(start, end, through, width)
+```
+
 ### Constraints
 These are refused with `ValueError` when they'd over-constrain the sketch, the same as in the UI.
 
@@ -65,7 +81,7 @@ s.coincident(p, q)        s.coincident(p, line_or_curve)
 s.horizontal(l)           s.horizontal(p, q)        s.vertical(...)
 s.parallel(l1, l2)        s.perpendicular(l1, l2)   s.equal(a, b)
 s.tangent(line, circle)   s.tangent(circle1, arc2)  s.concentric(c1, c2)
-s.midpoint(p, l)          s.symmetric(p, q, axis_line)
+s.midpoint(p, l)          s.symmetric(p, q, axis_line)     s.collinear(l1, l2)
 p.fixed = True            l.construction = True
 ```
 
@@ -106,8 +122,10 @@ doc.to_json()
 app.fit()  app.selection = [l, c]  app.tool = "line"  app.message("hi")   # needs the UI
 ```
 
-`app.tool` accepts: select, line, rectangle, circle, arc, arc3, dimension, coincident,
-horizontal_vertical, parallel, perpendicular, tangent, equal, midpoint, concentric, symmetric, fix.
+`app.tool` accepts the tool names, which follow the API names:
+- Geometry: select, line, point, rectangle, rectangle_3point, rectangle_center, circle, circle_2point, circle_3point, circle_tangent2, circle_tangent3, arc, arc3, arc_tangent
+- Polygons and slots: polygon_inscribed, polygon_circumscribed, polygon_edge, slot, slot_overall, slot_center_point, arc_slot, arc_slot_3point
+- Dimensions and constraints: dimension, coincident, horizontal_vertical, parallel, perpendicular, tangent, equal, midpoint, concentric, symmetric, collinear, fix
 
 ## Tests
 Each `tests/scripts/test_*.py` is a CTest test run through `drawapp-cli`. The GUI test

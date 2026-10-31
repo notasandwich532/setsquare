@@ -87,22 +87,126 @@ Id Editor::arc(Id center, Id start, Id end)
     return id;
 }
 
-Editor::Rectangle Editor::rectangle(Id corner, Id opposite)
+QString Editor::pair(core::Vec2 v)
 {
-    // Done on the sketch directly and logged as one call: s.rectangle() replays all of it.
-    const core::Point a = m_sketch.point(corner);
-    const core::Point c = m_sketch.point(opposite);
-    Rectangle r;
-    r.corners = {corner, m_sketch.addPoint(c.x, a.y), opposite, m_sketch.addPoint(a.x, c.y)};
-    for (int i = 0; i < 4; ++i) {
-        r.sides[i] = m_sketch.addLine(r.corners[i], r.corners[(i + 1) % 4]);
-    }
-    m_sketch.addConstraint(ConstraintType::Horizontal, {r.sides[0]});
-    m_sketch.addConstraint(ConstraintType::Vertical, {r.sides[1]});
-    m_sketch.addConstraint(ConstraintType::Horizontal, {r.sides[2]});
-    m_sketch.addConstraint(ConstraintType::Vertical, {r.sides[3]});
+    return QStringLiteral("(%1, %2)").arg(number(v.x), number(v.y));
+}
+
+// Composite shapes are built on the sketch directly and logged as one call, which replays all
+// of it (the builders are deterministic, so ids come out the same).
+
+namespace build = core::build;
+
+build::Rectangle Editor::rectangle(Id corner, Id opposite)
+{
+    const build::Rectangle r = build::rectangle(m_sketch, corner, opposite);
     log(QStringLiteral("s.rectangle(%1, %2)").arg(name(m_sketch, corner), name(m_sketch, opposite)));
     return r;
+}
+
+build::Rectangle Editor::rectangle3(Id a, Id b, core::Vec2 widthPoint)
+{
+    const build::Rectangle r = build::rectangle3(m_sketch, a, b, widthPoint);
+    log(QStringLiteral("s.rectangle_3point(%1, %2, %3)").arg(name(m_sketch, a), name(m_sketch, b), pair(widthPoint)));
+    return r;
+}
+
+build::Rectangle Editor::rectangleCenter(Id center, core::Vec2 corner)
+{
+    const build::Rectangle r = build::rectangleCenter(m_sketch, center, corner);
+    log(QStringLiteral("s.rectangle_center(%1, %2)").arg(name(m_sketch, center), pair(corner)));
+    return r;
+}
+
+Id Editor::circle2(core::Vec2 a, core::Vec2 b)
+{
+    const Id id = build::circle2(m_sketch, a, b);
+    log(QStringLiteral("%1 = s.circle_2point(%2, %3)").arg(name(m_sketch, id), pair(a), pair(b)));
+    return id;
+}
+
+Id Editor::circle3(core::Vec2 a, core::Vec2 b, core::Vec2 c)
+{
+    const Id id = build::circle3(m_sketch, a, b, c);
+    log(QStringLiteral("%1 = s.circle_3point(%2, %3, %4)").arg(name(m_sketch, id), pair(a), pair(b), pair(c)));
+    return id;
+}
+
+Id Editor::circleTangent(const std::vector<Id>& curves, core::Vec2 near, double radius)
+{
+    const Id id = build::circleTangent(m_sketch, curves, near, radius);
+    QStringList names;
+    for (Id c : curves) {
+        names << name(m_sketch, c);
+    }
+    QString call = QStringLiteral("%1 = s.circle_tangent([%2], near=%3")
+                       .arg(name(m_sketch, id), names.join(QStringLiteral(", ")), pair(near));
+    if (curves.size() == 2) {
+        call += QStringLiteral(", radius=") + number(radius);
+    }
+    log(call + QLatin1Char(')'));
+    return id;
+}
+
+Id Editor::arcTangent(Id curve, Id start, Id end)
+{
+    const Id id = build::arcTangent(m_sketch, curve, start, end);
+    log(QStringLiteral("%1 = s.arc_tangent(%2, %3, %4)")
+            .arg(name(m_sketch, id), name(m_sketch, curve), name(m_sketch, start), name(m_sketch, end)));
+    return id;
+}
+
+build::Polygon Editor::polygon(Id center, core::Vec2 at, int sides, build::PolygonKind kind)
+{
+    const build::Polygon p = build::polygon(m_sketch, center, at, sides, kind);
+    log(QStringLiteral("s.polygon(%1, %2, sides=%3%4)")
+            .arg(name(m_sketch, center), pair(at), QString::number(sides),
+                 kind == build::PolygonKind::Circumscribed ? QStringLiteral(", circumscribed=True") : QString()));
+    return p;
+}
+
+build::Polygon Editor::polygonEdge(Id a, Id b, int sides, bool left)
+{
+    const build::Polygon p = build::polygonEdge(m_sketch, a, b, sides, left);
+    log(QStringLiteral("s.polygon_edge(%1, %2, sides=%3%4)")
+            .arg(name(m_sketch, a), name(m_sketch, b), QString::number(sides),
+                 left ? QString() : QStringLiteral(", left=False")));
+    return p;
+}
+
+build::Slot Editor::slot(Id center1, Id center2, double width)
+{
+    const build::Slot s = build::slot(m_sketch, center1, center2, width);
+    log(QStringLiteral("s.slot(%1, %2, %3)").arg(name(m_sketch, center1), name(m_sketch, center2), number(width)));
+    return s;
+}
+
+build::Slot Editor::slotOverall(core::Vec2 end1, core::Vec2 end2, double width)
+{
+    const build::Slot s = build::slotOverall(m_sketch, end1, end2, width);
+    log(QStringLiteral("s.slot_overall(%1, %2, %3)").arg(pair(end1), pair(end2), number(width)));
+    return s;
+}
+
+build::Slot Editor::slotCenterPoint(Id center, core::Vec2 capCenter, double width)
+{
+    const build::Slot s = build::slotCenterPoint(m_sketch, center, capCenter, width);
+    log(QStringLiteral("s.slot_center_point(%1, %2, %3)").arg(name(m_sketch, center), pair(capCenter), number(width)));
+    return s;
+}
+
+build::Slot Editor::arcSlot(Id center, core::Vec2 start, core::Vec2 end, double width)
+{
+    const build::Slot s = build::arcSlot(m_sketch, center, start, end, width);
+    log(QStringLiteral("s.arc_slot(%1, %2, %3, %4)").arg(name(m_sketch, center), pair(start), pair(end), number(width)));
+    return s;
+}
+
+build::Slot Editor::arcSlot3(core::Vec2 start, core::Vec2 end, core::Vec2 through, double width)
+{
+    const build::Slot s = build::arcSlot3(m_sketch, start, end, through, width);
+    log(QStringLiteral("s.arc_slot_3point(%1, %2, %3, %4)").arg(pair(start), pair(end), pair(through), number(width)));
+    return s;
 }
 
 Id Editor::constrain(ConstraintType type, std::vector<Id> refs, double value)

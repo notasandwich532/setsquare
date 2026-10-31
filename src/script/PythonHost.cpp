@@ -203,6 +203,31 @@ Id editReturningId(const char* label, F&& f)
     return out;
 }
 
+// For shapes: f returns the new curves, which come back as a list of handles.
+template<typename F>
+py::list editCurves(const char* label, F&& f)
+{
+    std::vector<Id> ids;
+    {
+        Call call;
+        call.target().edit(QString::fromLatin1(label), [&](Editor& ed) { ids = f(ed); });
+    }
+    return wrapAll(ids);
+}
+
+// A position argument: an (x, y) pair, or a Point's current position.
+core::Vec2 vecArg(py::handle h)
+{
+    if (py::isinstance<PointH>(h)) {
+        const Id id = h.cast<PointH&>().id;
+        entity(id);
+        const core::Point& p = sketch().point(id);
+        return {p.x, p.y};
+    }
+    const auto [x, y] = pairOf(h, "a position");
+    return {x, y};
+}
+
 // Adds a (checked) constraint or dimension; refuses over-constraining like the UI does.
 py::object addConstraint(ConstraintType type, std::vector<Id> refs, py::object value, py::object label)
 {
@@ -536,15 +561,95 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
             }));
         }, py::arg("center"), py::arg("start"), py::arg("end"), "Counter-clockwise from start to end.")
         .def("rectangle", [](const SketchH&, py::handle corner, py::handle opposite) {
-            Editor::Rectangle r{};
-            editReturningId("Rectangle", [&](Editor& ed) {
+            return editCurves("Rectangle", [&](Editor& ed) {
                 const Id a = pointArg(ed, corner);
-                r = ed.rectangle(a, pointArg(ed, opposite));
-                return r.sides[0];
+                const auto r = ed.rectangle(a, pointArg(ed, opposite));
+                return std::vector<Id>(r.sides.begin(), r.sides.end());
             });
-            return wrapAll({r.sides.begin(), r.sides.end()});
         }, py::arg("corner"), py::arg("opposite"),
              "Axis-aligned rectangle; returns its sides [bottom, right, top, left] (H/V constrained).")
+        .def("rectangle_3point", [](const SketchH&, py::handle a, py::handle b, py::handle widthPoint) {
+            return editCurves("Rectangle", [&](Editor& ed) {
+                const Id pa = pointArg(ed, a);
+                const Id pb = pointArg(ed, b);
+                const auto r = ed.rectangle3(pa, pb, vecArg(widthPoint));
+                return std::vector<Id>(r.sides.begin(), r.sides.end());
+            });
+        }, py::arg("a"), py::arg("b"), py::arg("width_point"),
+             "Rotated rectangle: first side a->b, opposite side through width_point. Returns the sides.")
+        .def("rectangle_center", [](const SketchH&, py::handle center, py::handle corner) {
+            return editCurves("Rectangle", [&](Editor& ed) {
+                const auto r = ed.rectangleCenter(pointArg(ed, center), vecArg(corner));
+                return std::vector<Id>(r.sides.begin(), r.sides.end());
+            });
+        }, py::arg("center"), py::arg("corner"), "Axis-aligned rectangle about a centre point. Returns the sides.")
+        .def("circle_2point", [](const SketchH&, py::handle a, py::handle b) {
+            return wrap(editReturningId("Circle", [&](Editor& ed) { return ed.circle2(vecArg(a), vecArg(b)); }));
+        }, py::arg("a"), py::arg("b"), "Circle with a and b at the ends of a diameter.")
+        .def("circle_3point", [](const SketchH&, py::handle a, py::handle b, py::handle c) {
+            return wrap(editReturningId("Circle", [&](Editor& ed) { return ed.circle3(vecArg(a), vecArg(b), vecArg(c)); }));
+        }, py::arg("a"), py::arg("b"), py::arg("c"), "Circle through three points.")
+        .def("circle_tangent", [](const SketchH&, py::handle curves, py::handle near, double radius) {
+            std::vector<Id> ids;
+            for (py::handle h : curves) {
+                ids.push_back(idOf(h));
+            }
+            const core::Vec2 at = vecArg(near);
+            return wrap(editReturningId("Circle", [&](Editor& ed) { return ed.circleTangent(ids, at, radius); }));
+        }, py::arg("curves"), py::arg("near"), py::arg("radius") = 0.0,
+             "Circle tangent to 2 curves (give radius) or 3 curves, on the side nearest `near`.")
+        .def("arc_tangent", [](const SketchH&, py::handle curve, py::handle start, py::handle end) {
+            const Id c = idOf(curve);
+            return wrap(editReturningId("Arc", [&](Editor& ed) {
+                const Id st = pointArg(ed, start);
+                return ed.arcTangent(c, st, pointArg(ed, end));
+            }));
+        }, py::arg("curve"), py::arg("start"), py::arg("end"),
+             "Arc continuing tangentially from `start` (an end of a line or arc) to `end`.")
+        .def("polygon", [](const SketchH&, py::handle center, py::handle at, int sides, bool circumscribed) {
+            return editCurves("Polygon", [&](Editor& ed) {
+                return ed.polygon(pointArg(ed, center), vecArg(at), sides,
+                                  circumscribed ? core::build::PolygonKind::Circumscribed
+                                                : core::build::PolygonKind::Inscribed)
+                    .sides;
+            });
+        }, py::arg("center"), py::arg("at"), py::arg("sides") = 6, py::arg("circumscribed") = false,
+             "Regular polygon. `at` is a vertex, or with circumscribed=True a side's midpoint. Returns the sides.")
+        .def("polygon_edge", [](const SketchH&, py::handle a, py::handle b, int sides, bool left) {
+            return editCurves("Polygon", [&](Editor& ed) {
+                const Id pa = pointArg(ed, a);
+                return ed.polygonEdge(pa, pointArg(ed, b), sides, left).sides;
+            });
+        }, py::arg("a"), py::arg("b"), py::arg("sides") = 6, py::arg("left") = true,
+             "Regular polygon built on the edge a->b (on its left unless left=False). Returns the sides.")
+        .def("slot", [](const SketchH&, py::handle c1, py::handle c2, double width) {
+            return editCurves("Slot", [&](Editor& ed) {
+                const Id a = pointArg(ed, c1);
+                return ed.slot(a, pointArg(ed, c2), width).curves;
+            });
+        }, py::arg("center1"), py::arg("center2"), py::arg("width"),
+             "Centre-to-centre slot. Returns its outline [side, cap, side, cap].")
+        .def("slot_overall", [](const SketchH&, py::handle e1, py::handle e2, double width) {
+            return editCurves("Slot", [&](Editor& ed) { return ed.slotOverall(vecArg(e1), vecArg(e2), width).curves; });
+        }, py::arg("end1"), py::arg("end2"), py::arg("width"), "Slot from its overall end points.")
+        .def("slot_center_point", [](const SketchH&, py::handle center, py::handle cap, double width) {
+            return editCurves("Slot", [&](Editor& ed) {
+                return ed.slotCenterPoint(pointArg(ed, center), vecArg(cap), width).curves;
+            });
+        }, py::arg("center"), py::arg("cap_center"), py::arg("width"),
+             "Slot about its centre point; cap_center is one end's centre.")
+        .def("arc_slot", [](const SketchH&, py::handle center, py::handle start, py::handle end, double width) {
+            return editCurves("Slot", [&](Editor& ed) {
+                return ed.arcSlot(pointArg(ed, center), vecArg(start), vecArg(end), width).curves;
+            });
+        }, py::arg("center"), py::arg("start"), py::arg("end"), py::arg("width"),
+             "Arc slot along a counter-clockwise centreline arc from start to end.")
+        .def("arc_slot_3point", [](const SketchH&, py::handle start, py::handle end, py::handle through, double width) {
+            return editCurves("Slot", [&](Editor& ed) {
+                return ed.arcSlot3(vecArg(start), vecArg(end), vecArg(through), width).curves;
+            });
+        }, py::arg("start"), py::arg("end"), py::arg("through"), py::arg("width"),
+             "Arc slot along the arc through three points.")
         .def("delete", [](const SketchH&, py::args items) {
             const std::vector<Id> ids = idsOf(items);
             Call call;
@@ -568,6 +673,7 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
         .def("midpoint", constraintFn(ConstraintType::Midpoint), "(point, line)")
         .def("concentric", constraintFn(ConstraintType::Concentric))
         .def("symmetric", constraintFn(ConstraintType::Symmetric), "(point, point, line)")
+        .def("collinear", constraintFn(ConstraintType::Collinear), "(line, line)")
 
         // dimensions: value=None keeps the current size
         .def("distance", dimensionFn(ConstraintType::Distance), py::arg("value") = py::none(),
