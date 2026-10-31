@@ -263,6 +263,7 @@ Id splitLine(Sketch& s, Id line, const Cut& cut)
     s.rebindPoint(line, oldEnd, p);
     const Id piece = s.addLine(p, oldEnd);
     s.entity(piece).construction = s.entity(line).construction;
+    s.copyStroke(line, piece);
     s.addConstraint(CT::Collinear, {line, piece});
     return piece;
 }
@@ -276,6 +277,7 @@ Id splitArc(Sketch& s, Id arc, const Cut& cut)
     s.rebindPoint(arc, a.end, p);
     const Id piece = s.addArc(a.center, p, a.end);
     s.entity(piece).construction = s.entity(arc).construction;
+    s.copyStroke(arc, piece);
     return piece;
 }
 
@@ -285,6 +287,7 @@ Id circleToArc(Sketch& s, Id circle, Id from, Id to)
     const Id centre = s.circle(circle).center;
     const Id arc = s.addArc(centre, from, to);
     s.entity(arc).construction = s.entity(circle).construction;
+    s.copyStroke(circle, arc);
     s.retarget(circle, arc);
     s.remove(circle);
     return arc;
@@ -445,6 +448,7 @@ std::vector<Id> breakCurve(Sketch& s, Id curve, Vec2 near)
             const Id centre = s.circle(curve).center;
             const Id clicked = s.addArc(centre, lo, hi);  // shares centre and both ends with the rest
             s.entity(clicked).construction = s.entity(curve).construction;
+            s.copyStroke(curve, clicked);
             const Id rest = circleToArc(s, curve, hi, lo);
             return {clicked, rest};
         }
@@ -672,6 +676,8 @@ Corner fillet(Sketch& s, Id a, Vec2 nearA, Id b, Vec2 nearB, double radius)
     const auto [pieceB, tb] = keptPiece(s, b, touchB, sub(touchB, touchA), "fillet");
     s.entity(a).construction = true;
     s.entity(b).construction = true;
+    s.copyStroke(a, pieceA);  // the solid outline keeps its look
+    s.copyStroke(b, pieceB);
     out.pieces = {pieceA, pieceB};
 
     // The short way round between the touching points.
@@ -679,6 +685,7 @@ Corner fillet(Sketch& s, Id a, Vec2 nearA, Id b, Vec2 nearB, double radius)
     const Vec2 pa = pos(s, ta), pb = pos(s, tb);
     const double sweep = angleFrom(std::atan2(pa.y - centre->y, pa.x - centre->x), std::atan2(pb.y - centre->y, pb.x - centre->x));
     out.joint = sweep <= kPi ? s.addArc(c, ta, tb) : s.addArc(c, tb, ta);
+    s.copyStroke(a, out.joint);
     s.addConstraint(CT::Tangent, {pieceA, out.joint});
     s.addConstraint(CT::Tangent, {pieceB, out.joint});
     out.dimensions.push_back(s.addConstraint(CT::Radius, {out.joint}, radius));
@@ -740,8 +747,11 @@ Corner chamfer(Sketch& s, Id a, Vec2 nearA, Id b, Vec2 nearB, ChamferKind kind, 
     const auto [pieceB, c2] = keptPiece(s, b, add(x, mul(u2, d2)), u2, "chamfer");
     s.entity(a).construction = true;
     s.entity(b).construction = true;
+    s.copyStroke(a, pieceA);  // the solid outline keeps its look
+    s.copyStroke(b, pieceB);
     out.pieces = {pieceA, pieceB};
     out.joint = s.addLine(c1, c2);
+    s.copyStroke(pieceA, out.joint);
 
     out.dimensions.push_back(s.addConstraint(CT::Distance, {corner, c1}, d1));
     if (kind == ChamferKind::DistanceAngle) {

@@ -133,6 +133,14 @@ std::string toJson(const Sketch& sketch, bool compact)
     }
     doc["entities"] = std::move(entities);
     doc["constraints"] = std::move(constraints);
+    if (!sketch.strokes().empty()) {
+        json strokes = json::array();
+        for (const auto& [curve, style] : sketch.strokes()) {
+            strokes.push_back(
+                {{"curve", curve}, {"color", style.color.hex()}, {"width", style.width}, {"dash", toString(style.dash)}});
+        }
+        doc["strokes"] = std::move(strokes);
+    }
     return compact ? doc.dump() : doc.dump(2) + "\n";
 }
 
@@ -173,6 +181,19 @@ Sketch fromJson(const std::string& text)
         }
         for (const json& j : doc.at("constraints")) {
             sketch.insertConstraint(constraintFromJson(j));
+        }
+        for (const json& j : doc.value("strokes", json::array())) {
+            StrokeStyle style;
+            const std::string color = j.value("color", std::string("#000000"));
+            if (!Color::fromHex(color, style.color)) {
+                throw SketchError("bad stroke colour '" + color + "'");
+            }
+            style.width = j.value("width", style.width);
+            const std::string dash = j.value("dash", std::string("solid"));
+            if (!dashFromString(dash, style.dash)) {
+                throw SketchError("unknown line style '" + dash + "'");
+            }
+            sketch.setStroke(j.at("curve").get<Id>(), style);
         }
         return sketch;
     }

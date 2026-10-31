@@ -52,6 +52,8 @@ enum class ToolKind
     Offset,
     Paste,
 
+    StrokeBrush,
+
     Dimension,
     Coincident,
     HorizontalVertical,

@@ -499,6 +499,7 @@ Id offset(Sketch& s, const std::vector<Id>& curves, double d, Vec2 toward)
         }
         const Id made = s.addCircle(circle.center, r);
         s.entity(made).construction = s.entity(curves[0]).construction;
+        s.copyStroke(curves[0], made);
         return s.addConstraint(ConstraintType::Offset, {curves[0], made}, d);
     }
 
@@ -596,6 +597,7 @@ Id offset(Sketch& s, const std::vector<Id>& curves, double d, Vec2 toward)
             curve = s.addArc(a.center, made.at(a.start), made.at(a.end));
         }
         s.entity(curve).construction = e.construction;
+        s.copyStroke(step.curve, curve);
         refs.push_back(step.curve);
         offsets.push_back(curve);
     }

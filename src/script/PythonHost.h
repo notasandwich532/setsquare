@@ -27,6 +27,8 @@ struct UiHooks
     std::function<QString()> tool;
     std::function<bool(const QString&)> setTool;  // false if the name is unknown
     std::function<void(const QString&)> message;
+    std::function<bool()> presentation;  // presentation view on?
+    std::function<void(bool)> setPresentation;
 };
 
 // Starts the interpreter. pythonHome defaults to "<executable dir>/python". Returns false (with

@@ -8,6 +8,7 @@
 #include "tools/ModifyTools.h"
 #include "tools/SelectTool.h"
 #include "tools/ShapeTools.h"
+#include "tools/StyleTools.h"
 #include "tools/TransformTools.h"
 
 #include <QDoubleSpinBox>
@@ -111,6 +112,9 @@ void SketchView::setTool(ToolKind kind)
         m_tool->cancel();
         m_tool.reset();  // before the new one starts (a command tidies up as it goes)
     }
+    if (kind != ToolKind::Select && kind != ToolKind::StrokeBrush) {
+        setPresentation(false);  // editing geometry: see it (and its constraints) properly
+    }
     showOptionsPanel(kind);
     switch (kind) {
         case ToolKind::Select: m_tool = std::make_unique<SelectTool>(*this); break;
@@ -166,6 +170,7 @@ void SketchView::setTool(ToolKind kind)
             break;
         case ToolKind::Offset: m_tool = std::make_unique<OffsetTool>(*this); break;
         case ToolKind::Paste: m_tool = std::make_unique<PasteTool>(*this, m_pasteFragment); break;
+        case ToolKind::StrokeBrush: m_tool = std::make_unique<StrokeBrushTool>(*this); break;
         case ToolKind::Dimension: m_tool = std::make_unique<DimensionTool>(*this); break;
         default: m_tool = std::make_unique<ConstraintTool>(*this, kind); break;
     }
@@ -232,6 +237,47 @@ void SketchView::showOptionsPanel(ToolKind kind)
     connect(panel, &CommandPanel::rejected, this, [this] { setFocus(); });
 }
 
+void SketchView::setPresentation(bool on)
+{
+    if (on == m_presentation) {
+        return;
+    }
+    m_presentation = on;
+    setHovered(core::kNoId);
+    scheduleRepaint();
+    emit presentationChanged(on);
+}
+
+void SketchView::setPaint(const Paint& paint)
+{
+    if (paint == m_paint) {
+        return;
+    }
+    m_paint = paint;
+    refreshTool();  // e.g. the stroke brush's preview
+    emit paintChanged();
+}
+
+QPen SketchView::strokePen(const core::StrokeStyle& style) const
+{
+    const core::Color& c = style.color;
+    // Width is on the drawing, so it zooms; never thinner than a pixel. 0 is a 1-pixel hairline.
+    const double width = style.width > 0.0 ? std::max(style.width * m_zoom, 1.0) : 1.0;
+    QPen pen(QColor(c.r, c.g, c.b, c.a), width, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+    if (style.dash != core::Dash::Solid) {
+        pen.setCapStyle(Qt::FlatCap);
+        // In multiples of the width, so thicker lines get longer dashes.
+        switch (style.dash) {
+            case core::Dash::Dashed: pen.setDashPattern({5, 3}); break;
+            case core::Dash::Dotted: pen.setDashPattern({1, 2}); break;
+            case core::Dash::DashDot: pen.setDashPattern({8, 3, 1, 3}); break;
+            case core::Dash::DashDotDot: pen.setDashPattern({8, 3, 1, 3, 1, 3}); break;
+            case core::Dash::Solid: break;
+        }
+    }
+    return pen;
+}
+
 void SketchView::setPasteFragment(core::Sketch fragment)
 {
     m_pasteFragment = std::move(fragment);
@@ -254,7 +300,7 @@ void SketchView::refreshTool()
 
 core::Id SketchView::pickAt(QPointF screen, bool annotations) const
 {
-    if (annotations) {
+    if (annotations && !m_presentation) {  // (not drawn in presentation view)
         // Topmost (last drawn) first.
         const auto items = layoutAnnotations();
         for (auto it = items.rbegin(); it != items.rend(); ++it) {
@@ -265,6 +311,7 @@ core::Id SketchView::pickAt(QPointF screen, bool annotations) const
     }
     core::PickOptions options;
     options.tolerance = kPickPixels / m_zoom;
+    options.points = !m_presentation;  // points aren't shown there
     return core::pick(m_doc.sketch(), toWorld(screen), options);
 }
 
@@ -605,19 +652,14 @@ void SketchView::drawSketch(QPainter& painter) const
         }
     }
 
-    // Curves first, points on top.
-    painter.setBrush(Qt::NoBrush);
-    for (const auto& [id, e] : sketch.entities()) {
-        if (sketch.isAxis(id)) {
-            continue;
-        }
+    // Draws a curve with whatever pen is set.
+    auto drawCurve = [&](core::Id id, const core::Entity& e) {
         switch (e.kind()) {
             case core::EntityKind::Point: break;
             case core::EntityKind::Line: {
                 const auto& l = std::get<core::Line>(e.geom);
                 const core::Point& a = sketch.point(l.p1);
                 const core::Point& b = sketch.point(l.p2);
-                painter.setPen(styleFor(e));
                 painter.drawLine(toScreen({a.x, a.y}), toScreen({b.x, b.y}));
                 break;
             }
@@ -625,17 +667,55 @@ void SketchView::drawSketch(QPainter& painter) const
                 const auto& c = std::get<core::Circle>(e.geom);
                 const core::Point& centre = sketch.point(c.center);
                 const double r = c.radius * m_zoom;
-                painter.setPen(styleFor(e));
                 painter.drawEllipse(toScreen({centre.x, centre.y}), r, r);
                 break;
             }
-            case core::EntityKind::Arc:
-                painter.setPen(styleFor(e));
-                drawArcPath(painter, core::arcShape(sketch, id));
-                break;
+            case core::EntityKind::Arc: drawArcPath(painter, core::arcShape(sketch, id)); break;
         }
+    };
+
+    // Strokes: the drawing's look. Faded under the geometry while sketching; in presentation
+    // view they replace the geometry they decorate. (Construction geometry is never decorated.)
+    painter.setBrush(Qt::NoBrush);
+    std::set<core::Id> decorated;
+    for (const auto& [id, style] : sketch.strokes()) {
+        if (!sketch.hasEntity(id) || sketch.entity(id).construction) {
+            continue;
+        }
+        QPen pen = strokePen(style);
+        if (!m_presentation) {
+            QColor faded = pen.color();
+            faded.setAlphaF(faded.alphaF() * 0.3);
+            pen.setColor(faded);
+        }
+        painter.setPen(pen);
+        drawCurve(id, sketch.entity(id));
+        decorated.insert(id);
     }
 
+    // Curves first, points on top.
+    for (const auto& [id, e] : sketch.entities()) {
+        if (sketch.isAxis(id) || e.kind() == core::EntityKind::Point) {
+            continue;
+        }
+        if (m_presentation && decorated.contains(id)) {
+            if (!m_selection.contains(id) && id != m_hovered) {
+                continue;  // its stroke is what shows
+            }
+            // Selected or hovered: a thin highlight over the stroke.
+            QPen pen = styleFor(e);
+            pen.setWidthF(1.0);
+            painter.setPen(pen);
+            drawCurve(id, e);
+            continue;
+        }
+        painter.setPen(styleFor(e));
+        drawCurve(id, e);
+    }
+
+    if (m_presentation) {
+        return;  // no constraint symbols, dimensions or points: just the drawing
+    }
     drawAnnotations(painter);
 
     for (const auto& [id, e] : sketch.entities()) {

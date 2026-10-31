@@ -418,6 +418,28 @@ std::map<Id, Id> Editor::paste(const core::Sketch& fragment, core::Vec2 at)
     return map;
 }
 
+QString Editor::strokeArgs(const core::StrokeStyle& style)
+{
+    return QStringLiteral("color=\"%1\", width=%2, dash=\"%3\"")
+        .arg(QString::fromStdString(style.color.hex()), number(style.width), QString::fromLatin1(core::toString(style.dash)));
+}
+
+void Editor::setStroke(const std::vector<Id>& curves, const core::StrokeStyle& style)
+{
+    for (Id c : curves) {
+        m_sketch.setStroke(c, style);
+    }
+    log(QStringLiteral("s.stroke(%1, %2)").arg(list(m_sketch, curves), strokeArgs(style)));
+}
+
+void Editor::clearStroke(const std::vector<Id>& curves)
+{
+    for (Id c : curves) {
+        m_sketch.clearStroke(c);
+    }
+    log(QStringLiteral("s.clear_stroke(%1)").arg(list(m_sketch, curves)));
+}
+
 Id Editor::constrain(ConstraintType type, std::vector<Id> refs, double value)
 {
     const Id id = m_sketch.addConstraint(type, std::move(refs), value);

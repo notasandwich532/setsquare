@@ -15,6 +15,8 @@ add_library(drawcore STATIC
     Sketch.h
     Solver.cpp
     Solver.h
+    Style.cpp
+    Style.h
     Transform.cpp
     Transform.h
 )

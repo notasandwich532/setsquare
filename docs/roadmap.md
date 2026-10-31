@@ -50,6 +50,25 @@ geometry tests, GUI tool tests, and Python scenario scripts.
 - **Offset,** linked: one distance drives the whole chain (lines go parallel, arcs concentric,
   corners meet).
 
+## Appearance
+Presentation is kept apart from the geometry: fills and strokes reference curves, the solver never
+sees them, and per item styles live alongside the sketch (they go into layers later).
+
+1. **Strokes (done).** Colour, width (mm on the drawing; 0 = hairline) and line style per curve.
+   - Sketch view fades strokes under the geometry; Presentation view (V) shows the drawing (strokes
+     at full strength, undecorated geometry as is, no constraints, dimensions or points), and
+     drawing tools switch back to Sketch view.
+   - Stroke brush (B): click a curve, double-click a chain; Ctrl+click removes, Alt+click picks up.
+   - MS Paint-style colour bar: Colour 1 (strokes) / Colour 2 (fills), palette (left/right-click),
+     custom colours, Edit colours, width and line style. Changes apply to the selected curves.
+   - Strokes carry over to copies, mirrors, patterns, offsets and trimmed/filleted pieces.
+2. **Fills.** Paint-bucket click finds the smallest closed region (construction ignored) from a
+   planar arrangement of the curves; store boundary ids plus the click point, re-find on breakage,
+   flag broken fills. Report loose ends when there's no closed region.
+3. **Spill animation.** Optional animated raster flood fill that shows where a fill escapes through
+   a gap, highlights the nearest loose ends and offers to close the gap.
+4. **Layers panel.** Layers, each a sketch with ordered sublayers (show / fade / hide, lock).
+
 ## M9: New curve types
 - **Ellipse** and elliptical arc, with major/minor radius dimensions.
 - **Splines:** control-point and fit-point. Fit points are constrained onto the curve.

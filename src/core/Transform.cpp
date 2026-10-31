@@ -161,6 +161,9 @@ std::map<Id, Id> copy(const Sketch& from, Sketch& to, const std::vector<Id>& sel
         if (made != kNoId) {
             to.entity(made).construction = e.construction;
             map[id] = made;
+            if (const StrokeStyle* style = from.stroke(id)) {
+                to.setStroke(made, StrokeStyle(*style));  // copies look the same
+            }
         }
     }
 
@@ -342,6 +345,7 @@ std::map<Id, Id> mirror(Sketch& s, const std::vector<Id>& selection, Id line)
         }
         if (made != kNoId) {
             s.entity(made).construction = e.construction;
+            s.copyStroke(id, made);
             map[id] = made;
         }
     }

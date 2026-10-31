@@ -625,6 +625,7 @@ void Sketch::remove(Id id)
 
     for (Id d : doomed) {
         m_entities.erase(d);
+        m_strokes.erase(d);
     }
     std::erase_if(m_constraints, [&](const auto& kv) {
         return std::ranges::any_of(kv.second.refs, [&](Id r) { return doomed.contains(r); });
@@ -662,6 +663,36 @@ void Sketch::rebindPoint(Id curve, Id oldPoint, Id newPoint)
     checkGeometry(e);
 }
 
+void Sketch::setStroke(Id curve, const StrokeStyle& style)
+{
+    if (!hasEntity(curve) || !isCurve(curve) || isReference(curve)) {
+        throw SketchError("only lines, circles and arcs can have a stroke");
+    }
+    if (!(style.width >= 0.0)) {
+        throw SketchError("stroke width can't be negative");
+    }
+    m_strokes[curve] = style;
+}
+
+void Sketch::clearStroke(Id curve)
+{
+    m_strokes.erase(curve);
+}
+
+const StrokeStyle* Sketch::stroke(Id curve) const
+{
+    auto it = m_strokes.find(curve);
+    return it == m_strokes.end() ? nullptr : &it->second;
+}
+
+void Sketch::copyStroke(Id from, Id to)
+{
+    if (const StrokeStyle* s = stroke(from)) {
+        const StrokeStyle style = *s;  // (inserting may not move it, but be safe)
+        setStroke(to, style);
+    }
+}
+
 bool Sketch::isPointUsed(Id point) const
 {
     return std::ranges::any_of(m_entities, [&](const auto& kv) { return referencesPoint(kv.second, point); });
@@ -694,6 +725,7 @@ void Sketch::clear()
 {
     m_entities.clear();
     m_constraints.clear();
+    m_strokes.clear();
     m_origin = kNoId;
     m_axes = {kNoId, kNoId};
     m_axisEnds = {kNoId, kNoId};

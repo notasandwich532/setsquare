@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Style.h"
+
 #include <array>
 #include <cstdint>
 #include <map>
@@ -180,6 +182,15 @@ public:
     // arc). Throws SketchError, changing nothing, if a constraint wouldn't be valid afterwards.
     void retarget(Id from, Id to);
 
+    // --- appearance (presentation only; the solver ignores it) ---
+    // A curve's stroke in the drawing. Curves without one are drawn as plain sketch geometry.
+    // Strokes go with their curve: deleting the curve deletes its stroke.
+    void setStroke(Id curve, const StrokeStyle& style);  // throws unless `curve` is a user curve
+    void clearStroke(Id curve);
+    const StrokeStyle* stroke(Id curve) const;  // nullptr if it has none
+    const std::map<Id, StrokeStyle>& strokes() const { return m_strokes; }
+    void copyStroke(Id from, Id to);  // gives `to` the stroke of `from` (if it has one)
+
     // --- origin and axes ---
     // A fixed point at (0, 0) plus fixed X and Y axis lines through it, which geometry can snap
     // to and be constrained/dimensioned against (e.g. an angle to the X axis). Created on
@@ -249,6 +260,7 @@ private:
 
     std::map<Id, Entity> m_entities;
     std::map<Id, Constraint> m_constraints;
+    std::map<Id, StrokeStyle> m_strokes;
     Id m_nextId = 1;
     Id m_origin = kNoId;
     std::array<Id, 2> m_axes{kNoId, kNoId};

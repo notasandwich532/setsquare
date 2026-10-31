@@ -146,6 +146,21 @@ data = s.extract(items)                 # JSON, as the clipboard holds it
 pasted = s.paste(data, at=(x, y))       # centred at (x, y)
 ```
 
+### Appearance (strokes)
+How curves look in the finished drawing; the solver ignores it. Curves without a stroke draw as
+plain sketch geometry.
+
+```python
+s.stroke(curves, color="#ed1c24", width=0.5, dash="dashed")  # any of these; the rest stay as they are
+s.stroke(line, color=(0, 162, 232, 128))      # (r, g, b[, a]) works too
+s.stroke(circle, width=0)                      # 0 = hairline (always 1 pixel)
+s.clear_stroke(curves)
+line.stroke                                    # {'color': '#ed1c24', 'width': 0.5, 'dash': 'dashed'} or None
+app.presentation = True                        # see the drawing as it will look
+```
+Line styles: `solid`, `dashed`, `dotted`, `dash_dot`, `dash_dot_dot`. Widths are millimetres on
+the drawing. Copies, mirrors, patterns, offsets and trimmed or filleted pieces keep their stroke.
+
 ### Origin and axes
 `s.origin`, `s.x_axis` and `s.y_axis` are fixed and permanent. Use them like any point or line:
 `s.angle(s.x_axis, l, value=30)`, `s.distance(p, s.y_axis, value=5)`, `s.coincident(p, s.x_axis)`.

@@ -77,6 +77,11 @@ public:
 
     static core::Affine moveMap(double dx, double dy, double angle, core::Vec2 about);
 
+    // Appearance: give curves a stroke (colour, width, line style), or take it away.
+    void setStroke(const std::vector<core::Id>& curves, const core::StrokeStyle& style);
+    void clearStroke(const std::vector<core::Id>& curves);
+    static QString strokeArgs(const core::StrokeStyle& style);  // "color=\"#ff8800\", width=0.5, dash=\"dashed\""
+
     // Unchecked (inference while drawing); Document::addConstraint is the checked version.
     core::Id constrain(core::ConstraintType type, std::vector<core::Id> refs, double value = 0.0);
 

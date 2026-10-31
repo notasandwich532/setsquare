@@ -7,6 +7,7 @@
 #include <core/Geometry.h>
 
 #include <QElapsedTimer>
+#include <QPen>
 #include <QPointF>
 #include <QWidget>
 
@@ -118,6 +119,32 @@ public:
     ModifyOptions& modifyOptions() { return m_modifyOptions; }
     const ModifyOptions& modifyOptions() const { return m_modifyOptions; }
 
+    // --- appearance ---
+    // Presentation view shows the drawing as it will look: strokes at full strength, with no
+    // constraint symbols, dimensions or points (undecorated curves still show as geometry).
+    // Sketch view, the default, fades strokes under the geometry. Picking a drawing or
+    // constraint tool goes back to sketch view.
+    bool presentation() const { return m_presentation; }
+    void setPresentation(bool on);
+
+    // The current paint, as in MS Paint: colour 1 for strokes, colour 2 for fills, plus the
+    // line width and style that new strokes get.
+    struct Paint
+    {
+        core::Color color1{0xff, 0xff, 0xff};
+        core::Color color2{0x4d, 0xa3, 0xff};
+        double width = 0.35;
+        core::Dash dash = core::Dash::Solid;
+
+        core::StrokeStyle stroke() const { return {color1, width, dash}; }
+        bool operator==(const Paint&) const = default;
+    };
+    const Paint& paint() const { return m_paint; }
+    void setPaint(const Paint& paint);
+
+    // How a stroke style is drawn at the current zoom.
+    QPen strokePen(const core::StrokeStyle& style) const;
+
     // Constraint symbols on the canvas (dimensions are always shown).
     bool showConstraints() const { return m_showConstraints; }
     void setShowConstraints(bool show);
@@ -131,6 +158,8 @@ signals:
     void message(const QString& text);
     void polygonSidesChanged(int sides);
     void recentToolsRequested(QPoint globalPos);  // right-click with nothing to cancel
+    void presentationChanged(bool on);
+    void paintChanged();
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -176,6 +205,8 @@ private:
     ModifyOptions m_modifyOptions;
     bool m_showConstraints = true;
     core::Sketch m_pasteFragment;
+    bool m_presentation = false;
+    Paint m_paint;
     core::Id m_editFeature = core::kNoId;  // the pattern the next pattern command edits
     // Settings panel for the tools that have settings but no command (fillet, polygon, ...).
     class CommandPanel* m_optionsPanel = nullptr;

@@ -198,6 +198,27 @@ std::vector<Id> mapped(const std::vector<Id>& ids, const std::map<Id, Id>& map)
     return out;
 }
 
+// A colour: "#rrggbb", "#rrggbbaa" or (r, g, b[, a]) with 0-255 components.
+core::Color colorArg(py::handle h)
+{
+    core::Color c;
+    if (py::isinstance<py::str>(h)) {
+        const std::string text = h.cast<std::string>();
+        if (!core::Color::fromHex(text, c)) {
+            throw py::value_error("not a colour: '" + text + "' (use '#rrggbb')");
+        }
+        return c;
+    }
+    if (py::isinstance<py::sequence>(h)) {
+        const auto seq = h.cast<py::sequence>();
+        if (seq.size() == 3 || seq.size() == 4) {
+            auto part = [&](size_t i) { return static_cast<std::uint8_t>(std::clamp(seq[i].cast<int>(), 0, 255)); };
+            return {part(0), part(1), part(2), seq.size() == 4 ? part(3) : std::uint8_t(255)};
+        }
+    }
+    throw py::type_error("a colour is '#rrggbb' or an (r, g, b[, a]) tuple");
+}
+
 std::pair<double, double> pairOf(py::handle h, const char* what)
 {
     if (py::isinstance<py::sequence>(h) && !py::isinstance<py::str>(h)) {
@@ -412,7 +433,19 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
             .def_property_readonly("fully_constrained", [](const T& i) {
                 entity(i.id);
                 return doc().solveResult().fullyConstrained.contains(i.id);
-            });
+            })
+            .def_property_readonly("stroke", [](const T& i) -> py::object {
+                entity(i.id);
+                const core::StrokeStyle* style = sketch().stroke(i.id);
+                if (!style) {
+                    return py::none();
+                }
+                py::dict d;
+                d["color"] = style->color.hex();
+                d["width"] = style->width;
+                d["dash"] = std::string(core::toString(style->dash));
+                return d;
+            }, "The curve's stroke as {'color', 'width', 'dash'}, or None (see Sketch.stroke).");
     };
 
     py::class_<PointH, Item> point(m, "Point");
@@ -880,6 +913,53 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
            "Move items rigidly: turn by `angle` degrees about `about`, then shift by (dx, dy). Connected geometry "
            "follows as the constraints allow, as when dragging.")
 
+        // appearance
+        .def("stroke", [](const SketchH&, py::handle curves, py::object color, py::object width, py::object dash) {
+            const std::vector<Id> ids = itemsOf(curves);
+            // What isn't given stays as the curve has it (or the default for a new stroke).
+            std::vector<std::pair<core::StrokeStyle, std::vector<Id>>> groups;
+            for (Id id : ids) {
+                entity(id);
+                core::StrokeStyle style = sketch().stroke(id) ? *sketch().stroke(id) : core::StrokeStyle{};
+                if (!color.is_none()) {
+                    style.color = colorArg(color);
+                }
+                if (!width.is_none()) {
+                    style.width = width.cast<double>();
+                }
+                if (!dash.is_none()) {
+                    const std::string name = dash.cast<std::string>();
+                    if (!core::dashFromString(name, style.dash)) {
+                        throw py::value_error("unknown line style '" + name
+                                              + "' (solid, dashed, dotted, dash_dot, dash_dot_dot)");
+                    }
+                }
+                auto it = std::ranges::find_if(groups, [&](const auto& g) { return g.first == style; });
+                if (it == groups.end()) {
+                    groups.push_back({style, {id}});
+                }
+                else {
+                    it->second.push_back(id);
+                }
+            }
+            editReturningId("Stroke", [&](Editor& ed) {
+                for (const auto& [style, group] : groups) {
+                    ed.setStroke(group, style);
+                }
+                return kNoId;
+            });
+        }, py::arg("curves"), py::arg("color") = py::none(), py::arg("width") = py::none(),
+           py::arg("dash") = py::none(),
+           "Give curves a stroke: color as '#rrggbb' (or '#rrggbbaa', or an (r, g, b[, a]) tuple), width in mm "
+           "(0 = hairline), dash 'solid', 'dashed', 'dotted', 'dash_dot' or 'dash_dot_dot'.")
+        .def("clear_stroke", [](const SketchH&, py::handle curves) {
+            const std::vector<Id> ids = itemsOf(curves);
+            editReturningId("Remove stroke", [&](Editor& ed) {
+                ed.clearStroke(ids);
+                return kNoId;
+            });
+        }, py::arg("curves"), "Take curves' strokes off (they draw as plain geometry again).")
+
         // copies and linked features
         .def("copy", [](const SketchH&, py::handle items, double dx, double dy, double angle, py::handle about) {
             const std::vector<Id> ids = itemsOf(items);
@@ -1086,6 +1166,10 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
                 }
             },
             "The active tool: select, line, rectangle, circle, arc, arc3, dimension, coincident, ...")
+        .def_property(
+            "presentation", [](const AppH&) { return ui().presentation(); },
+            [](const AppH&, bool on) { ui().setPresentation(on); },
+            "Presentation view: the drawing as it will look (strokes at full strength, no constraints).")
         .def("message", [](const AppH&, const std::string& text) { ui().message(QString::fromStdString(text)); });
     m.attr("app") = AppH{};
 

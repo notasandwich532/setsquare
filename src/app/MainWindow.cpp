@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 
+#include "ColorBar.h"
 #include "ConstraintPanel.h"
 #include "Document.h"
 #include "PythonHost.h"
@@ -84,6 +85,8 @@ MainWindow::MainWindow(QWidget* parent)
         return kind.has_value();
     };
     hooks.message = [this](const QString& text) { statusBar()->showMessage(text, 5000); };
+    hooks.presentation = [this] { return m_view->presentation(); };
+    hooks.setPresentation = [this](bool on) { m_view->setPresentation(on); };
     script::setUiHooks(std::move(hooks));
 
     createActions();
@@ -142,6 +145,7 @@ const std::pair<ToolKind, const char*> kToolNames[] = {
     {ToolKind::CircularPattern, "circular_pattern"},
     {ToolKind::Offset, "offset"},
     {ToolKind::Paste, "paste"},
+    {ToolKind::StrokeBrush, "stroke_brush"},
     {ToolKind::Dimension, "dimension"},
     {ToolKind::Coincident, "coincident"},
     {ToolKind::HorizontalVertical, "horizontal_vertical"},
@@ -532,6 +536,25 @@ void MainWindow::createActions()
                 });
     addTools(modifyBar, {{ToolKind::Offset, tr("Offset"), {}}});
     // (Tool settings are in panels on the canvas, not up here.)
+
+    // Appearance, on a row of its own: presentation view, the stroke brush and the colour bar.
+    addToolBarBreak();
+    auto* appearanceBar = addToolBar(tr("Appearance"));
+    appearanceBar->setObjectName("AppearanceToolbar");
+    appearanceBar->setMovable(false);
+    appearanceBar->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    auto* presentation = new QAction(tr("Presentation"), this);
+    presentation->setObjectName(QStringLiteral("presentationAction"));
+    presentation->setCheckable(true);
+    presentation->setShortcut(Qt::Key_V);
+    presentation->setToolTip(tr("Presentation view: the drawing as it will look (V)"));
+    connect(presentation, &QAction::toggled, m_view, &SketchView::setPresentation);
+    connect(m_view, &SketchView::presentationChanged, presentation, &QAction::setChecked);
+    appearanceBar->addAction(presentation);
+    QMenu* appearanceMenu = menuBar()->addMenu(tr("&Appearance"));
+    appearanceMenu->addAction(presentation);
+    addTools(appearanceBar, {{ToolKind::StrokeBrush, tr("Stroke Brush"), QKeySequence(Qt::Key_B)}});
+    appearanceBar->addWidget(new ColorBar(*m_view, appearanceBar));
 
     sketchMenu->addSeparator();
     addToolBarBreak();
