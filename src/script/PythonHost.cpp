@@ -10,9 +10,11 @@
 #include "Editor.h"
 
 #include <core/Dimensions.h>
+#include <core/Features.h>
 #include <core/Modify.h>
 #include <core/Serialize.h>
 #include <core/Solver.h>
+#include <core/Transform.h>
 
 // Qt's `slots` macro collides with a struct member in Python's object.h.
 #pragma push_macro("slots")
@@ -169,6 +171,31 @@ std::vector<Id> idsOf(const py::args& args)
         }
     }
     return ids;
+}
+
+// One item or a list/tuple of them.
+std::vector<Id> itemsOf(py::handle h)
+{
+    if (py::isinstance<py::sequence>(h) && !py::isinstance<py::str>(h)) {
+        std::vector<Id> ids;
+        for (py::handle inner : h) {
+            ids.push_back(idOf(inner));
+        }
+        return ids;
+    }
+    return {idOf(h)};
+}
+
+// What each of `ids` became (skipping those with no counterpart).
+std::vector<Id> mapped(const std::vector<Id>& ids, const std::map<Id, Id>& map)
+{
+    std::vector<Id> out;
+    for (Id id : ids) {
+        if (auto it = map.find(id); it != map.end()) {
+            out.push_back(it->second);
+        }
+    }
+    return out;
 }
 
 std::pair<double, double> pairOf(py::handle h, const char* what)
@@ -459,10 +486,38 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
         })
         .def_property_readonly("refs", [](const ConstraintH& c) { return wrapAll(constraintOf(c.id).refs); })
         .def_property_readonly("is_dimension", [](const ConstraintH& c) { return core::isDimension(constraintOf(c.id).type); })
+        .def_property_readonly("is_feature", [](const ConstraintH& c) { return core::isFeature(constraintOf(c.id).type); },
+                               "A pattern or offset.")
+        .def_property_readonly("sources", [](const ConstraintH& c) {
+            const core::Constraint& k = constraintOf(c.id);
+            if (k.type == ConstraintType::Offset) {
+                return wrapAll(core::feature::offsetRefs(k).sources);
+            }
+            if (core::isFeature(k.type)) {
+                return wrapAll(core::feature::pattern(k).sources);
+            }
+            throw py::value_error("not a pattern or offset");
+        }, "A pattern's or offset's original items.")
+        .def_property_readonly("copies", [](const ConstraintH& c) {
+            const core::Constraint& k = constraintOf(c.id);
+            py::list out;
+            if (k.type == ConstraintType::Offset) {
+                out.append(wrapAll(core::feature::offsetRefs(k).offsets));
+            }
+            else if (core::isFeature(k.type)) {
+                for (const auto& instance : core::feature::pattern(k).copies) {
+                    out.append(wrapAll(instance));
+                }
+            }
+            else {
+                throw py::value_error("not a pattern or offset");
+            }
+            return out;
+        }, "Per copy (one for an offset), the items matching `sources`.")
         .def_property(
             "value", [](const ConstraintH& c) -> py::object {
                 const core::Constraint& k = constraintOf(c.id);
-                return core::isDimension(k.type) ? py::cast(k.value) : py::none();
+                return core::hasValue(k.type) ? py::cast(k.value) : py::none();
             },
             [](const ConstraintH& c, double v) {
                 constraintOf(c.id);
@@ -472,7 +527,8 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
                     throw py::value_error(error.toStdString());
                 }
             },
-            "A dimension's value (lengths, or degrees for angles). Setting it re-solves.")
+            "A dimension's value (lengths, or degrees for angles), a pattern's spacing or total angle, or an "
+            "offset's distance. Setting it re-solves.")
         .def_property(
             "label", [](const ConstraintH& c) {
                 const core::Constraint& k = constraintOf(c.id);
@@ -801,6 +857,134 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
             call.target().dragTo(dx, dy);
             call.target().endDrag();
         }, py::arg("curve"), py::arg("grab"), py::arg("dx"), py::arg("dy"), "Drag a circle/arc rim from a grab point.")
+        .def("move", [](const SketchH&, py::handle items, double dx, double dy, double angle, py::handle about) {
+            std::vector<Id> points;
+            for (Id id : core::xform::expand(sketch(), itemsOf(items))) {
+                if (sketch().entity(id).kind() == EntityKind::Point) {
+                    points.push_back(id);
+                }
+            }
+            const core::Vec2 centre = vecArg(about);
+            Call call;
+            call.target().beginDrag(points);
+            // Turn in small steps, as a mouse would: the solver follows the geometry from where it
+            // was, and a big jump could land it in a mirrored arrangement instead.
+            const int steps = std::max(1, static_cast<int>(std::ceil(std::abs(angle) / 10.0)));
+            for (int i = 1; i <= steps; ++i) {
+                const double f = double(i) / steps;
+                call.target().dragMove(dx * f, dy * f, angle * f, centre);
+            }
+            call.target().endDrag();
+        }, py::arg("items"), py::arg("dx") = 0.0, py::arg("dy") = 0.0, py::arg("angle") = 0.0,
+           py::arg("about") = py::make_tuple(0, 0),
+           "Move items rigidly: turn by `angle` degrees about `about`, then shift by (dx, dy). Connected geometry "
+           "follows as the constraints allow, as when dragging.")
+
+        // copies and linked features
+        .def("copy", [](const SketchH&, py::handle items, double dx, double dy, double angle, py::handle about) {
+            const std::vector<Id> ids = itemsOf(items);
+            const core::Vec2 centre = vecArg(about);
+            return editCurves("Copy", [&](Editor& ed) { return mapped(ids, ed.copy(ids, dx, dy, angle, centre)); });
+        }, py::arg("items"), py::arg("dx") = 0.0, py::arg("dy") = 0.0, py::arg("angle") = 0.0,
+           py::arg("about") = py::make_tuple(0, 0),
+           "Copy items (with the constraints among them), turned by `angle` degrees about `about` and shifted by "
+           "(dx, dy). Returns the copies, in the same order.")
+        .def("scale", [](const SketchH&, py::handle items, double factor, py::handle about) {
+            const std::vector<Id> ids = itemsOf(items);
+            const core::Vec2 centre = vecArg(about);
+            editReturningId("Scale", [&](Editor& ed) {
+                ed.scale(ids, factor, centre);
+                return kNoId;
+            });
+        }, py::arg("items"), py::arg("factor"), py::arg("about") = py::make_tuple(0, 0),
+           "Scale items about a point; dimensions between them scale too.")
+        .def("mirror", [](const SketchH&, py::handle items, py::handle line) {
+            const std::vector<Id> ids = itemsOf(items);
+            const Id across = idOf(line);
+            return editCurves("Mirror", [&](Editor& ed) { return mapped(ids, ed.mirror(ids, across)); });
+        }, py::arg("items"), py::arg("line"),
+           "Mirror items across a line, kept symmetric to the originals. Returns the mirror images (items lying "
+           "on the line have none).")
+        .def("rectangular_pattern", [](const SketchH&, py::handle items, int count, double spacing, double angle,
+                                       int count2, double spacing2) {
+            const std::vector<Id> ids = itemsOf(items);
+            const core::feature::LinearPatternParams p{count, spacing, angle, count2, spacing2};
+            return wrap(editReturningId("Pattern", [&](Editor& ed) { return ed.rectangularPattern(ids, p); }));
+        }, py::arg("items"), py::arg("count") = 3, py::arg("spacing") = 10.0, py::arg("angle") = 0.0,
+           py::arg("count2") = 1, py::arg("spacing2") = 10.0,
+           "Linked copies in rows: `count` along `angle` degrees, `count2` at right angles to it (counts include "
+           "the original). Returns the pattern; its value is the spacing.")
+        .def("circular_pattern", [](const SketchH&, py::handle items, py::handle center, int count, double angle) {
+            const std::vector<Id> ids = itemsOf(items);
+            const Id c = idOf(center);
+            const core::feature::CircularPatternParams p{count, angle};
+            return wrap(editReturningId("Pattern", [&](Editor& ed) { return ed.circularPattern(ids, c, p); }));
+        }, py::arg("items"), py::arg("center"), py::arg("count") = 6, py::arg("angle") = 360.0,
+           "Linked copies around a centre point: `count` (including the original) over `angle` degrees. A full "
+           "turn spaces them evenly. Returns the pattern; its value is the angle.")
+        .def("set_pattern", [](const SketchH&, py::handle pattern, py::object count, py::object spacing,
+                               py::object angle, py::object count2, py::object spacing2) {
+            const Id id = idOf(pattern);
+            const core::Constraint& k = constraintOf(id);
+            auto set = [](auto& field, const py::object& v) {
+                if (!v.is_none()) {
+                    field = v.cast<std::remove_reference_t<decltype(field)>>();
+                }
+            };
+            if (k.type == ConstraintType::LinearPattern) {
+                auto p = core::feature::linearParams(k);
+                set(p.count, count);
+                set(p.spacing, spacing);
+                set(p.angle, angle);
+                set(p.count2, count2);
+                set(p.spacing2, spacing2);
+                return wrap(editReturningId("Pattern", [&](Editor& ed) { return ed.setPattern(id, p); }));
+            }
+            if (k.type == ConstraintType::CircularPattern) {
+                auto p = core::feature::circularParams(k);
+                set(p.count, count);
+                set(p.angle, angle);
+                return wrap(editReturningId("Pattern", [&](Editor& ed) { return ed.setPattern(id, p); }));
+            }
+            throw py::value_error("not a pattern");
+        }, py::arg("pattern"), py::arg("count") = py::none(), py::arg("spacing") = py::none(),
+           py::arg("angle") = py::none(), py::arg("count2") = py::none(), py::arg("spacing2") = py::none(),
+           "Change a pattern's settings. A new count remakes the copies; returns the pattern (a new one then).")
+        .def("offset", [](const SketchH&, py::handle curves, double distance, py::handle toward) {
+            std::vector<Id> ids = itemsOf(curves);
+            if (ids.size() == 1 && !py::isinstance<py::sequence>(curves)) {
+                ids = core::feature::chainAt(sketch(), ids.front());  // one curve: its whole chain
+            }
+            const core::Vec2 side = vecArg(toward);
+            return wrap(editReturningId("Offset", [&](Editor& ed) { return ed.offset(ids, distance, side); }));
+        }, py::arg("curves"), py::arg("distance"), py::arg("toward"),
+           "Linked offset of a chain of lines/arcs (a list, or one curve for its whole chain) or a circle, on the "
+           "side `toward` is on. Returns the offset; its value is the distance.")
+        .def("chain", [](const SketchH&, py::handle curve) { return wrapAll(core::feature::chainAt(sketch(), idOf(curve))); },
+             py::arg("curve"), "The curves joined end to end with this one, in order.")
+        .def("extract", [](const SketchH&, py::handle items) {
+            return core::toJson(core::xform::extract(sketch(), itemsOf(items)), true);
+        }, py::arg("items"), "Items and the constraints among them as JSON, as the clipboard holds them.")
+        .def("paste", [](const SketchH&, const std::string& data, py::handle at) {
+            core::Sketch fragment;
+            try {
+                fragment = core::fromJson(data);
+            }
+            catch (const core::SketchError& e) {
+                throw py::value_error(e.what());
+            }
+            const core::Vec2 where = vecArg(at);
+            return editCurves("Paste", [&](Editor& ed) {
+                std::vector<Id> made;
+                for (const auto& [from, to] : ed.paste(fragment, where)) {
+                    if (fragment.hasEntity(from)) {
+                        made.push_back(to);
+                    }
+                }
+                return made;
+            });
+        }, py::arg("data"), py::arg("at"),
+           "Insert items from extract() (or the clipboard), centred at `at`. Returns the new entities.")
 
         // status
         .def("solve", [](const SketchH&) { return doc().solveResult(); },

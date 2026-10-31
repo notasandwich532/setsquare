@@ -4,6 +4,8 @@
 #include "SketchView.h"
 #include "Theme.h"
 
+#include <core/Features.h>
+
 #include <QListWidget>
 #include <QShortcut>
 #include <QVBoxLayout>
@@ -33,8 +35,34 @@ QString typeName(core::ConstraintType type)
         case T::Radius: return QObject::tr("Radius");
         case T::Diameter: return QObject::tr("Diameter");
         case T::Angle: return QObject::tr("Angle");
+        case T::Offset: return QObject::tr("Offset");
+        case T::LinearPattern: return QObject::tr("Rectangular pattern");
+        case T::CircularPattern: return QObject::tr("Circular pattern");
     }
     return {};
+}
+
+// "3 x 2, spacing 10 / 15 at 0°", "6 over 360°", "5 mm".
+QString featureSummary(const core::Constraint& c)
+{
+    using T = core::ConstraintType;
+    auto num = [](double v) { return QString::number(v, 'g', 6); };
+    switch (c.type) {
+        case T::Offset: return num(c.value);
+        case T::LinearPattern: {
+            const auto p = core::feature::linearParams(c);
+            QString text = QObject::tr("%1, spacing %2").arg(p.count).arg(num(p.spacing));
+            if (p.count2 > 1) {
+                text = QObject::tr("%1 x %2, spacing %3 / %4").arg(p.count).arg(p.count2).arg(num(p.spacing), num(p.spacing2));
+            }
+            return p.angle != 0.0 ? text + QObject::tr(" at %1°").arg(num(p.angle)) : text;
+        }
+        case T::CircularPattern: {
+            const auto p = core::feature::circularParams(c);
+            return QObject::tr("%1 over %2°").arg(p.count).arg(num(p.angle));
+        }
+        default: return {};
+    }
 }
 
 bool contains(const std::vector<core::Id>& v, core::Id id)
@@ -59,7 +87,13 @@ ConstraintPanel::ConstraintPanel(Document& doc, SketchView& view, QWidget* paren
     connect(&m_view, &SketchView::selectionChanged, this, &ConstraintPanel::pullSelectionFromView);
     connect(m_list, &QListWidget::itemSelectionChanged, this, &ConstraintPanel::pushSelectionToView);
     connect(m_list, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem* item) {
-        m_view.editDimension(item->data(Qt::UserRole).toUInt());
+        const core::Id id = item->data(Qt::UserRole).toUInt();
+        if (m_doc.sketch().hasConstraint(id) && core::isFeature(m_doc.sketch().constraint(id).type)) {
+            m_view.editFeature(id);
+        }
+        else {
+            m_view.editDimension(id);
+        }
     });
     auto* del = new QShortcut(QKeySequence::Delete, m_list, nullptr, nullptr, Qt::WidgetShortcut);
     connect(del, &QShortcut::activated, &m_view, &SketchView::deleteSelection);
@@ -73,8 +107,14 @@ QString ConstraintPanel::describe(const core::Constraint& c) const
     if (core::isDimension(c.type)) {
         text += QStringLiteral("  ") + m_view.formatDimension(c);
     }
-    QStringList refs;
     const core::Sketch& s = m_doc.sketch();
+    if (core::isFeature(c.type)) {
+        const size_t sources = c.type == core::ConstraintType::Offset ? core::feature::offsetRefs(c).sources.size()
+                                                                       : core::feature::pattern(c).sources.size();
+        return text + QStringLiteral("  ") + featureSummary(c) + QStringLiteral("   (")
+            + tr("%n item(s)", nullptr, static_cast<int>(sources)) + QLatin1Char(')');
+    }
+    QStringList refs;
     for (core::Id r : c.refs) {
         if (s.isOrigin(r)) {
             refs << tr("origin");
@@ -99,7 +139,7 @@ void ConstraintPanel::rebuild()
 
     std::vector<Shown> shown;
     for (const auto& [id, c] : s.constraints()) {
-        shown.push_back({id, c.value, contains(r.conflicting, id), contains(r.redundant, id)});
+        shown.push_back({id, c.value, c.params, contains(r.conflicting, id), contains(r.redundant, id)});
     }
     if (shown == m_shown) {
         return;  // e.g. a drag: geometry moved, constraints didn't change

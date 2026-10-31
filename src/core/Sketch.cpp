@@ -41,18 +41,31 @@ const char* toString(ConstraintType type)
         case ConstraintType::Radius: return "radius";
         case ConstraintType::Diameter: return "diameter";
         case ConstraintType::Angle: return "angle";
+        case ConstraintType::Offset: return "offset";
+        case ConstraintType::LinearPattern: return "linearPattern";
+        case ConstraintType::CircularPattern: return "circularPattern";
     }
     return "?";
 }
 
 bool isDimension(ConstraintType type)
 {
-    return type >= ConstraintType::Distance;
+    return type >= ConstraintType::Distance && type <= ConstraintType::Angle;
+}
+
+bool isFeature(ConstraintType type)
+{
+    return type >= ConstraintType::Offset;
+}
+
+bool hasValue(ConstraintType type)
+{
+    return isDimension(type) || isFeature(type);
 }
 
 bool constraintTypeFromString(const std::string& name, ConstraintType& out)
 {
-    for (int i = 0; i <= static_cast<int>(ConstraintType::Angle); ++i) {
+    for (int i = 0; i <= static_cast<int>(ConstraintType::CircularPattern); ++i) {
         const auto type = static_cast<ConstraintType>(i);
         if (name == toString(type)) {
             out = type;
@@ -168,7 +181,7 @@ void Sketch::insertConstraint(const Constraint& c)
     }
     std::vector<Id> refs = c.refs;
     normalize(c.type, refs);
-    validate(c.type, refs, c.value);
+    validate(c.type, refs, c.value, c.params);
     Constraint stored = c;
     stored.refs = std::move(refs);
     m_constraints.emplace(c.id, std::move(stored));
@@ -258,14 +271,26 @@ Id Sketch::addArc(double cx, double cy, double radius, double startDeg, double e
 // Constraints
 // ---------------------------------------------------------------------------------------------
 
-Id Sketch::addConstraint(ConstraintType type, std::vector<Id> refs, double value)
+Id Sketch::addConstraint(ConstraintType type, std::vector<Id> refs, double value, std::vector<double> params)
 {
     normalize(type, refs);
-    validate(type, refs, value);
+    validate(type, refs, value, params);
 
     const Id id = nextId();
-    m_constraints.emplace(id, Constraint{id, type, std::move(refs), value});
+    Constraint c{id, type, std::move(refs), value};
+    c.params = std::move(params);
+    m_constraints.emplace(id, std::move(c));
     return id;
+}
+
+void Sketch::setConstraintParams(Id id, std::vector<double> params)
+{
+    auto it = m_constraints.find(id);
+    if (it == m_constraints.end()) {
+        throw SketchError("unknown constraint " + std::to_string(id));
+    }
+    validate(it->second.type, it->second.refs, it->second.value, params);
+    it->second.params = std::move(params);
 }
 
 bool Sketch::canAddConstraint(ConstraintType type, std::vector<Id> refs, std::string* why) const
@@ -337,14 +362,15 @@ void Sketch::setConstraintValue(Id id, double value)
     if (it == m_constraints.end()) {
         throw SketchError("unknown constraint " + std::to_string(id));
     }
-    if (!isDimension(it->second.type)) {
+    if (!hasValue(it->second.type)) {
         throw SketchError(std::string(toString(it->second.type)) + " constraint has no value");
     }
-    validate(it->second.type, it->second.refs, value);
+    validate(it->second.type, it->second.refs, value, it->second.params);
     it->second.value = value;
 }
 
-void Sketch::validate(ConstraintType type, const std::vector<Id>& refs, double value) const
+void Sketch::validate(ConstraintType type, const std::vector<Id>& refs, double value,
+                      const std::vector<double>& params) const
 {
     const std::string name = toString(type);
     auto fail = [&](const std::string& what) { throw SketchError(name + ": " + what); };
@@ -352,6 +378,10 @@ void Sketch::validate(ConstraintType type, const std::vector<Id>& refs, double v
     const std::set<Id> unique(refs.begin(), refs.end());
     if (unique.size() != refs.size()) {
         fail("references must be distinct");
+    }
+    if (isFeature(type)) {
+        validateFeature(type, refs, value, params);
+        return;
     }
 
     auto kinds = [&](std::initializer_list<EntityKind> expected) {
@@ -447,6 +477,85 @@ void Sketch::validate(ConstraintType type, const std::vector<Id>& refs, double v
                 fail("value must be between 0 and 180 degrees");
             }
             break;
+        case ConstraintType::Offset:
+        case ConstraintType::LinearPattern:
+        case ConstraintType::CircularPattern: break;  // validateFeature
+    }
+}
+
+void Sketch::validateFeature(ConstraintType type, const std::vector<Id>& refs, double value,
+                             const std::vector<double>& params) const
+{
+    const std::string name = toString(type);
+    auto fail = [&](const std::string& what) { throw SketchError(name + ": " + what); };
+    auto count = [&](size_t i) {
+        const double v = i < params.size() ? params[i] : 0.0;
+        if (!(v >= 1.0 && v <= 10000.0 && v == std::floor(v))) {
+            fail("counts must be whole numbers from 1");
+        }
+        return static_cast<size_t>(v);
+    };
+    // `groups` runs of `n` entities each, starting at `first`; every run like the first.
+    auto matchingGroups = [&](size_t first, size_t groups, const char* what) {
+        if (groups == 0 || refs.size() <= first || (refs.size() - first) % groups != 0) {
+            fail(std::string("expects ") + what);
+        }
+        const size_t n = (refs.size() - first) / groups;
+        for (size_t g = 1; g < groups; ++g) {
+            for (size_t i = 0; i < n; ++i) {
+                if (kindOf(refs[first + g * n + i]) != kindOf(refs[first + i])) {
+                    fail(std::string("expects ") + what + " of the same kinds");
+                }
+            }
+        }
+        return n;
+    };
+
+    switch (type) {
+        case ConstraintType::Offset: {
+            const size_t n = matchingGroups(0, 2, "sources then their offsets");
+            for (size_t i = 0; i < n; ++i) {
+                if (!isCurve(refs[i])) {
+                    fail("only curves can be offset");
+                }
+            }
+            if (!(value > 0.0)) {
+                fail("distance must be positive");
+            }
+            break;
+        }
+        case ConstraintType::LinearPattern: {
+            if (params.size() != 4) {
+                fail("expects params {count, angle, count2, spacing2}");
+            }
+            const size_t total = count(0) * count(2);
+            if (total < 2) {
+                fail("needs at least two instances");
+            }
+            matchingGroups(0, total, "sources then each copy");
+            if (!(value > 0.0) || !(params[3] > 0.0)) {
+                fail("spacing must be positive");
+            }
+            break;
+        }
+        case ConstraintType::CircularPattern: {
+            if (params.size() != 1) {
+                fail("expects params {count}");
+            }
+            const size_t n = count(0);
+            if (n < 2) {
+                fail("needs at least two instances");
+            }
+            if (refs.empty() || kindOf(refs[0]) != EntityKind::Point) {
+                fail("expects a centre point first");
+            }
+            matchingGroups(1, n, "the centre, sources then each copy");
+            if (!(value > 0.0 && value <= 360.0)) {
+                fail("angle must be more than 0 and at most 360 degrees");
+            }
+            break;
+        }
+        default: break;
     }
 }
 
@@ -570,7 +679,7 @@ void Sketch::retarget(Id from, Id to)
         }
         std::ranges::replace(c.refs, from, to);
         normalize(c.type, c.refs);
-        validate(c.type, c.refs, core::isDimension(c.type) ? c.value : 1.0);
+        validate(c.type, c.refs, hasValue(c.type) ? c.value : 1.0, c.params);
     }
     m_constraints = std::move(updated);
 }

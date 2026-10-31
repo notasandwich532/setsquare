@@ -118,6 +118,30 @@ cut = s.chamfer(l1, l2, 5, angle=30)       # distance + angle
 s.drag([p, q], dx, dy)        # like dragging with the mouse; constraints still hold
 p.move_to(x, y)
 s.drag_edge(circle, (x, y), dx, dy)   # grab a rim: resizes a free circle
+s.move(items, dx=10, dy=0)            # rigidly, dragging the real geometry (attached things follow)
+s.move(items, angle=30, about=(x, y)) # turn (then shift by dx, dy if given)
+s.scale(items, 2, about=(x, y))       # dimensions between the items scale too
+```
+
+### Copies, mirrors, patterns and offsets
+Copies made with `copy`/`paste` are independent; `mirror`, the patterns and `offset` stay linked to
+their originals: edit the original and the copies follow. A pattern or offset is one feature
+constraint `k`; set `k.value` (spacing, total angle, or distance) to move the copies, and delete
+`k` to unlink them.
+
+```python
+new = s.copy(items, dx=50, dy=0, angle=0, about=(0, 0))  # with the constraints among them
+images = s.mirror(items, line)          # symmetric constraints; points on the line are shared
+k = s.rectangular_pattern(items, count=4, spacing=10, angle=0, count2=2, spacing2=15)
+k = s.circular_pattern(items, s.origin, count=6, angle=360)   # a full turn spaces them evenly
+k.value = 12                            # spacing (rectangular) or total angle (circular)
+k = s.set_pattern(k, count=5)           # a new count remakes the copies: use the returned pattern
+k.sources, k.copies                     # originals, and per copy the matching items
+o = s.offset(curve, 2, toward=(x, y))   # one curve offsets its whole chain; or pass a list
+o.value = 3                             # the distance; the originals stay put
+s.chain(curve)                          # the curves joined end to end with it
+data = s.extract(items)                 # JSON, as the clipboard holds it
+pasted = s.paste(data, at=(x, y))       # centred at (x, y)
 ```
 
 ### Origin and axes
@@ -129,7 +153,7 @@ They aren't included in `s.entities` and the other lists.
 ```python
 s.origin, s[12], s.points, s.lines, s.circles, s.arcs, s.entities, s.constraints, s.dimensions
 p.x, p.y, p.pos     l.p1, l.p2, l.length     c.center, c.radius     a.start, a.end, a.radius
-k.type, k.refs, k.value, k.is_dimension      item.id, item.name, item.exists
+k.type, k.refs, k.value, k.is_dimension, k.is_feature      item.id, item.name, item.exists
 s.dof                 r = s.solve()  ->  r.ok, r.dof, r.conflicting, r.redundant, r.fully_constrained
 e.fully_constrained
 ```

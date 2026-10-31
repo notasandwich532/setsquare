@@ -88,8 +88,16 @@ core::Id Document::addConstraint(core::ConstraintType type, std::vector<core::Id
 bool Document::setDimensionValue(core::Id dimension, double value, QString* error)
 {
     core::Sketch working = m_sketch;
+    std::vector<core::Id> hold;
     try {
         working.setConstraintValue(dimension, value);
+        const core::Constraint& c = working.constraint(dimension);
+        if (core::isFeature(c.type)) {
+            hold = core::feature::sourcePoints(working, c);
+            if (c.type != core::ConstraintType::Offset) {
+                core::feature::placeCopies(working, dimension);
+            }
+        }
     }
     catch (const core::SketchError& e) {
         if (error) {
@@ -97,16 +105,17 @@ bool Document::setDimensionValue(core::Id dimension, double value, QString* erro
         }
         return false;
     }
-    if (!commitChecked(std::move(working), error)) {
+    if (!commitChecked(std::move(working), error, hold)) {
         return false;
     }
     record(QStringLiteral("%1.value = %2").arg(Editor::name(m_sketch, dimension), Editor::number(value)));
     return true;
 }
 
-bool Document::commitChecked(core::Sketch working, QString* error)
+bool Document::commitChecked(core::Sketch working, QString* error, const std::vector<core::Id>& hold)
 {
-    core::SolveResult result = core::solve(working);  // writes back on success
+    // Writes back on success.
+    core::SolveResult result = hold.empty() ? core::solve(working) : core::solveHolding(working, hold);
     QString problem;
     if (result.conflicting.size() > m_result.conflicting.size()) {
         problem = tr("That would conflict with existing constraints");
@@ -180,6 +189,9 @@ void Document::beginDrag(const std::vector<core::Id>& points)
     m_dragPoints = points;
     m_dragEdge = core::kNoId;
     m_dragDx = m_dragDy = 0.0;
+    m_dragIsMove = false;
+    m_dragAngle = 0.0;
+    m_dragAbout = {};
     m_dragSolver = std::make_unique<core::Solver>(m_sketch);
     m_dragSolver->beginDrag(points);
 }
@@ -193,6 +205,7 @@ void Document::beginDragEdge(core::Id roundEntity, double x, double y)
     m_dragGrabX = x;
     m_dragGrabY = y;
     m_dragDx = m_dragDy = 0.0;
+    m_dragIsMove = false;
     m_dragSolver = std::make_unique<core::Solver>(m_sketch);
     m_dragSolver->beginDragEdge(roundEntity, x, y);
 }
@@ -207,6 +220,24 @@ void Document::dragTo(double dx, double dy)
         m_dragMoved = true;
         m_dragDx = dx;
         m_dragDy = dy;
+        emit changed();
+    }
+}
+
+void Document::dragMove(double dx, double dy, double angle, core::Vec2 about)
+{
+    if (!m_dragSolver) {
+        return;
+    }
+    const core::Affine t = Editor::moveMap(dx, dy, angle, about);
+    if (m_dragSolver->dragMap([&](core::Vec2 p) { return t.apply(p); })) {
+        m_dragSolver->writeBack(m_sketch);
+        m_dragMoved = true;
+        m_dragIsMove = true;
+        m_dragDx = dx;
+        m_dragDy = dy;
+        m_dragAngle = angle;
+        m_dragAbout = about;
         emit changed();
     }
 }
@@ -227,13 +258,14 @@ void Document::endDrag()
                          .arg(Editor::name(before, m_dragEdge), Editor::number(m_dragGrabX),
                               Editor::number(m_dragGrabY), Editor::number(m_dragDx), Editor::number(m_dragDy));
         }
+        else if (m_dragIsMove) {
+            python = QStringLiteral("s.move(%1%2)")
+                         .arg(Editor::list(before, m_dragPoints),
+                              Editor::moveArgs(m_dragDx, m_dragDy, m_dragAngle, m_dragAbout));
+        }
         else {
-            QStringList names;
-            for (core::Id p : m_dragPoints) {
-                names << Editor::name(before, p);
-            }
-            python = QStringLiteral("s.drag([%1], %2, %3)")
-                         .arg(names.join(QStringLiteral(", ")), Editor::number(m_dragDx), Editor::number(m_dragDy));
+            python = QStringLiteral("s.drag(%1, %2, %3)")
+                         .arg(Editor::list(before, m_dragPoints), Editor::number(m_dragDx), Editor::number(m_dragDy));
         }
         commit(std::move(now));
         record(python);

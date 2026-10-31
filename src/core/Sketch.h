@@ -98,10 +98,19 @@ enum class ConstraintType
     Radius,              // (circle|arc)
     Diameter,            // (circle|arc)
     Angle,               // (line, line), degrees, measured from the first to the second
+
+    // Features: generated geometry kept tied to its source by one constraint. They carry a
+    // value (edited like a dimension) and further settings in Constraint::params. See
+    // core/Features.h for the layout of the references.
+    Offset,           // (sources..., offsets...): value = distance
+    LinearPattern,    // (sources..., copies...): value = spacing; params = {count, angle, count2, spacing2}
+    CircularPattern,  // (centre point, sources..., copies...): value = total angle; params = {count}
 };
 
 const char* toString(ConstraintType type);
-bool isDimension(ConstraintType type);
+bool isDimension(ConstraintType type);  // a dimension drawn on the canvas
+bool isFeature(ConstraintType type);    // offset or pattern
+bool hasValue(ConstraintType type);     // dimensions and features
 bool constraintTypeFromString(const std::string& name, ConstraintType& out);
 
 struct Constraint
@@ -120,6 +129,9 @@ struct Constraint
     // between rays along each line; bit 0 / bit 1 reverse the first / second line's ray
     // (normally p1 -> p2). The UI picks these from where the label is placed.
     std::uint8_t flip = 0;
+
+    // Features only: settings beyond the value (see ConstraintType).
+    std::vector<double> params;
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -140,8 +152,9 @@ public:
 
     // --- constraints ---
     // Validates the references for the type; throws SketchError when they don't fit.
-    Id addConstraint(ConstraintType type, std::vector<Id> refs, double value = 0.0);
+    Id addConstraint(ConstraintType type, std::vector<Id> refs, double value = 0.0, std::vector<double> params = {});
     void setConstraintValue(Id constraint, double value);
+    void setConstraintParams(Id constraint, std::vector<double> params);  // features
     void setConstraintLabel(Id constraint, double dx, double dy);
     void setConstraintFlip(Id constraint, std::uint8_t flip);  // see Constraint::flip
 
@@ -226,7 +239,10 @@ private:
     bool isCurve(Id id) const;
     bool isRound(Id id) const;  // circle or arc
     void normalize(ConstraintType type, std::vector<Id>& refs) const;
-    void validate(ConstraintType type, const std::vector<Id>& refs, double value) const;
+    void validate(ConstraintType type, const std::vector<Id>& refs, double value,
+                  const std::vector<double>& params = {}) const;
+    void validateFeature(ConstraintType type, const std::vector<Id>& refs, double value,
+                         const std::vector<double>& params) const;
     bool referencesPoint(const Entity& e, Id point) const;
     void checkGeometry(const Entity& e) const;  // a curve's points exist and are distinct points
 

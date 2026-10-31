@@ -4,9 +4,16 @@
 #include "SketchView.h"
 #include "Theme.h"
 
+#include <core/Features.h>
+
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QDoubleSpinBox>
 #include <QFocusEvent>
+#include <QFormLayout>
 #include <QKeyEvent>
 #include <QLineEdit>
+#include <QSpinBox>
 #include <QLocale>
 #include <QPainter>
 #include <QPainterPath>
@@ -281,8 +288,8 @@ std::vector<SketchView::Annotation> SketchView::layoutAnnotations() const
             continue;
         }
 
-        if (!m_showConstraints) {
-            continue;
+        if (!m_showConstraints || core::isFeature(c.type)) {
+            continue;  // features are listed in the constraints panel, not drawn
         }
         const QString symbol = symbolFor(c.type);
         auto glyphAt = [&](QPointF at) {
@@ -452,20 +459,103 @@ void SketchView::editDimension(Id id)
     if (!s.hasConstraint(id) || !core::isDimension(s.constraint(id).type)) {
         return;
     }
+    editValue(id, toScreen(core::layoutDimension(s, s.constraint(id)).label));
+}
+
+void SketchView::editFeature(Id id)
+{
+    const core::Sketch& s = m_doc.sketch();
+    if (!s.hasConstraint(id) || !core::isFeature(s.constraint(id).type)) {
+        return;
+    }
+    const core::Constraint& c = s.constraint(id);
+    if (c.type == ConstraintType::Offset) {
+        const std::vector<Vec2> along = core::sample(s, core::feature::offsetRefs(c).offsets.front(), 2);
+        editValue(id, toScreen(along[along.size() / 2]));
+        return;
+    }
+
+    // Patterns: their settings in a small dialog.
+    const bool circular = c.type == ConstraintType::CircularPattern;
+    QDialog dialog(this);
+    dialog.setObjectName(QStringLiteral("patternDialog"));
+    dialog.setWindowTitle(circular ? tr("Circular Pattern") : tr("Rectangular Pattern"));
+    auto* form = new QFormLayout(&dialog);
+    auto count = [&](const QString& label, int value, const char* name) {
+        auto* box = new QSpinBox(&dialog);
+        box->setObjectName(QLatin1String(name));
+        box->setRange(1, 1000);
+        box->setValue(value);
+        form->addRow(label, box);
+        return box;
+    };
+    auto size = [&](const QString& label, double value, double min, double max, const char* name) {
+        auto* box = new QDoubleSpinBox(&dialog);
+        box->setObjectName(QLatin1String(name));
+        box->setDecimals(3);
+        box->setRange(min, max);
+        box->setValue(value);
+        form->addRow(label, box);
+        return box;
+    };
+    QSpinBox *count1 = nullptr, *count2 = nullptr;
+    QDoubleSpinBox *spacing1 = nullptr, *spacing2 = nullptr, *angle = nullptr;
+    if (circular) {
+        const auto p = core::feature::circularParams(c);
+        count1 = count(tr("Count"), p.count, "count");
+        count1->setMinimum(2);
+        angle = size(tr("Total angle (°)"), p.angle, 0.001, 360.0, "angle");
+    }
+    else {
+        const auto p = core::feature::linearParams(c);
+        count1 = count(tr("Count"), p.count, "count");
+        spacing1 = size(tr("Spacing"), p.spacing, 0.001, 1e6, "spacing");
+        angle = size(tr("Direction (°)"), p.angle, -360.0, 360.0, "angle");
+        count2 = count(tr("Rows"), p.count2, "count2");
+        spacing2 = size(tr("Row spacing"), p.spacing2, 0.001, 1e6, "spacing2");
+    }
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    form->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    Id result = core::kNoId;
+    const bool ok = tryEdit(tr("Pattern"), [&](Editor& ed) {
+        if (circular) {
+            result = ed.setPattern(id, core::feature::CircularPatternParams{count1->value(), angle->value()});
+        }
+        else {
+            result = ed.setPattern(id, core::feature::LinearPatternParams{count1->value(), spacing1->value(),
+                                                                           angle->value(), count2->value(),
+                                                                           spacing2->value()});
+        }
+    });
+    if (ok && m_selection.contains(id)) {
+        setSelection({result});
+    }
+}
+
+void SketchView::editValue(Id id, QPointF at)
+{
+    const core::Sketch& s = m_doc.sketch();
+    if (!s.hasConstraint(id) || !core::hasValue(s.constraint(id).type)) {
+        return;
+    }
     if (m_editor) {
         m_editor->deleteLater();
         m_editor = nullptr;
     }
 
     const core::Constraint& c = s.constraint(id);
-    const core::DimensionLayout L = core::layoutDimension(s, c);
     auto* editor = new DimensionEditor(this);
     m_editor = editor;
     editor->setObjectName(QStringLiteral("dimensionEditor"));
     editor->setText(formatNumber(c.value));
     editor->setAlignment(Qt::AlignCenter);
     editor->resize(90, editor->sizeHint().height());
-    editor->move((toScreen(L.label) - QPointF(45, editor->height() / 2.0)).toPoint());
+    editor->move((at - QPointF(45, editor->height() / 2.0)).toPoint());
 
     // Idempotent: Enter closes, and the resulting focus loss calls it again.
     auto close = [this, editor] {

@@ -7,8 +7,15 @@
 #include "SketchView.h"
 #include "Theme.h"
 
+#include <core/Serialize.h>
+#include <core/Transform.h>
+
+#include <QCheckBox>
+#include <QClipboard>
 #include <QDesktopServices>
+#include <QGuiApplication>
 #include <QMenu>
+#include <QMimeData>
 #include <QDoubleSpinBox>
 #include <functional>
 #include <QSpinBox>
@@ -129,6 +136,14 @@ const std::pair<ToolKind, const char*> kToolNames[] = {
     {ToolKind::ChamferEqual, "chamfer"},
     {ToolKind::ChamferTwoDistances, "chamfer_2distances"},
     {ToolKind::ChamferDistanceAngle, "chamfer_angle"},
+    {ToolKind::Move, "move"},
+    {ToolKind::Rotate, "rotate"},
+    {ToolKind::Scale, "scale"},
+    {ToolKind::Mirror, "mirror"},
+    {ToolKind::RectangularPattern, "rectangular_pattern"},
+    {ToolKind::CircularPattern, "circular_pattern"},
+    {ToolKind::Offset, "offset"},
+    {ToolKind::Paste, "paste"},
     {ToolKind::Dimension, "dimension"},
     {ToolKind::Coincident, "coincident"},
     {ToolKind::HorizontalVertical, "horizontal_vertical"},
@@ -271,6 +286,58 @@ void MainWindow::newSketch()
     }
 }
 
+namespace
+{
+const QString kSketchMime = QStringLiteral("application/x-drawapp-sketch");
+}
+
+void MainWindow::copySelection()
+{
+    std::vector<core::Id> items;
+    for (core::Id id : m_view->selection()) {
+        if (m_doc->sketch().hasEntity(id) && !m_doc->sketch().isReference(id)) {
+            items.push_back(id);
+        }
+    }
+    if (items.empty()) {
+        statusBar()->showMessage(tr("Nothing selected to copy"), 3000);
+        return;
+    }
+    const QByteArray json =
+        QByteArray::fromStdString(core::toJson(core::xform::extract(m_doc->sketch(), items), true));
+    auto* mime = new QMimeData;
+    mime->setData(kSketchMime, json);
+    mime->setText(QString::fromUtf8(json));  // pasteable into scripts: s.paste(text, at=...)
+    QGuiApplication::clipboard()->setMimeData(mime);
+    statusBar()->showMessage(tr("Copied %n item(s)", nullptr, static_cast<int>(items.size())), 3000);
+}
+
+void MainWindow::pasteClipboard()
+{
+    const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
+    QByteArray json;
+    if (mime && mime->hasFormat(kSketchMime)) {
+        json = mime->data(kSketchMime);
+    }
+    else if (mime && mime->hasText()) {
+        json = mime->text().toUtf8();  // e.g. copied from s.extract()
+    }
+    core::Sketch fragment;
+    try {
+        fragment = core::fromJson(json.toStdString());
+    }
+    catch (const core::SketchError&) {
+        statusBar()->showMessage(tr("The clipboard has no sketch geometry"), 3000);
+        return;
+    }
+    if (fragment.entities().empty()) {
+        return;
+    }
+    m_view->setPasteFragment(std::move(fragment));
+    m_view->setTool(ToolKind::Paste);
+    m_view->setFocus();
+}
+
 void MainWindow::closeEvent(QCloseEvent* event)
 {
     if (maybeSave()) {
@@ -324,6 +391,20 @@ void MainWindow::createActions()
     del->setShortcutContext(Qt::WidgetShortcut);  // the view handles Delete/Backspace itself
     del->setShortcut(QKeySequence::Delete);
     connect(del, &QAction::triggered, m_view, &SketchView::deleteSelection);
+    editMenu->addSeparator();
+    // (Text fields such as the Python console keep these keys for their own text.)
+    auto* cut = editMenu->addAction(tr("Cu&t"));
+    cut->setShortcut(QKeySequence::Cut);
+    connect(cut, &QAction::triggered, this, [this] {
+        copySelection();
+        m_view->deleteSelection();
+    });
+    auto* copy = editMenu->addAction(tr("&Copy"));
+    copy->setShortcut(QKeySequence::Copy);
+    connect(copy, &QAction::triggered, this, &MainWindow::copySelection);
+    auto* paste = editMenu->addAction(tr("&Paste"));
+    paste->setShortcut(QKeySequence::Paste);
+    connect(paste, &QAction::triggered, this, &MainWindow::pasteClipboard);
 
     // --- Sketch tools ---
     auto* sketchMenu = menuBar()->addMenu(tr("&Sketch"));
@@ -434,6 +515,20 @@ void MainWindow::createActions()
                           {ToolKind::Extend, tr("Extend"), {}},
                           {ToolKind::Break, tr("Break"), {}},
                       });
+    toolbar->addSeparator();
+    addDropdown(toolbar, tr("Move"),
+                {
+                    {ToolKind::Move, tr("Move/Copy"), QKeySequence(Qt::Key_M)},
+                    {ToolKind::Rotate, tr("Rotate"), QKeySequence(Qt::SHIFT | Qt::Key_M)},
+                    {ToolKind::Scale, tr("Scale"), {}},
+                });
+    addTools(toolbar, {{ToolKind::Mirror, tr("Mirror"), {}}});
+    addDropdown(toolbar, tr("Pattern"),
+                {
+                    {ToolKind::RectangularPattern, tr("Rectangular Pattern"), {}},
+                    {ToolKind::CircularPattern, tr("Circular Pattern"), {}},
+                });
+    addTools(toolbar, {{ToolKind::Offset, tr("Offset"), {}}});
 
     // Tool options: only shown while a tool that uses them is active.
     auto* sidesBox = new QSpinBox(toolbar);
@@ -481,6 +576,62 @@ void MainWindow::createActions()
             [this](double v) { m_view->modifyOptions().chamferDistance2 = v; }, {ToolKind::ChamferTwoDistances});
     addSize(tr("Angle: "), QStringLiteral("°"), o.chamferAngle, 179.0,
             [this](double v) { m_view->modifyOptions().chamferAngle = v; }, {ToolKind::ChamferDistanceAngle});
+
+    // Move / scale / pattern / offset options.
+    auto showFor = [this](QAction* action, std::vector<ToolKind> kinds) {
+        action->setVisible(false);
+        connect(m_view, &SketchView::toolChanged, action, [action, kinds](ToolKind kind) {
+            action->setVisible(std::ranges::find(kinds, kind) != kinds.end());
+        });
+    };
+    auto addCount = [&](const QString& prefix, int value, int min, std::function<void(int)> set,
+                        std::vector<ToolKind> tools) {
+        auto* box = new QSpinBox(toolbar);
+        box->setRange(min, 1000);
+        box->setValue(value);
+        box->setPrefix(prefix);
+        connect(box, &QSpinBox::valueChanged, this, [this, set](int v) {
+            set(v);
+            m_view->refreshTool();  // previews follow
+        });
+        showFor(toolbar->addWidget(box), std::move(tools));
+    };
+    auto addValue = [&](const QString& prefix, const QString& suffix, double value, double min, double max,
+                        std::function<void(double)> set, std::vector<ToolKind> tools) {
+        auto* box = new QDoubleSpinBox(toolbar);
+        box->setRange(min, max);
+        box->setDecimals(3);
+        box->setValue(value);
+        box->setPrefix(prefix);
+        box->setSuffix(suffix);
+        connect(box, &QDoubleSpinBox::valueChanged, this, [this, set](double v) {
+            set(v);
+            m_view->refreshTool();
+        });
+        showFor(toolbar->addWidget(box), std::move(tools));
+    };
+    auto* copyBox = new QCheckBox(tr("Copy"), toolbar);
+    copyBox->setToolTip(tr("Copy the selection instead of moving it (or hold Ctrl on the last click)"));
+    connect(copyBox, &QCheckBox::toggled, this, [this](bool on) { m_view->modifyOptions().copy = on; });
+    showFor(toolbar->addWidget(copyBox), {ToolKind::Move, ToolKind::Rotate});
+    addValue(tr("Factor: "), {}, o.scaleFactor, 0.001, 1000.0, [this](double v) { m_view->modifyOptions().scaleFactor = v; },
+             {ToolKind::Scale});
+    addCount(tr("Count: "), o.patternCount, 1, [this](int v) { m_view->modifyOptions().patternCount = v; },
+             {ToolKind::RectangularPattern});
+    addValue(tr("Spacing: "), {}, o.patternSpacing, 0.001, 1e6,
+             [this](double v) { m_view->modifyOptions().patternSpacing = v; }, {ToolKind::RectangularPattern});
+    addValue(tr("Direction: "), QStringLiteral("°"), o.patternAngle, -360.0, 360.0,
+             [this](double v) { m_view->modifyOptions().patternAngle = v; }, {ToolKind::RectangularPattern});
+    addCount(tr("Rows: "), o.patternCount2, 1, [this](int v) { m_view->modifyOptions().patternCount2 = v; },
+             {ToolKind::RectangularPattern});
+    addValue(tr("Row spacing: "), {}, o.patternSpacing2, 0.001, 1e6,
+             [this](double v) { m_view->modifyOptions().patternSpacing2 = v; }, {ToolKind::RectangularPattern});
+    addCount(tr("Count: "), o.circularCount, 2, [this](int v) { m_view->modifyOptions().circularCount = v; },
+             {ToolKind::CircularPattern});
+    addValue(tr("Angle: "), QStringLiteral("°"), o.circularAngle, 0.001, 360.0,
+             [this](double v) { m_view->modifyOptions().circularAngle = v; }, {ToolKind::CircularPattern});
+    addValue(tr("Distance: "), {}, o.offsetDistance, 0.001, 1e6,
+             [this](double v) { m_view->modifyOptions().offsetDistance = v; }, {ToolKind::Offset});
 
     sketchMenu->addSeparator();
     addToolBarBreak();

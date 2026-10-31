@@ -1,13 +1,16 @@
 #pragma once
 
 #include <core/Builders.h>
+#include <core/Features.h>
 #include <core/Modify.h>
 #include <core/Sketch.h>
+#include <core/Transform.h>
 
 #include <QString>
 #include <QStringList>
 
 #include <array>
+#include <map>
 #include <vector>
 
 // The sketch-editing commands shared by the UI tools and the Python API. Each one edits the
@@ -56,6 +59,24 @@ public:
     core::modify::Corner chamfer(core::Id a, core::Vec2 nearA, core::Id b, core::Vec2 nearB,
                                  core::modify::ChamferKind kind, double value1, double value2 = 0.0);
 
+    // Copies, transforms and linked features (see core/Transform.h, core/Features.h). Copy and
+    // move maps turn by `angle` degrees about `about`, then shift by (dx, dy).
+    std::map<core::Id, core::Id> copy(const std::vector<core::Id>& items, double dx, double dy, double angle = 0.0,
+                                      core::Vec2 about = {});
+    void scale(const std::vector<core::Id>& items, double factor, core::Vec2 about);
+    std::map<core::Id, core::Id> mirror(const std::vector<core::Id>& items, core::Id line);
+    core::Id rectangularPattern(const std::vector<core::Id>& items, const core::feature::LinearPatternParams& p);
+    core::Id circularPattern(const std::vector<core::Id>& items, core::Id center,
+                             const core::feature::CircularPatternParams& p);
+    // Returns the pattern's id, which changes when the count does (the copies are remade).
+    core::Id setPattern(core::Id pattern, const core::feature::LinearPatternParams& p);
+    core::Id setPattern(core::Id pattern, const core::feature::CircularPatternParams& p);
+    core::Id offset(const std::vector<core::Id>& curves, double distance, core::Vec2 toward);
+    // Inserts clipboard contents (a sketch fragment, see core::xform::paste) centred at `at`.
+    std::map<core::Id, core::Id> paste(const core::Sketch& fragment, core::Vec2 at);
+
+    static core::Affine moveMap(double dx, double dy, double angle, core::Vec2 about);
+
     // Unchecked (inference while drawing); Document::addConstraint is the checked version.
     core::Id constrain(core::ConstraintType type, std::vector<core::Id> refs, double value = 0.0);
 
@@ -70,6 +91,9 @@ public:
     // e.g. "d17 = s.distance(l13, value=40, label=(0, 8))"
     static QString constraintCall(const core::Sketch& sketch, core::Id id);
     static QString pair(core::Vec2 v);  // "(x, y)"
+    static QString list(const core::Sketch& sketch, const std::vector<core::Id>& ids);  // "[l13, c14]"
+    // ", dx=.., dy=.., angle=.., about=(..)" for the parts that aren't zero.
+    static QString moveArgs(double dx, double dy, double angle, core::Vec2 about);
 
 private:
     void log(const QString& line)

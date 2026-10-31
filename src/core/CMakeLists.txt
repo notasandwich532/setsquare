@@ -3,6 +3,8 @@ add_library(drawcore STATIC
     Builders.h
     Dimensions.cpp
     Dimensions.h
+    Features.cpp
+    Features.h
     Geometry.cpp
     Geometry.h
     Modify.cpp
@@ -13,6 +15,8 @@ add_library(drawcore STATIC
     Sketch.h
     Solver.cpp
     Solver.h
+    Transform.cpp
+    Transform.h
 )
 
 target_include_directories(drawcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)  # #include <core/Sketch.h>

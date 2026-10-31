@@ -44,6 +44,15 @@ enum class ToolKind
     ChamferTwoDistances,
     ChamferDistanceAngle,
 
+    Move,
+    Rotate,
+    Scale,
+    Mirror,
+    RectangularPattern,
+    CircularPattern,
+    Offset,
+    Paste,
+
     Dimension,
     Coincident,
     HorizontalVertical,

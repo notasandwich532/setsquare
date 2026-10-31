@@ -19,7 +19,7 @@ namespace core
 
 inline constexpr int kFileVersion = 1;
 
-std::string toJson(const Sketch& sketch);
+std::string toJson(const Sketch& sketch, bool compact = false);  // compact: one line
 
 // Throws SketchError with a readable message for malformed or unsupported files.
 Sketch fromJson(const std::string& text);

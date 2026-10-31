@@ -75,7 +75,10 @@ Entity entityFromJson(const json& j)
 json constraintToJson(const Constraint& c)
 {
     json j{{"id", c.id}, {"type", toString(c.type)}, {"refs", c.refs}};
-    if (isDimension(c.type)) {
+    if (!c.params.empty()) {
+        j["params"] = c.params;
+    }
+    if (hasValue(c.type)) {
         j["value"] = c.value;
         if (c.labelX != 0.0 || c.labelY != 0.0) {
             j["label"] = {c.labelX, c.labelY};
@@ -97,6 +100,7 @@ Constraint constraintFromJson(const json& j)
     }
     c.refs = j.at("refs").get<std::vector<Id>>();
     c.value = j.value("value", 0.0);
+    c.params = j.value("params", std::vector<double>{});
     if (j.contains("label")) {
         const auto& label = j.at("label");
         c.labelX = label.at(0).get<double>();
@@ -110,7 +114,7 @@ Constraint constraintFromJson(const json& j)
 }
 }  // namespace
 
-std::string toJson(const Sketch& sketch)
+std::string toJson(const Sketch& sketch, bool compact)
 {
     json entities = json::array();
     for (const auto& [id, e] : sketch.entities()) {
@@ -129,7 +133,7 @@ std::string toJson(const Sketch& sketch)
     }
     doc["entities"] = std::move(entities);
     doc["constraints"] = std::move(constraints);
-    return doc.dump(2) + "\n";
+    return compact ? doc.dump() : doc.dump(2) + "\n";
 }
 
 Sketch fromJson(const std::string& text)

@@ -1,0 +1,408 @@
+// Copy / move / scale / mirror, linked patterns and offsets.
+
+#include <core/Builders.h>
+#include <core/Features.h>
+#include <core/Geometry.h>
+#include <core/Modify.h>
+#include <core/Serialize.h>
+#include <core/Solver.h>
+#include <core/Transform.h>
+
+#include <catch2/catch_approx.hpp>
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
+
+#include <algorithm>
+#include <cmath>
+
+using namespace core;
+using Catch::Approx;
+
+namespace
+{
+Vec2 at(const Sketch& s, Id p)
+{
+    return {s.point(p).x, s.point(p).y};
+}
+
+// Solves and checks the sketch is healthy: solved, nothing redundant or conflicting.
+SolveResult solveClean(Sketch& s)
+{
+    const SolveResult r = solve(s);
+    INFO("redundant " << r.redundant.size() << ", partly " << r.partiallyRedundant.size() << ", conflicting "
+                      << r.conflicting.size());
+    CHECK(r.ok);
+    CHECK(r.redundant.empty());
+    CHECK(r.partiallyRedundant.empty());
+    CHECK(r.conflicting.empty());
+    return r;
+}
+
+// Changes a feature's value the way the app does: its source stays put.
+void setValue(Sketch& s, Id feature, double value)
+{
+    s.setConstraintValue(feature, value);
+    if (s.constraint(feature).type != ConstraintType::Offset) {
+        feature::placeCopies(s, feature);
+    }
+    const SolveResult r = solveHolding(s, feature::sourcePoints(s, s.constraint(feature)));
+    CHECK(r.ok);
+    CHECK(r.redundant.empty());
+}
+
+// Drags a point and solves; returns whether it converged.
+bool drag(Sketch& s, Id point, double dx, double dy)
+{
+    Solver solver(s);
+    solver.beginDrag({point});
+    const bool ok = solver.dragTo(dx, dy);
+    solver.endDrag();
+    solver.writeBack(s);
+    return ok && solve(s).ok;
+}
+
+double lineDistance(const Sketch& s, Id line, Vec2 p)
+{
+    const Line& l = s.line(line);
+    const Vec2 a = at(s, l.p1), b = at(s, l.p2);
+    return std::abs((b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)) / std::hypot(b.x - a.x, b.y - a.y);
+}
+
+build::Rectangle rect(Sketch& s, double x0, double y0, double x1, double y1)
+{
+    return build::rectangle(s, s.addPoint(x0, y0), s.addPoint(x1, y1));
+}
+
+std::vector<Id> ids(const build::Rectangle& r)
+{
+    return {r.sides.begin(), r.sides.end()};
+}
+}  // namespace
+
+// ---------------------------------------------------------------------------------------------
+// Transforms
+// ---------------------------------------------------------------------------------------------
+
+TEST_CASE("Affine maps compose and mirror", "[transform]")
+{
+    const Affine r = Affine::rotation({1, 1}, 90);
+    const Vec2 p = r.apply({2, 1});
+    CHECK(p.x == Approx(1.0));
+    CHECK(p.y == Approx(2.0));
+    const Affine m = Affine::mirror({0, 0}, {0, 1});
+    CHECK(m.apply({3, 4}).x == Approx(-3.0));
+    CHECK(m.mirrors());
+    const Affine both = Affine::translation(1, 0).then(Affine::scaling({0, 0}, 2));
+    CHECK(both.apply({1, 1}).x == Approx(4.0));
+    CHECK(both.scale() == Approx(2.0));
+}
+
+TEST_CASE("Copying keeps internal constraints and scales dimensions", "[transform]")
+{
+    Sketch s;
+    const auto r = rect(s, 0, 0, 20, 10);
+    const Id width = s.addConstraint(ConstraintType::Distance, {r.sides[0]}, 20.0);
+    solveClean(s);
+
+    SECTION("translated")
+    {
+        const auto map = xform::copy(s, ids(r), Affine::translation(50, 0));
+        CHECK(map.contains(width));
+        CHECK(s.constraint(map.at(width)).value == Approx(20.0));
+        const SolveResult res = solveClean(s);
+        CHECK(res.dof == 2 * 3);  // two rectangles, each with a width
+        CHECK(at(s, map.at(r.corners[0])).x == Approx(50.0));
+    }
+    SECTION("scaled")
+    {
+        const auto map = xform::copy(s, ids(r), Affine::scaling({0, 0}, 2));
+        CHECK(s.constraint(map.at(width)).value == Approx(40.0));
+        solveClean(s);
+    }
+    SECTION("rotated 90 degrees: horizontal and vertical swap")
+    {
+        const auto map = xform::copy(s, ids(r), Affine::rotation({0, 0}, 90));
+        const auto horizontals = std::ranges::count_if(s.constraints(), [&](const auto& kv) {
+            return kv.second.type == ConstraintType::Horizontal;
+        });
+        CHECK(horizontals == 4);
+        CHECK(solveClean(s).dof == 6);
+    }
+    SECTION("rotated 30 degrees: horizontal and vertical are dropped")
+    {
+        const size_t before = s.constraints().size();
+        xform::copy(s, ids(r), Affine::rotation({0, 0}, 30));
+        CHECK(s.constraints().size() == before + 1);  // just the width
+        CHECK(solveClean(s).dof == 3 + 7);
+    }
+}
+
+TEST_CASE("Scaling in place scales the dimensions between the scaled entities", "[transform]")
+{
+    Sketch s;
+    const auto r = rect(s, 0, 0, 20, 10);
+    const Id width = s.addConstraint(ConstraintType::Distance, {r.sides[0]}, 20.0);
+    const Id circle = s.addCircle(10, 5, 2);
+    const Id radius = s.addConstraint(ConstraintType::Radius, {circle}, 2.0);
+    std::vector<Id> all = ids(r);
+    all.push_back(circle);
+    xform::apply(s, all, Affine::scaling({0, 0}, 1.5));
+    CHECK(s.constraint(width).value == Approx(30.0));
+    CHECK(s.constraint(radius).value == Approx(3.0));
+    CHECK(s.circle(circle).radius == Approx(3.0));
+    solveClean(s);
+    CHECK(at(s, r.corners[2]).x == Approx(30.0));
+}
+
+TEST_CASE("Mirroring ties the copy with symmetric constraints", "[transform][mirror]")
+{
+    Sketch s;
+    s.ensureOrigin();
+    const auto r = rect(s, 5, 0, 20, 10);
+    const Id arc = s.addArc(30, 5, 4, 0, 90);
+    const Id circle = s.addCircle(10, 20, 3);
+    std::vector<Id> sel = ids(r);
+    sel.push_back(arc);
+    sel.push_back(circle);
+    const SolveResult before = solveClean(s);
+
+    const auto map = xform::mirror(s, sel, s.yAxis());
+    const SolveResult after = solve(s);
+    CHECK(after.ok);
+    CHECK(after.redundant.empty());
+    CHECK(after.dof == before.dof);  // the mirror image adds no freedom
+    const ArcShape a = arcShape(s, map.at(arc));
+    CHECK(a.center.x == Approx(-30.0));
+    CHECK(a.radius == Approx(4.0));
+
+    REQUIRE(drag(s, r.corners[2], 5, 3));
+    CHECK(at(s, map.at(r.corners[2])).x == Approx(-at(s, r.corners[2]).x).margin(1e-6));
+    CHECK(at(s, map.at(r.corners[2])).y == Approx(at(s, r.corners[2]).y).margin(1e-6));
+}
+
+TEST_CASE("Points on the mirror line are shared", "[transform][mirror]")
+{
+    Sketch s;
+    s.ensureOrigin();
+    const Id l = s.addLine(s.origin(), s.addPoint(10, 10));
+    const auto map = xform::mirror(s, {l}, s.yAxis());
+    const Line copy = s.line(map.at(l));
+    CHECK(copy.p1 == s.origin());
+    CHECK(solveClean(s).dof == 2);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Patterns
+// ---------------------------------------------------------------------------------------------
+
+TEST_CASE("Rectangular pattern follows its source and spacing", "[pattern]")
+{
+    Sketch s;
+    const auto r = rect(s, 0, 0, 10, 5);
+    const Id circle = s.addCircle(5, 2.5, 1);
+    std::vector<Id> sel = ids(r);
+    sel.push_back(circle);
+    const int dof = solveClean(s).dof;
+
+    feature::LinearPatternParams p;
+    p.count = 3;
+    p.spacing = 20;
+    p.count2 = 2;
+    p.spacing2 = 15;
+    const Id k = feature::linearPattern(s, sel, p);
+    const feature::Pattern decoded = feature::pattern(s.constraint(k));
+    REQUIRE(decoded.copies.size() == 5);
+    CHECK(solveClean(s).dof == dof);
+
+    // Instance (2, 1): 40 across, 15 up.
+    const Id lastCircle = decoded.copies[4].back();
+    CHECK(at(s, s.circle(lastCircle).center).x == Approx(45.0));
+    CHECK(at(s, s.circle(lastCircle).center).y == Approx(17.5));
+
+    REQUIRE(drag(s, r.corners[2], 2, 1));  // the source's top-right corner
+    CHECK(s.circle(lastCircle).radius == Approx(1.0));
+    const Id copySide = decoded.copies[4][1];
+    CHECK(at(s, s.line(copySide).p1).x == Approx(at(s, r.corners[1]).x + 40.0).margin(1e-6));
+
+    setValue(s, k, 25.0);
+    CHECK(at(s, s.circle(lastCircle).center).x == Approx(55.0));
+
+    p.count = 2;
+    const Id k2 = feature::setLinearPattern(s, k, p);
+    CHECK(feature::pattern(s.constraint(k2)).copies.size() == 3);
+    CHECK(solveClean(s).dof == dof);
+    CHECK(!s.hasEntity(lastCircle));
+}
+
+TEST_CASE("Circular pattern rotates copies about the centre", "[pattern]")
+{
+    Sketch s;
+    s.ensureOrigin();
+    const Id circle = s.addCircle(20, 0, 2);
+    const Id arc = s.addArc(30, 0, 3, 0, 120);
+    const int dof = solveClean(s).dof;
+
+    feature::CircularPatternParams p;
+    p.count = 4;
+    const Id k = feature::circularPattern(s, {circle, arc}, s.origin(), p);
+    const feature::Pattern decoded = feature::pattern(s.constraint(k));
+    REQUIRE(decoded.copies.size() == 3);
+    CHECK(solveClean(s).dof == dof);
+    const Vec2 c1 = at(s, s.circle(decoded.copies[0][0]).center);
+    CHECK(c1.x == Approx(0.0).margin(1e-9));
+    CHECK(c1.y == Approx(20.0));
+
+    setValue(s, k, 90.0);  // spread over a quarter turn instead
+    const Vec2 last = at(s, s.circle(decoded.copies[2][0]).center);
+    CHECK(last.x == Approx(0.0).margin(1e-9));
+    CHECK(last.y == Approx(20.0));
+
+    REQUIRE(drag(s, s.arc(arc).end, 1, 1));
+    CHECK(arcShape(s, decoded.copies[1][1]).radius == Approx(arcShape(s, arc).radius).margin(1e-6));
+}
+
+TEST_CASE("Patterned arcs can be dragged after the pattern changes", "[pattern]")
+{
+    Sketch s;
+    s.ensureOrigin();
+    const Id arc = s.addArc(30, 0, 3, 0, 120);
+    const int n = GENERATE(0, 2, 4);
+    const double total = GENERATE(360.0, 90.0);
+    const bool change = GENERATE(false, true);
+    if (n > 0) {
+        const Id k = feature::circularPattern(s, {arc}, s.origin(), {n, 360});
+        if (change) {
+            setValue(s, k, total);
+        }
+        else {
+            feature::setCircularPattern(s, k, {n, total});
+            solve(s);
+        }
+    }
+    INFO("n " << n << " total " << total << " change " << change);
+    CHECK(drag(s, s.arc(arc).end, 1, 1));
+    CHECK(drag(s, s.arc(arc).start, 1, 1));
+    CHECK(drag(s, s.arc(arc).center, 1, 1));
+}
+
+TEST_CASE("Patterned slots: arcs joined to lines aren't over-constrained", "[pattern]")
+{
+    Sketch s;
+    const auto slot = build::slot(s, s.addPoint(0, 0), s.addPoint(20, 0), 6);
+    const int dof = solveClean(s).dof;
+    feature::LinearPatternParams p;
+    p.angle = 90;
+    feature::linearPattern(s, slot.curves, p);
+    CHECK(solveClean(s).dof == dof);
+}
+
+TEST_CASE("Deleting a pattern leaves the copies, unlinked", "[pattern]")
+{
+    Sketch s;
+    const Id l = s.addLine(0, 0, 10, 0);
+    const Id k = feature::linearPattern(s, {l}, {});
+    s.remove(k);
+    CHECK(solveClean(s).dof == 4 * 3);
+}
+
+TEST_CASE("Patterns survive a save and load", "[pattern][serialize]")
+{
+    Sketch s;
+    s.ensureOrigin();
+    const Id l = s.addLine(10, 0, 15, 0);
+    const Id k = feature::circularPattern(s, {l}, s.origin(), {5, 180});
+    Sketch loaded = fromJson(toJson(s));
+    REQUIRE(loaded.hasConstraint(k));
+    CHECK(loaded.constraint(k).params == s.constraint(k).params);
+    CHECK(solveClean(loaded).dof == 4);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Offsets
+// ---------------------------------------------------------------------------------------------
+
+TEST_CASE("Offset a rectangle outwards and inwards", "[offset]")
+{
+    Sketch s;
+    const auto r = rect(s, 0, 0, 20, 10);
+    const int dof = solveClean(s).dof;
+
+    const bool outside = GENERATE(true, false);
+    const Id k = feature::offset(s, ids(r), 2.0, outside ? Vec2{-5, 5} : Vec2{2, 5});
+    CHECK(solveClean(s).dof == dof);
+    const feature::OffsetRefs refs = feature::offsetRefs(s.constraint(k));
+    REQUIRE(refs.offsets.size() == 4);
+    const Line bottom = s.line(refs.offsets[0]);
+    CHECK(at(s, bottom.p1).y == Approx(outside ? -2.0 : 2.0));
+    CHECK(at(s, bottom.p1).x == Approx(outside ? -2.0 : 2.0));
+
+    setValue(s, k, 1.0);
+    CHECK(at(s, s.line(refs.offsets[0]).p1).y == Approx(outside ? -1.0 : 1.0));
+    REQUIRE(drag(s, r.corners[2], 5, 5));
+    for (size_t i = 0; i < 4; ++i) {
+        const Line o = s.line(refs.offsets[i]);
+        CHECK(lineDistance(s, refs.sources[i], at(s, o.p1)) == Approx(1.0));
+        CHECK(lineDistance(s, refs.sources[i], at(s, o.p2)) == Approx(1.0));
+    }
+}
+
+TEST_CASE("Offset chains with arcs", "[offset]")
+{
+    Sketch s;
+    std::vector<Id> curves;
+    Vec2 toward;
+    SECTION("slot (smooth line-arc joins, closed)")
+    {
+        curves = build::slot(s, s.addPoint(0, 0), s.addPoint(20, 0), 6).curves;
+        toward = {10, 10};
+    }
+    SECTION("arc slot (smooth arc-arc joins, closed)")
+    {
+        curves = build::arcSlot(s, s.addPoint(0, 0), {20, 0}, {0, 20}, 4).curves;
+        toward = {0, 0};
+    }
+    SECTION("filleted corner (open)")
+    {
+        const Id a = s.addLine(0, 0, 20, 0);
+        const Id b = s.addLine(20, 0, 20, 20);
+        s.addConstraint(ConstraintType::Coincident, {s.line(a).p2, s.line(b).p1});
+        const auto corner = modify::fillet(s, a, {5, 0}, b, {20, 15}, 5);
+        curves = feature::chainAt(s, corner.joint);
+        REQUIRE(curves.size() == 3);
+        toward = {10, 5};
+    }
+    SECTION("sharp line-arc corner (open)")
+    {
+        const Id a = s.addLine(-20, 0, 0, 0);
+        const Id arc = s.addArc(s.addPoint(0, 10), s.line(a).p2, s.addPoint(10, 10));
+        curves = {a, arc};
+        toward = {-10, 5};
+    }
+    const int dof = solveClean(s).dof;
+    const Id k = feature::offset(s, curves, 1.5, toward);
+    CHECK(solveClean(s).dof == dof);
+    setValue(s, k, 2.5);
+    const feature::OffsetRefs refs = feature::offsetRefs(s.constraint(k));
+    for (size_t i = 0; i < refs.sources.size(); ++i) {
+        if (s.entity(refs.sources[i]).kind() == EntityKind::Arc) {
+            CHECK(std::abs(arcShape(s, refs.offsets[i]).radius - arcShape(s, refs.sources[i]).radius)
+                  == Approx(2.5));
+        }
+        else {
+            const Line o = s.line(refs.offsets[i]);
+            CHECK(lineDistance(s, refs.sources[i], at(s, o.p1)) == Approx(2.5));
+            CHECK(lineDistance(s, refs.sources[i], at(s, o.p2)) == Approx(2.5));
+        }
+    }
+}
+
+TEST_CASE("Offset a circle", "[offset]")
+{
+    Sketch s;
+    const Id c = s.addCircle(0, 0, 10);
+    const Id k = feature::offset(s, {c}, 3, {0, 0});
+    const Id inner = feature::offsetRefs(s.constraint(k)).offsets[0];
+    CHECK(s.circle(inner).radius == Approx(7.0));
+    CHECK(solveClean(s).dof == 3);
+    CHECK_THROWS_AS(feature::offset(s, {c}, 12, {0, 0}), SketchError);
+}

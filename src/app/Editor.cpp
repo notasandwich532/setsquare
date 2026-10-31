@@ -1,5 +1,7 @@
 #include "Editor.h"
 
+#include <core/Serialize.h>
+
 #include <format>
 
 using core::ConstraintType;
@@ -274,6 +276,140 @@ modify::Corner Editor::chamfer(Id a, core::Vec2 nearA, Id b, core::Vec2 nearB, m
     log(QStringLiteral("%1 = s.chamfer(%2, %3, %4%5, near=(%6, %7))")
             .arg(name(m_sketch, c.joint), na, nb, number(value1), extra, pair(nearA), pair(nearB)));
     return c;
+}
+
+QString Editor::list(const core::Sketch& s, const std::vector<Id>& ids)
+{
+    QStringList names;
+    for (Id id : ids) {
+        names << name(s, id);
+    }
+    return QLatin1Char('[') + names.join(QStringLiteral(", ")) + QLatin1Char(']');
+}
+
+QString Editor::moveArgs(double dx, double dy, double angle, core::Vec2 about)
+{
+    QString args;
+    if (dx != 0.0) {
+        args += QStringLiteral(", dx=") + number(dx);
+    }
+    if (dy != 0.0) {
+        args += QStringLiteral(", dy=") + number(dy);
+    }
+    if (angle != 0.0) {
+        args += QStringLiteral(", angle=") + number(angle);
+        if (about.x != 0.0 || about.y != 0.0) {
+            args += QStringLiteral(", about=") + pair(about);
+        }
+    }
+    return args;
+}
+
+core::Affine Editor::moveMap(double dx, double dy, double angle, core::Vec2 about)
+{
+    return core::Affine::rotation(about, angle).then(core::Affine::translation(dx, dy));
+}
+
+namespace xform = core::xform;
+namespace feature = core::feature;
+
+std::map<Id, Id> Editor::copy(const std::vector<Id>& items, double dx, double dy, double angle, core::Vec2 about)
+{
+    const QString what = list(m_sketch, items);
+    std::map<Id, Id> map = xform::copy(m_sketch, items, moveMap(dx, dy, angle, about));
+    log(QStringLiteral("s.copy(%1%2)").arg(what, moveArgs(dx, dy, angle, about)));
+    return map;
+}
+
+void Editor::scale(const std::vector<Id>& items, double factor, core::Vec2 about)
+{
+    xform::apply(m_sketch, items, core::Affine::scaling(about, factor));
+    QString call = QStringLiteral("s.scale(%1, %2").arg(list(m_sketch, items), number(factor));
+    if (about.x != 0.0 || about.y != 0.0) {
+        call += QStringLiteral(", about=") + pair(about);
+    }
+    log(call + QLatin1Char(')'));
+}
+
+std::map<Id, Id> Editor::mirror(const std::vector<Id>& items, Id line)
+{
+    const QString what = list(m_sketch, items);
+    std::map<Id, Id> map = xform::mirror(m_sketch, items, line);
+    log(QStringLiteral("s.mirror(%1, %2)").arg(what, name(m_sketch, line)));
+    return map;
+}
+
+namespace
+{
+QString linearArgs(const feature::LinearPatternParams& p)
+{
+    QString args = QStringLiteral("count=%1, spacing=%2").arg(p.count).arg(Editor::number(p.spacing));
+    if (p.angle != 0.0) {
+        args += QStringLiteral(", angle=") + Editor::number(p.angle);
+    }
+    if (p.count2 != 1) {
+        args += QStringLiteral(", count2=%1, spacing2=%2").arg(p.count2).arg(Editor::number(p.spacing2));
+    }
+    return args;
+}
+
+QString circularArgs(const feature::CircularPatternParams& p)
+{
+    QString args = QStringLiteral("count=%1").arg(p.count);
+    if (p.angle != 360.0) {
+        args += QStringLiteral(", angle=") + Editor::number(p.angle);
+    }
+    return args;
+}
+}  // namespace
+
+Id Editor::rectangularPattern(const std::vector<Id>& items, const feature::LinearPatternParams& p)
+{
+    const QString what = list(m_sketch, items);
+    const Id id = feature::linearPattern(m_sketch, items, p);
+    log(QStringLiteral("%1 = s.rectangular_pattern(%2, %3)").arg(name(m_sketch, id), what, linearArgs(p)));
+    return id;
+}
+
+Id Editor::circularPattern(const std::vector<Id>& items, Id center, const feature::CircularPatternParams& p)
+{
+    const QString what = list(m_sketch, items);
+    const Id id = feature::circularPattern(m_sketch, items, center, p);
+    log(QStringLiteral("%1 = s.circular_pattern(%2, %3, %4)")
+            .arg(name(m_sketch, id), what, name(m_sketch, center), circularArgs(p)));
+    return id;
+}
+
+Id Editor::setPattern(Id pattern, const feature::LinearPatternParams& p)
+{
+    const QString what = name(m_sketch, pattern);
+    const Id id = feature::setLinearPattern(m_sketch, pattern, p);
+    log(QStringLiteral("%1 = s.set_pattern(%2, %3)").arg(name(m_sketch, id), what, linearArgs(p)));
+    return id;
+}
+
+Id Editor::setPattern(Id pattern, const feature::CircularPatternParams& p)
+{
+    const QString what = name(m_sketch, pattern);
+    const Id id = feature::setCircularPattern(m_sketch, pattern, p);
+    log(QStringLiteral("%1 = s.set_pattern(%2, %3)").arg(name(m_sketch, id), what, circularArgs(p)));
+    return id;
+}
+
+Id Editor::offset(const std::vector<Id>& curves, double distance, core::Vec2 toward)
+{
+    const QString what = list(m_sketch, curves);
+    const Id id = feature::offset(m_sketch, curves, distance, toward);
+    log(QStringLiteral("%1 = s.offset(%2, %3, toward=%4)").arg(name(m_sketch, id), what, number(distance), pair(toward)));
+    return id;
+}
+
+std::map<Id, Id> Editor::paste(const core::Sketch& fragment, core::Vec2 at)
+{
+    std::map<Id, Id> map = xform::paste(m_sketch, fragment, at);
+    // The fragment travels as JSON (single-quoted: it has no single quotes or backslashes).
+    log(QStringLiteral("s.paste('%1', at=%2)").arg(QString::fromStdString(core::toJson(fragment, true)), pair(at)));
+    return map;
 }
 
 Id Editor::constrain(ConstraintType type, std::vector<Id> refs, double value)

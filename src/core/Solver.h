@@ -1,7 +1,9 @@
 #pragma once
 
+#include "Geometry.h"
 #include "Sketch.h"
 
+#include <functional>
 #include <memory>
 #include <set>
 #include <vector>
@@ -43,6 +45,8 @@ public:
     // (x, y) + offset, so a free circle grows/shrinks about its centre.
     void beginDragEdge(Id roundEntity, double x, double y);
     bool dragTo(double dx, double dy);  // returns false if the solver could not converge
+    // Like dragTo, but each target is `to` of where it started (e.g. a rotation).
+    bool dragMap(const std::function<Vec2(Vec2)>& to);
     void endDrag();
 
 private:
@@ -52,5 +56,9 @@ private:
 
 // Convenience: build, solve, and write back when the solve succeeded.
 SolveResult solve(Sketch& sketch);
+
+// Like solve, but where the sketch has freedom left, the given points stay put if they can
+// (e.g. a pattern's source when its spacing changes, so the copies move instead).
+SolveResult solveHolding(Sketch& sketch, const std::vector<Id>& points);
 
 }  // namespace core

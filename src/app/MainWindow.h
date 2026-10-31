@@ -43,6 +43,10 @@ private:
     void open();
     void newSketch();
 
+    // Clipboard: the selection (and the constraints among it) as a sketch fragment.
+    void copySelection();
+    void pasteClipboard();  // starts the Paste tool with the clipboard's fragment
+
     Document* m_doc = nullptr;
     SketchView* m_view = nullptr;
     QLabel* m_hintLabel = nullptr;

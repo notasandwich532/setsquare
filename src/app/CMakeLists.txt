@@ -36,6 +36,8 @@ add_library(drawapp_lib STATIC
     tools/ShapeTools.cpp
     tools/ShapeTools.h
     tools/Tool.h
+    tools/TransformTools.cpp
+    tools/TransformTools.h
 )
 target_include_directories(drawapp_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(drawapp_lib PUBLIC drawdoc drawscript Qt6::Widgets)

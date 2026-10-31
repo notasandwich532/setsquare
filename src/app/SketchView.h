@@ -55,6 +55,13 @@ public:
 
     // --- dimensions ---
     void editDimension(core::Id dimension);  // inline value editor at the label
+    // A dimension's or feature's value, in an inline editor centred at `at` (screen).
+    void editValue(core::Id constraint, QPointF at);
+    // Patterns: a settings dialog; offsets: the inline distance editor.
+    void editFeature(core::Id feature);
+
+    // What Paste places (set before switching to ToolKind::Paste).
+    void setPasteFragment(core::Sketch fragment);
     QString formatDimension(const core::Constraint& c) const;
     void drawDimension(QPainter& painter, const core::DimensionLayout& layout, const QString& text,
                        const QColor& color, QRectF* textRect = nullptr) const;
@@ -85,13 +92,25 @@ public:
     int polygonSides() const { return m_polygonSides; }
     void setPolygonSides(int sides);
 
-    // Default sizes for fillets and chamfers (each is then editable as a dimension).
+    // Settings for the modify tools, from the toolbar: default sizes for fillets and chamfers
+    // (each is then editable as a dimension), and the move/scale/pattern/offset options.
     struct ModifyOptions
     {
         double filletRadius = 5.0;
         double chamferDistance = 5.0;
         double chamferDistance2 = 5.0;
         double chamferAngle = 45.0;
+
+        bool copy = false;  // move/rotate copy the selection rather than moving it
+        double scaleFactor = 2.0;
+        int patternCount = 3;
+        double patternSpacing = 10.0;
+        double patternAngle = 0.0;
+        int patternCount2 = 1;
+        double patternSpacing2 = 10.0;
+        int circularCount = 6;
+        double circularAngle = 360.0;
+        double offsetDistance = 5.0;
     };
     ModifyOptions& modifyOptions() { return m_modifyOptions; }
     const ModifyOptions& modifyOptions() const { return m_modifyOptions; }
@@ -153,6 +172,7 @@ private:
     int m_polygonSides = 6;
     ModifyOptions m_modifyOptions;
     bool m_showConstraints = true;
+    core::Sketch m_pasteFragment;
 
     // Constraint symbols and dimension labels, laid out in screen space. Computed on demand for
     // both painting and picking, so picking never sees a stale layout.

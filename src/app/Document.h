@@ -63,7 +63,8 @@ public:
                            QString* error = nullptr, double labelX = 0.0, double labelY = 0.0,
                            std::uint8_t flip = 0);
 
-    // Changes a dimension, rejecting values the solver can't satisfy.
+    // Changes a dimension or feature value (pattern spacing/angle, offset distance), rejecting
+    // values the solver can't satisfy. A feature's source geometry stays put.
     bool setDimensionValue(core::Id dimension, double value, QString* error = nullptr);
 
     // Moving a dimension label (no solve); one undo step per drag.
@@ -75,6 +76,9 @@ public:
     void beginDrag(const std::vector<core::Id>& points);
     void beginDragEdge(core::Id roundEntity, double x, double y);
     void dragTo(double dx, double dy);
+    // Moves the dragged points rigidly: turned by `angle` degrees about `about`, then shifted.
+    // Recorded as s.move(...).
+    void dragMove(double dx, double dy, double angle, core::Vec2 about);
     void endDrag();
     void cancelDrag();  // restores the sketch to how it was when the drag began
     bool isDragging() const { return m_dragSolver != nullptr; }
@@ -110,7 +114,8 @@ private:
     void commit(core::Sketch next);
     void record(const QString& python);
     // Commits a solved working copy if it isn't more over-constrained than the current sketch.
-    bool commitChecked(core::Sketch working, QString* error);
+    // `hold`: points to keep in place where the sketch leaves a choice.
+    bool commitChecked(core::Sketch working, QString* error, const std::vector<core::Id>& hold = {});
     void resolve();
 
     core::Sketch m_sketch;
@@ -140,6 +145,9 @@ private:
     core::Id m_dragEdge = core::kNoId;
     double m_dragGrabX = 0.0, m_dragGrabY = 0.0;
     double m_dragDx = 0.0, m_dragDy = 0.0;
+    bool m_dragIsMove = false;  // dragMove() rather than dragTo()
+    double m_dragAngle = 0.0;
+    core::Vec2 m_dragAbout;
     core::Id m_labelDimension = core::kNoId;
 
     int m_transactionDepth = 0;

@@ -11,8 +11,8 @@ class Document;
 class QListWidget;
 class SketchView;
 
-// Lists the sketch's constraints and dimensions. Selection is shared with the canvas;
-// double-click edits a dimension, Delete removes.
+// Lists the sketch's constraints, dimensions and features (patterns, offsets). Selection is
+// shared with the canvas; double-click edits a dimension or feature, Delete removes.
 class ConstraintPanel : public QWidget
 {
     Q_OBJECT
@@ -36,6 +36,7 @@ private:
     {
         core::Id id;
         double value;
+        std::vector<double> params;
         bool conflicting;
         bool redundant;
         bool operator==(const Shown&) const = default;

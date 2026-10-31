@@ -7,6 +7,7 @@
 #include "tools/ModifyTools.h"
 #include "tools/SelectTool.h"
 #include "tools/ShapeTools.h"
+#include "tools/TransformTools.h"
 
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -148,6 +149,14 @@ void SketchView::setTool(ToolKind kind)
         case ToolKind::ChamferDistanceAngle:
             m_tool = std::make_unique<CornerTool>(*this, CornerTool::Kind::ChamferDistanceAngle);
             break;
+        case ToolKind::Move: m_tool = std::make_unique<MoveTool>(*this, false); break;
+        case ToolKind::Rotate: m_tool = std::make_unique<MoveTool>(*this, true); break;
+        case ToolKind::Scale: m_tool = std::make_unique<ScaleTool>(*this); break;
+        case ToolKind::Mirror: m_tool = std::make_unique<MirrorTool>(*this); break;
+        case ToolKind::RectangularPattern: m_tool = std::make_unique<PatternTool>(*this, false); break;
+        case ToolKind::CircularPattern: m_tool = std::make_unique<PatternTool>(*this, true); break;
+        case ToolKind::Offset: m_tool = std::make_unique<OffsetTool>(*this); break;
+        case ToolKind::Paste: m_tool = std::make_unique<PasteTool>(*this, m_pasteFragment); break;
         case ToolKind::Dimension: m_tool = std::make_unique<DimensionTool>(*this); break;
         default: m_tool = std::make_unique<ConstraintTool>(*this, kind); break;
     }
@@ -157,6 +166,11 @@ void SketchView::setTool(ToolKind kind)
     emit toolChanged(kind);
     m_tool->activate();
     refreshTool();
+}
+
+void SketchView::setPasteFragment(core::Sketch fragment)
+{
+    m_pasteFragment = std::move(fragment);
 }
 
 QString SketchView::hint() const

@@ -28,18 +28,22 @@ geometry tests, GUI tool tests, and Python scenario scripts.
 - **Chamfer:** equal distance, distance-distance, and distance-angle, kept as construction the same
   way.
 
-## M8: Transform family
-- **Solver support:** custom PlaneGCS constraints (translation, rotation, scale relationships)
-  whose parameters can be shared between many constraints and driven by one dimension.
-- **Move/Copy** tool: translate or rotate a selection, with a "create copy" option.
-- **Clipboard** copy and paste (Ctrl+C/V). The paste follows the cursor; internal constraints come
-  along with the copy.
-- **Scale** about a point. Dimensions inside the selection scale with it.
-- **Mirror** about a line, linked by symmetric constraints.
-- **Rectangular and circular patterns,** linked: one spacing/angle parameter drives every copy.
-  Changing the count regenerates the copies.
-- **Offset,** linked: one offset dimension drives the whole chain (lines go parallel, arcs
-  concentric, corners meet).
+## M8: Transform family (done)
+- **Feature constraints:** a pattern or offset is one constraint (with a value and settings) that
+  the solver expands into per-point equations, including custom PlaneGCS constraints for rotated
+  copies. Arc ends and smooth joins get exactly as many equations as they need, so linked copies
+  add no freedom and no redundancy. Changing the value keeps the original in place.
+- **Move/Copy** (M) and **Rotate** (Shift+M): base point then target, or centre, reference and new
+  direction (Shift snaps 15°). The move drags the real geometry live; the Copy option (or Ctrl on
+  the last click) copies instead.
+- **Clipboard** copy, cut and paste (Ctrl+C/X/V). The paste follows the cursor; internal
+  constraints come along with the copy.
+- **Scale** about a clicked point. Dimensions inside the selection scale with it.
+- **Mirror** about a line (or axis), linked by symmetric constraints (equal for circles).
+- **Rectangular and circular patterns,** linked: one spacing/angle value drives every copy.
+  Changing the count (double-click the pattern in the constraints panel) regenerates the copies.
+- **Offset,** linked: one distance drives the whole chain (lines go parallel, arcs concentric,
+  corners meet).
 
 ## M9: New curve types
 - **Ellipse** and elliptical arc, with major/minor radius dimensions.

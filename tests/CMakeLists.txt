@@ -9,6 +9,7 @@ set(QT_BIN_DIR "${QT6_INSTALL_PREFIX}/${QT6_INSTALL_BINS}")
 add_executable(core_tests
     core/test_builders.cpp
     core/test_dimensions.cpp
+    core/test_features.cpp
     core/test_geometry.cpp
     core/test_modify.cpp
     core/test_planegcs.cpp
@@ -31,6 +32,7 @@ add_executable(app_tests
     app/test_scripting.cpp
     app/test_shape_tools.cpp
     app/test_tools.cpp
+    app/test_transform_tools.cpp
 )
 target_link_libraries(app_tests PRIVATE drawapp_lib Qt6::Test Catch2::Catch2)
 drawapp_warnings(app_tests)
