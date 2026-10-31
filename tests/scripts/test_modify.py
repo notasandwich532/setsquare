@@ -42,6 +42,16 @@ pieces = s.break_curve(h, near=(10, 10))
 assert len(pieces) == 2
 clean()
 
+# Trim to construction: the piece stays, dashed.
+doc.new()
+h = s.line((0, 10), (50, 10))
+s.line((20, 0), (20, 20))
+before = len(s.lines)
+s.trim(h, near=(40, 10), construction=True)
+assert len(s.lines) == before + 1
+assert sum(1 for l in s.lines if l.construction) == 1
+clean()
+
 # Fillet two crossing lines needs to know which quadrant.
 doc.new()
 a = s.line((-20, 0), (20, 0))

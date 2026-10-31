@@ -36,6 +36,7 @@ enum class ToolKind
     SlotArcCenter,
 
     Trim,
+    TrimToConstruction,
     Extend,
     Break,
     Fillet,

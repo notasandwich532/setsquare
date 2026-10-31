@@ -679,15 +679,16 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
             });
         }, py::arg("start"), py::arg("end"), py::arg("through"), py::arg("width"),
              "Arc slot along the arc through three points.")
-        .def("trim", [](const SketchH&, py::handle curve, py::handle near) {
+        .def("trim", [](const SketchH&, py::handle curve, py::handle near, bool construction) {
             const Id id = idOf(curve);
             const core::Vec2 at = vecArg(near);
             editReturningId("Trim", [&](Editor& ed) {
-                ed.trim(id, at);
+                ed.trim(id, at, construction);
                 return id;
             });
-        }, py::arg("curve"), py::arg("near"),
-             "Remove the part of a curve around `near`, up to where other curves cross it.")
+        }, py::arg("curve"), py::arg("near"), py::arg("construction") = false,
+             "Remove the part of a curve around `near`, up to where other curves cross it "
+             "(or with construction=True, keep it as construction geometry).")
         .def("extend", [](const SketchH&, py::handle curve, py::handle near) {
             const Id id = idOf(curve);
             const core::Vec2 at = vecArg(near);

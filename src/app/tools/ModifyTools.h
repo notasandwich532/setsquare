@@ -17,6 +17,7 @@ public:
     enum class Op
     {
         Trim,
+        TrimToConstruction,
         Extend,
         Break,
     };

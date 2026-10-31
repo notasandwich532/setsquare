@@ -174,7 +174,10 @@ TEST_CASE("Replaying recorded modify tools reproduces the sketch", "[modify][rec
     QTest::keyClick(&f.view, Qt::Key_Escape);
     f.view.setTool(ToolKind::Trim);
     f.click(30, 45);  // the bit poking out of the top
-    REQUIRE(f.recorded.size() >= 5);
+    f.view.setTool(ToolKind::TrimToConstruction);
+    f.click(30, 5);  // the bit below the bottom edge, kept as construction
+    CHECK(f.count(EntityKind::Line, true) >= 1);
+    REQUIRE(f.recorded.size() >= 6);
 
     Document replay;
     script::setDocument(&replay);

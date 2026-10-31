@@ -35,6 +35,8 @@ QString CurveOpTool::hint() const
 {
     switch (m_op) {
         case Op::Trim: return QObject::tr("Trim: click the part of a curve to remove");
+        case Op::TrimToConstruction:
+            return QObject::tr("Trim to construction: click the part of a curve to turn into construction");
         case Op::Extend: return QObject::tr("Extend: click near the end of a line or arc to extend");
         case Op::Break: return QObject::tr("Break: click a curve to split it where other curves cross it");
     }
@@ -70,6 +72,9 @@ void CurveOpTool::press(const ToolEvent& e)
     const Vec2 at = e.world;
     switch (m_op) {
         case Op::Trim: view().tryEdit(QObject::tr("Trim"), [&](Editor& ed) { ed.trim(curve, at); }); break;
+        case Op::TrimToConstruction:
+            view().tryEdit(QObject::tr("Trim"), [&](Editor& ed) { ed.trim(curve, at, true); });
+            break;
         case Op::Extend: view().tryEdit(QObject::tr("Extend"), [&](Editor& ed) { ed.extend(curve, at); }); break;
         case Op::Break: view().tryEdit(QObject::tr("Break"), [&](Editor& ed) { ed.breakCurve(curve, at); }); break;
     }
@@ -87,6 +92,10 @@ void CurveOpTool::paintOverlay(QPainter& painter)
         case Op::Trim:
             drawPolyline(view(), painter, modify::trimPreview(s, m_hover, m_mouse),
                          QPen(theme::canvas().conflict, 3.0, Qt::SolidLine, Qt::RoundCap));
+            break;
+        case Op::TrimToConstruction:
+            drawPolyline(view(), painter, modify::trimPreview(s, m_hover, m_mouse),
+                         QPen(theme::canvas().construction, 3.0, Qt::DashLine, Qt::RoundCap));
             break;
         case Op::Extend:
             drawPolyline(view(), painter, modify::extendPreview(s, m_hover, m_mouse),

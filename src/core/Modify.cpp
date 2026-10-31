@@ -360,6 +360,19 @@ void trim(Sketch& s, Id curve, Vec2 near)
     }
 }
 
+Id trimToConstruction(Sketch& s, Id curve, Vec2 near)
+{
+    if (spanAt(s, curve, near).whole) {
+        s.entity(curve).construction = true;
+        return curve;
+    }
+    // Split at the crossings, then turn the piece that was clicked into construction.
+    const std::vector<Id> pieces = breakCurve(s, curve, near);
+    const Id clicked = *std::ranges::min_element(pieces, {}, [&](Id p) { return distanceTo(s, p, near); });
+    s.entity(clicked).construction = true;
+    return clicked;
+}
+
 std::vector<Vec2> trimPreview(const Sketch& s, Id curve, Vec2 near)
 {
     if (!s.hasEntity(curve) || s.entity(curve).kind() == EntityKind::Point) {

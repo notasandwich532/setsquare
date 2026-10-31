@@ -100,6 +100,36 @@ TEST_CASE("Trim the middle of a line leaves two collinear pieces", "[modify][tri
     REQUIRE(solve(s).ok);
 }
 
+TEST_CASE("Trim to construction keeps the piece, dashed and still joined", "[modify][trim]")
+{
+    Sketch s;
+    const Id h = s.addLine(0, 0, 30, 0);
+    s.addLine(10, -5, 10, 5);
+    s.addLine(20, -5, 20, 5);
+    const Id piece = mod::trimToConstruction(s, h, {15, 0});
+    CHECK(s.entity(piece).construction);
+    CHECK(countKind(s, EntityKind::Line, true) == 1);
+    CHECK(countKind(s, EntityKind::Line, false) == 4);  // h's two ends + the verticals
+    const Line l = s.line(piece);
+    CHECK(pos(s, l.p1).x == Approx(10.0));
+    CHECK(pos(s, l.p2).x == Approx(20.0));
+    requireClean(s, 16 - 2 - 2);  // 8 points; pieces collinear (2), cut points on the verticals (2)
+
+    // A circle: the clicked part becomes a construction arc, the rest a solid arc.
+    Sketch t;
+    const Id c = t.addCircle(0, 0, 10);
+    t.addLine(-20, 0, 20, 0);
+    mod::trimToConstruction(t, c, {0, -10});
+    CHECK(countKind(t, EntityKind::Arc, true) == 1);
+    CHECK(countKind(t, EntityKind::Arc, false) == 1);
+
+    // Nothing crossing: the whole curve.
+    Sketch u;
+    const Id lone = u.addLine(0, 0, 10, 0);
+    CHECK(mod::trimToConstruction(u, lone, {5, 0}) == lone);
+    CHECK(u.entity(lone).construction);
+}
+
 TEST_CASE("Trim a curve that crosses nothing removes it", "[modify][trim]")
 {
     Sketch s;

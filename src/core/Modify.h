@@ -23,6 +23,10 @@ std::vector<Vec2> intersections(const Sketch& sketch, Id a, Id b);
 // an arc (keeping its constraints). New ends stay on the curves that cut them.
 void trim(Sketch& sketch, Id curve, Vec2 near);
 
+// Like trim, but the piece is kept as construction geometry instead of removed (still joined to
+// the rest: collinear / on the same circle). Returns the construction piece.
+Id trimToConstruction(Sketch& sketch, Id curve, Vec2 near);
+
 // Lengthens the end of a line or arc nearest `near` until it meets another curve.
 void extend(Sketch& sketch, Id curve, Vec2 near);
 

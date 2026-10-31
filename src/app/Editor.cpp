@@ -222,11 +222,17 @@ build::Slot Editor::arcSlot3(core::Vec2 start, core::Vec2 end, core::Vec2 throug
 
 namespace modify = core::modify;
 
-void Editor::trim(Id curve, core::Vec2 near)
+void Editor::trim(Id curve, core::Vec2 near, bool toConstruction)
 {
     const QString what = name(m_sketch, curve);  // before it changes (it may disappear)
-    modify::trim(m_sketch, curve, near);
-    log(QStringLiteral("s.trim(%1, near=%2)").arg(what, pair(near)));
+    if (toConstruction) {
+        modify::trimToConstruction(m_sketch, curve, near);
+        log(QStringLiteral("s.trim(%1, near=%2, construction=True)").arg(what, pair(near)));
+    }
+    else {
+        modify::trim(m_sketch, curve, near);
+        log(QStringLiteral("s.trim(%1, near=%2)").arg(what, pair(near)));
+    }
 }
 
 void Editor::extend(Id curve, core::Vec2 near)

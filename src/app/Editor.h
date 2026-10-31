@@ -49,7 +49,7 @@ public:
     core::build::Slot arcSlot3(core::Vec2 start, core::Vec2 end, core::Vec2 through, double width);
 
     // Cutting and joining (see core/Modify.h). `near` is where the curve was clicked.
-    void trim(core::Id curve, core::Vec2 near);
+    void trim(core::Id curve, core::Vec2 near, bool toConstruction = false);
     void extend(core::Id curve, core::Vec2 near);
     std::vector<core::Id> breakCurve(core::Id curve, core::Vec2 near);
     core::modify::Corner fillet(core::Id a, core::Vec2 nearA, core::Id b, core::Vec2 nearB, double radius);

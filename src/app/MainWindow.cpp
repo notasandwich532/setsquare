@@ -122,6 +122,7 @@ const std::pair<ToolKind, const char*> kToolNames[] = {
     {ToolKind::SlotArcCenter, "arc_slot"},
     {ToolKind::Collinear, "collinear"},
     {ToolKind::Trim, "trim"},
+    {ToolKind::TrimToConstruction, "trim_construction"},
     {ToolKind::Extend, "extend"},
     {ToolKind::Break, "break"},
     {ToolKind::Fillet, "fillet"},
@@ -424,8 +425,12 @@ void MainWindow::createActions()
                     {ToolKind::ChamferTwoDistances, tr("Distance-Distance Chamfer"), {}},
                     {ToolKind::ChamferDistanceAngle, tr("Distance-Angle Chamfer"), {}},
                 });
+    addDropdown(toolbar, tr("Trim"),
+                {
+                    {ToolKind::Trim, tr("Trim"), QKeySequence(Qt::Key_T)},
+                    {ToolKind::TrimToConstruction, tr("Trim to Construction"), QKeySequence(Qt::SHIFT | Qt::Key_T)},
+                });
     addTools(toolbar, {
-                          {ToolKind::Trim, tr("Trim"), QKeySequence(Qt::Key_T)},
                           {ToolKind::Extend, tr("Extend"), {}},
                           {ToolKind::Break, tr("Break"), {}},
                       });
