@@ -2,6 +2,8 @@
 
 #include "Tool.h"
 
+#include "../Editor.h"
+
 // A position picked while drawing, with what it was inferred from. Turning a snap into a
 // point (see resolveSnap) reuses the existing point, or adds the matching constraint, so
 // shapes come out connected the way they were drawn.
@@ -17,7 +19,7 @@ struct Snap
 
 // The point for a snap inside an edit: the existing point, or a new one plus its inferred
 // constraint (midpoint / point-on-curve).
-core::Id resolveSnap(core::Sketch& sketch, const Snap& snap);
+core::Id resolveSnap(Editor& editor, const Snap& snap);
 
 // Polyline: each click adds a segment joined to the previous one. Esc, right-click or
 // double-click ends the chain; clicking the chain's first point closes it.

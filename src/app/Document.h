@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Editor.h"
+
 #include <core/Sketch.h>
 #include <core/Solver.h>
 
@@ -24,8 +26,36 @@ public:
     const core::SolveResult& solveResult() const { return m_result; }
 
     // Applies an edit as one undoable step. Exceptions from the edit (e.g. SketchError) leave
-    // the sketch untouched and propagate to the caller.
+    // the sketch untouched and propagate to the caller. Not recorded: for tests and internals.
     void modify(const QString& label, const std::function<void(core::Sketch&)>& edit);
+
+    // Same, through the recording Editor: the UI's way of changing geometry. The Python
+    // equivalent of the edit is emitted via recorded().
+    void edit(const QString& label, const std::function<void(Editor&)>& fn);
+
+    // Groups everything until endTransaction() into one undo step (e.g. a whole script).
+    // Nests; undo/redo are refused while one is open.
+    void beginTransaction();
+    void endTransaction();
+    bool inTransaction() const { return m_transactionDepth > 0; }
+
+    // While alive, nothing is emitted through recorded(); used for calls made from Python,
+    // which is already code.
+    class SilentRecording
+    {
+    public:
+        explicit SilentRecording(Document& d)
+            : m_doc(d)
+        {
+            ++m_doc.m_silence;
+        }
+        ~SilentRecording() { --m_doc.m_silence; }
+        SilentRecording(const SilentRecording&) = delete;
+        SilentRecording& operator=(const SilentRecording&) = delete;
+
+    private:
+        Document& m_doc;
+    };
 
     // Adds a constraint unless it would over-constrain the sketch (conflicting or redundant
     // with what's there), as Fusion does. Returns the new id, or kNoId with *error set.
@@ -69,9 +99,15 @@ signals:
     void changed();
     void undoStateChanged();
     void fileStateChanged();  // path or modified flag
+    // Python equivalent of a user action that just happened (one or more lines).
+    void recorded(const QString& python);
 
 private:
     void pushUndo(core::Sketch snapshot);
+    // Replaces the current sketch with a new state as one undo step (or folds it into the
+    // open transaction).
+    void commit(core::Sketch next);
+    void record(const QString& python);
     // Commits a solved working copy if it isn't more over-constrained than the current sketch.
     bool commitChecked(core::Sketch working, QString* error);
     void resolve();
@@ -97,4 +133,18 @@ private:
     core::Sketch m_beforeDrag;
     bool m_dragMoved = false;
     bool m_labelDragging = false;
+
+    // What the current drag is, for recording it when it ends.
+    std::vector<core::Id> m_dragPoints;
+    core::Id m_dragEdge = core::kNoId;
+    double m_dragGrabX = 0.0, m_dragGrabY = 0.0;
+    double m_dragDx = 0.0, m_dragDy = 0.0;
+    core::Id m_labelDimension = core::kNoId;
+
+    int m_transactionDepth = 0;
+    core::Sketch m_beforeTransaction;
+    quint64 m_revisionBeforeTransaction = 0;
+    bool m_transactionChanged = false;
+
+    int m_silence = 0;
 };

@@ -1,0 +1,1018 @@
+// The embedded interpreter and the `drawapp` Python module.
+//
+// The module lives in this file (not a separate one) because PYBIND11_EMBEDDED_MODULE registers
+// itself from a static initialiser, and a linker would drop an otherwise-unreferenced object
+// file from a static library.
+
+#include "PythonHost.h"
+
+#include "Document.h"
+#include "Editor.h"
+
+#include <core/Dimensions.h>
+#include <core/Serialize.h>
+#include <core/Solver.h>
+
+// Qt's `slots` macro collides with a struct member in Python's object.h.
+#pragma push_macro("slots")
+#undef slots
+#include <pybind11/embed.h>
+#include <pybind11/stl.h>
+#pragma pop_macro("slots")
+
+#include <QCoreApplication>
+#include <QDir>
+#include <QFileInfo>
+
+#include <cstdio>
+#include <memory>
+
+namespace py = pybind11;
+using core::ConstraintType;
+using core::EntityKind;
+using core::Id;
+using core::kNoId;
+
+namespace script
+{
+namespace
+{
+Document* g_doc = nullptr;
+UiHooks g_ui;
+std::function<void(const QString&, bool)> g_output;
+bool g_initialised = false;
+
+// Python objects owned by the host; released before the interpreter shuts down.
+struct HostObjects
+{
+    py::object helpers;  // the _drawapp_host helper module
+    py::dict consoleGlobals;
+    py::object consoleLocals;
+};
+std::unique_ptr<HostObjects> g_objects;
+
+Document& doc()
+{
+    if (!g_doc) {
+        throw std::runtime_error("no document is open");
+    }
+    return *g_doc;
+}
+
+const core::Sketch& sketch()
+{
+    return doc().sketch();
+}
+
+// One Python API call = one undo step, and not echoed by the recorder (it's already code).
+class Call
+{
+public:
+    Call()
+        : m_doc(doc())
+        , m_silent(m_doc)
+    {
+        m_doc.beginTransaction();
+    }
+    ~Call() { m_doc.endTransaction(); }
+    Document& target() { return m_doc; }  // (not doc(): that would shadow the free function above)
+
+private:
+    Document& m_doc;
+    Document::SilentRecording m_silent;
+};
+
+// ---------------------------------------------------------------------------------------------
+// Handles: Python objects naming a sketch item by id. Reading through them always sees the
+// current sketch; using one whose item was deleted raises ValueError.
+// ---------------------------------------------------------------------------------------------
+
+struct Item
+{
+    Id id = kNoId;
+};
+struct PointH : Item
+{};
+struct LineH : Item
+{};
+struct CircleH : Item
+{};
+struct ArcH : Item
+{};
+struct ConstraintH : Item
+{};
+
+const core::Entity& entity(Id id)
+{
+    if (!sketch().hasEntity(id)) {
+        throw py::value_error("item " + std::to_string(id) + " no longer exists");
+    }
+    return sketch().entity(id);
+}
+
+const core::Constraint& constraintOf(Id id)
+{
+    if (!sketch().hasConstraint(id)) {
+        throw py::value_error("constraint " + std::to_string(id) + " no longer exists");
+    }
+    return sketch().constraint(id);
+}
+
+py::object wrap(Id id)
+{
+    const core::Sketch& s = sketch();
+    if (s.hasConstraint(id)) {
+        return py::cast(ConstraintH{{id}});
+    }
+    switch (entity(id).kind()) {
+        case EntityKind::Point: return py::cast(PointH{{id}});
+        case EntityKind::Line: return py::cast(LineH{{id}});
+        case EntityKind::Circle: return py::cast(CircleH{{id}});
+        case EntityKind::Arc: return py::cast(ArcH{{id}});
+    }
+    return py::none();
+}
+
+py::list wrapAll(const std::vector<Id>& ids)
+{
+    py::list out;
+    for (Id id : ids) {
+        out.append(wrap(id));
+    }
+    return out;
+}
+
+Id idOf(py::handle h)
+{
+    if (py::isinstance<Item>(h)) {
+        return h.cast<Item&>().id;
+    }
+    if (py::isinstance<py::int_>(h)) {
+        return h.cast<Id>();
+    }
+    throw py::type_error("expected a sketch item (point, line, circle, arc or constraint)");
+}
+
+std::vector<Id> idsOf(const py::args& args)
+{
+    std::vector<Id> ids;
+    for (py::handle h : args) {
+        // Accept s.delete(a, b) as well as s.delete([a, b]).
+        if (py::isinstance<py::list>(h) || py::isinstance<py::tuple>(h)) {
+            for (py::handle inner : h) {
+                ids.push_back(idOf(inner));
+            }
+        }
+        else {
+            ids.push_back(idOf(h));
+        }
+    }
+    return ids;
+}
+
+std::pair<double, double> pairOf(py::handle h, const char* what)
+{
+    if (py::isinstance<py::sequence>(h) && !py::isinstance<py::str>(h)) {
+        const auto seq = h.cast<py::sequence>();
+        if (seq.size() == 2) {
+            return {seq[0].cast<double>(), seq[1].cast<double>()};
+        }
+    }
+    throw py::type_error(std::string(what) + " must be an (x, y) pair");
+}
+
+// A point argument: an existing point, or an (x, y) pair that becomes a new point.
+Id pointArg(Editor& ed, py::handle h)
+{
+    if (py::isinstance<PointH>(h)) {
+        return h.cast<PointH&>().id;
+    }
+    if (py::isinstance<Item>(h)) {
+        throw py::type_error("expected a point or an (x, y) pair");
+    }
+    const auto [x, y] = pairOf(h, "a point");
+    return ed.point(x, y);
+}
+
+template<typename F>
+Id editReturningId(const char* label, F&& f)
+{
+    Call call;
+    Id out = kNoId;
+    call.target().edit(QString::fromLatin1(label), [&](Editor& ed) { out = f(ed); });
+    return out;
+}
+
+// Adds a (checked) constraint or dimension; refuses over-constraining like the UI does.
+py::object addConstraint(ConstraintType type, std::vector<Id> refs, py::object value, py::object label)
+{
+    double v = 0.0;
+    if (core::isDimension(type)) {
+        if (value.is_none()) {
+            // Measure in the normalised order (point before line).
+            std::vector<Id> measured = refs;
+            if (type == ConstraintType::Distance && measured.size() == 2
+                && sketch().hasEntity(measured[0]) && sketch().entity(measured[0]).kind() == EntityKind::Line) {
+                std::swap(measured[0], measured[1]);
+            }
+            std::string why;
+            if (!sketch().canAddConstraint(type, measured, &why)) {
+                throw py::value_error(why);
+            }
+            v = core::measure(sketch(), type, measured);
+        }
+        else {
+            v = value.cast<double>();
+        }
+    }
+    double lx = 0.0, ly = 0.0;
+    if (!label.is_none()) {
+        std::tie(lx, ly) = pairOf(label, "label");
+    }
+    Call call;
+    QString error;
+    const Id id = call.target().addConstraint(type, std::move(refs), v, &error, lx, ly);
+    if (id == kNoId) {
+        throw py::value_error(error.toStdString());
+    }
+    return wrap(id);
+}
+
+std::string itemName(Id id)
+{
+    return Editor::name(sketch(), id).toStdString();
+}
+
+std::string fmt(double v)
+{
+    return Editor::number(v).toStdString();
+}
+
+// ---------------------------------------------------------------------------------------------
+// Sketch / Document / App facades (stateless: they act on whatever document is current)
+// ---------------------------------------------------------------------------------------------
+
+struct SketchH
+{};
+struct DocumentH
+{};
+struct AppH
+{};
+struct Transaction
+{};
+
+UiHooks& ui()
+{
+    if (!g_ui.fit) {
+        throw std::runtime_error("no user interface (running headless)");
+    }
+    return g_ui;
+}
+
+void dragPoints(const std::vector<Id>& points, double dx, double dy)
+{
+    Call call;
+    call.target().beginDrag(points);
+    call.target().dragTo(dx, dy);
+    call.target().endDrag();
+}
+
+}  // namespace
+}  // namespace script
+
+// =============================================================================================
+// The module
+// =============================================================================================
+
+PYBIND11_EMBEDDED_MODULE(drawapp, m)
+{
+    using namespace script;
+    m.doc() = "Scripting API for the drawing app. Everything the UI does can be done from here.";
+
+    py::register_exception_translator([](std::exception_ptr p) {
+        try {
+            if (p) {
+                std::rethrow_exception(p);
+            }
+        }
+        catch (const core::SketchError& e) {
+            PyErr_SetString(PyExc_ValueError, e.what());
+        }
+    });
+
+    // --- items -------------------------------------------------------------------------------
+
+    py::class_<Item>(m, "Item", "Base of all sketch items.")
+        .def_property_readonly("id", [](const Item& i) { return i.id; })
+        .def_property_readonly("name", [](const Item& i) { return itemName(i.id); },
+                               "The name used in recorded scripts, e.g. 'l7'.")
+        .def_property_readonly("exists", [](const Item& i) {
+            return sketch().hasEntity(i.id) || sketch().hasConstraint(i.id);
+        })
+        .def("__eq__", [](const Item& a, py::handle b) { return py::isinstance<Item>(b) && a.id == b.cast<Item&>().id; })
+        .def("__hash__", [](const Item& i) { return py::hash(py::int_(i.id)); });
+
+    auto entityProps = [](auto& cls) {
+        using T = typename std::remove_reference_t<decltype(cls)>::type;
+        cls.def_property(
+               "fixed", [](const T& i) { return entity(i.id).fixed; },
+               [](const T& i, bool fixed) {
+                   editReturningId("Fix", [&](Editor& ed) {
+                       ed.setFixed(i.id, fixed);
+                       return i.id;
+                   });
+               },
+               "Locked in place (the origin is always fixed).")
+            .def_property(
+                "construction", [](const T& i) { return entity(i.id).construction; },
+                [](const T& i, bool on) {
+                    editReturningId("Construction", [&](Editor& ed) {
+                        ed.setConstruction(i.id, on);
+                        return i.id;
+                    });
+                },
+                "Reference geometry, drawn dashed.")
+            .def_property_readonly("fully_constrained", [](const T& i) {
+                entity(i.id);
+                return doc().solveResult().fullyConstrained.contains(i.id);
+            });
+    };
+
+    py::class_<PointH, Item> point(m, "Point");
+    point.def_property_readonly("x", [](const PointH& p) { entity(p.id); return sketch().point(p.id).x; })
+        .def_property_readonly("y", [](const PointH& p) { entity(p.id); return sketch().point(p.id).y; })
+        .def_property_readonly("pos", [](const PointH& p) {
+            entity(p.id);
+            const core::Point& q = sketch().point(p.id);
+            return py::make_tuple(q.x, q.y);
+        })
+        .def("move_to", [](const PointH& p, double x, double y) {
+            entity(p.id);
+            const core::Point q = sketch().point(p.id);
+            dragPoints({p.id}, x - q.x, y - q.y);
+        }, py::arg("x"), py::arg("y"), "Drag the point towards (x, y); constraints still hold.")
+        .def("__repr__", [](const PointH& p) {
+            if (!sketch().hasEntity(p.id)) {
+                return "<Point " + std::to_string(p.id) + " (deleted)>";
+            }
+            const core::Point& q = sketch().point(p.id);
+            return "<Point " + itemName(p.id) + " (" + fmt(q.x) + ", " + fmt(q.y) + ")>";
+        });
+    entityProps(point);
+
+    py::class_<LineH, Item> line(m, "Line");
+    line.def_property_readonly("p1", [](const LineH& l) { entity(l.id); return wrap(sketch().line(l.id).p1); })
+        .def_property_readonly("p2", [](const LineH& l) { entity(l.id); return wrap(sketch().line(l.id).p2); })
+        .def_property_readonly("length", [](const LineH& l) {
+            entity(l.id);
+            return core::measure(sketch(), ConstraintType::Distance, {l.id});
+        })
+        .def("__repr__", [](const LineH& l) {
+            if (!sketch().hasEntity(l.id)) {
+                return "<Line " + std::to_string(l.id) + " (deleted)>";
+            }
+            const core::Line& ln = sketch().line(l.id);
+            const core::Point& a = sketch().point(ln.p1);
+            const core::Point& b = sketch().point(ln.p2);
+            return "<Line " + itemName(l.id) + " (" + fmt(a.x) + ", " + fmt(a.y) + ")-(" + fmt(b.x) + ", " + fmt(b.y)
+                + ")>";
+        });
+    entityProps(line);
+
+    py::class_<CircleH, Item> circle(m, "Circle");
+    circle.def_property_readonly("center", [](const CircleH& c) { entity(c.id); return wrap(sketch().circle(c.id).center); })
+        .def_property_readonly("radius", [](const CircleH& c) { entity(c.id); return sketch().circle(c.id).radius; })
+        .def("__repr__", [](const CircleH& c) {
+            if (!sketch().hasEntity(c.id)) {
+                return "<Circle " + std::to_string(c.id) + " (deleted)>";
+            }
+            return "<Circle " + itemName(c.id) + " r=" + fmt(sketch().circle(c.id).radius) + ">";
+        });
+    entityProps(circle);
+
+    py::class_<ArcH, Item> arc(m, "Arc");
+    arc.def_property_readonly("center", [](const ArcH& a) { entity(a.id); return wrap(sketch().arc(a.id).center); })
+        .def_property_readonly("start", [](const ArcH& a) { entity(a.id); return wrap(sketch().arc(a.id).start); })
+        .def_property_readonly("end", [](const ArcH& a) { entity(a.id); return wrap(sketch().arc(a.id).end); })
+        .def_property_readonly("radius", [](const ArcH& a) { entity(a.id); return sketch().arcRadius(a.id); })
+        .def("__repr__", [](const ArcH& a) {
+            if (!sketch().hasEntity(a.id)) {
+                return "<Arc " + std::to_string(a.id) + " (deleted)>";
+            }
+            return "<Arc " + itemName(a.id) + " r=" + fmt(sketch().arcRadius(a.id)) + ">";
+        });
+    entityProps(arc);
+
+    py::class_<ConstraintH, Item>(m, "Constraint")
+        .def_property_readonly("type", [](const ConstraintH& c) {
+            return Editor::function(constraintOf(c.id).type).toStdString();
+        })
+        .def_property_readonly("refs", [](const ConstraintH& c) { return wrapAll(constraintOf(c.id).refs); })
+        .def_property_readonly("is_dimension", [](const ConstraintH& c) { return core::isDimension(constraintOf(c.id).type); })
+        .def_property(
+            "value", [](const ConstraintH& c) -> py::object {
+                const core::Constraint& k = constraintOf(c.id);
+                return core::isDimension(k.type) ? py::cast(k.value) : py::none();
+            },
+            [](const ConstraintH& c, double v) {
+                constraintOf(c.id);
+                Call call;
+                QString error;
+                if (!call.target().setDimensionValue(c.id, v, &error)) {
+                    throw py::value_error(error.toStdString());
+                }
+            },
+            "A dimension's value (lengths, or degrees for angles). Setting it re-solves.")
+        .def_property(
+            "label", [](const ConstraintH& c) {
+                const core::Constraint& k = constraintOf(c.id);
+                return py::make_tuple(k.labelX, k.labelY);
+            },
+            [](const ConstraintH& c, py::handle xy) {
+                constraintOf(c.id);
+                const auto [x, y] = pairOf(xy, "label");
+                Call call;
+                call.target().beginLabelDrag();
+                call.target().moveLabel(c.id, x, y);
+                call.target().endLabelDrag();
+            },
+            "Dimension label position, as an offset from the dimension's anchor.")
+        .def("__repr__", [](const ConstraintH& c) {
+            if (!sketch().hasConstraint(c.id)) {
+                return "<Constraint " + std::to_string(c.id) + " (deleted)>";
+            }
+            return "<" + Editor::constraintCall(sketch(), c.id).section(QStringLiteral(" = "), 1).toStdString() + ">";
+        });
+
+    // --- solve status ------------------------------------------------------------------------
+
+    py::class_<core::SolveResult>(m, "SolveResult")
+        .def_readonly("ok", &core::SolveResult::ok)
+        .def_readonly("dof", &core::SolveResult::dof, "Remaining degrees of freedom.")
+        .def_property_readonly("conflicting", [](const core::SolveResult& r) { return wrapAll(r.conflicting); })
+        .def_property_readonly("redundant", [](const core::SolveResult& r) { return wrapAll(r.redundant); })
+        .def_property_readonly("fully_constrained", [](const core::SolveResult& r) {
+            return wrapAll({r.fullyConstrained.begin(), r.fullyConstrained.end()});
+        })
+        .def("__repr__", [](const core::SolveResult& r) {
+            return "<SolveResult ok=" + std::string(r.ok ? "True" : "False") + " dof=" + std::to_string(r.dof) + ">";
+        });
+
+    // --- sketch ------------------------------------------------------------------------------
+
+    auto constraintFn = [](ConstraintType type) {
+        return [type](const SketchH&, py::args args) { return addConstraint(type, idsOf(args), py::none(), py::none()); };
+    };
+    // Arguments after *args are keyword-only: s.distance(l7, value=40, label=(0, 8)).
+    auto dimensionFn = [](ConstraintType type) {
+        return [type](const SketchH&, py::args args, py::object value, py::object label) {
+            return addConstraint(type, idsOf(args), std::move(value), std::move(label));
+        };
+    };
+    auto listOf = [](std::optional<EntityKind> kind) {
+        return [kind](const SketchH&) {
+            std::vector<Id> ids;
+            for (const auto& [id, e] : sketch().entities()) {
+                if (!kind || e.kind() == *kind) {
+                    ids.push_back(id);
+                }
+            }
+            return wrapAll(ids);
+        };
+    };
+
+    py::class_<SketchH>(m, "Sketch")
+        .def_property_readonly("origin", [](const SketchH&) { return wrap(sketch().origin()); })
+        .def("__getitem__", [](const SketchH&, Id id) {
+            if (!sketch().hasEntity(id) && !sketch().hasConstraint(id)) {
+                throw py::key_error("no item " + std::to_string(id));
+            }
+            return wrap(id);
+        })
+        .def("__contains__", [](const SketchH&, py::handle h) {
+            const Id id = idOf(h);
+            return sketch().hasEntity(id) || sketch().hasConstraint(id);
+        })
+        .def_property_readonly("entities", listOf(std::nullopt))
+        .def_property_readonly("points", listOf(EntityKind::Point))
+        .def_property_readonly("lines", listOf(EntityKind::Line))
+        .def_property_readonly("circles", listOf(EntityKind::Circle))
+        .def_property_readonly("arcs", listOf(EntityKind::Arc))
+        .def_property_readonly("constraints", [](const SketchH&) {
+            std::vector<Id> ids;
+            for (const auto& [id, c] : sketch().constraints()) {
+                ids.push_back(id);
+            }
+            return wrapAll(ids);
+        })
+        .def_property_readonly("dimensions", [](const SketchH&) {
+            std::vector<Id> ids;
+            for (const auto& [id, c] : sketch().constraints()) {
+                if (core::isDimension(c.type)) {
+                    ids.push_back(id);
+                }
+            }
+            return wrapAll(ids);
+        })
+
+        // geometry
+        .def("point", [](const SketchH&, double x, double y) {
+            return wrap(editReturningId("Point", [&](Editor& ed) { return ed.point(x, y); }));
+        }, py::arg("x"), py::arg("y"))
+        .def("line", [](const SketchH&, py::handle a, py::handle b) {
+            return wrap(editReturningId("Line", [&](Editor& ed) {
+                const Id pa = pointArg(ed, a);
+                return ed.line(pa, pointArg(ed, b));
+            }));
+        }, py::arg("start"), py::arg("end"), "Line between two points or (x, y) pairs.")
+        .def("circle", [](const SketchH&, py::handle center, double radius) {
+            return wrap(editReturningId("Circle", [&](Editor& ed) { return ed.circle(pointArg(ed, center), radius); }));
+        }, py::arg("center"), py::arg("radius"))
+        .def("arc", [](const SketchH&, py::handle center, py::handle start, py::handle end) {
+            return wrap(editReturningId("Arc", [&](Editor& ed) {
+                const Id c = pointArg(ed, center);
+                const Id s0 = pointArg(ed, start);
+                return ed.arc(c, s0, pointArg(ed, end));
+            }));
+        }, py::arg("center"), py::arg("start"), py::arg("end"), "Counter-clockwise from start to end.")
+        .def("rectangle", [](const SketchH&, py::handle corner, py::handle opposite) {
+            Editor::Rectangle r{};
+            editReturningId("Rectangle", [&](Editor& ed) {
+                const Id a = pointArg(ed, corner);
+                r = ed.rectangle(a, pointArg(ed, opposite));
+                return r.sides[0];
+            });
+            return wrapAll({r.sides.begin(), r.sides.end()});
+        }, py::arg("corner"), py::arg("opposite"),
+             "Axis-aligned rectangle; returns its sides [bottom, right, top, left] (H/V constrained).")
+        .def("delete", [](const SketchH&, py::args items) {
+            const std::vector<Id> ids = idsOf(items);
+            Call call;
+            call.target().edit(QStringLiteral("Delete"), [&](Editor& ed) {
+                for (Id id : ids) {
+                    if (ed.sketch().hasEntity(id) || ed.sketch().hasConstraint(id)) {
+                        ed.remove(id);
+                    }
+                }
+            });
+        }, "Delete items (and whatever depends on them).")
+
+        // geometric constraints
+        .def("coincident", constraintFn(ConstraintType::Coincident), "(point, point) or (point, curve)")
+        .def("horizontal", constraintFn(ConstraintType::Horizontal), "(line) or (point, point)")
+        .def("vertical", constraintFn(ConstraintType::Vertical), "(line) or (point, point)")
+        .def("parallel", constraintFn(ConstraintType::Parallel))
+        .def("perpendicular", constraintFn(ConstraintType::Perpendicular))
+        .def("tangent", constraintFn(ConstraintType::Tangent))
+        .def("equal", constraintFn(ConstraintType::Equal))
+        .def("midpoint", constraintFn(ConstraintType::Midpoint), "(point, line)")
+        .def("concentric", constraintFn(ConstraintType::Concentric))
+        .def("symmetric", constraintFn(ConstraintType::Symmetric), "(point, point, line)")
+
+        // dimensions: value=None keeps the current size
+        .def("distance", dimensionFn(ConstraintType::Distance), py::arg("value") = py::none(),
+             py::arg("label") = py::none(), "(line), (point, point) or (point, line)")
+        .def("horizontal_distance", dimensionFn(ConstraintType::HorizontalDistance), py::arg("value") = py::none(), py::arg("label") = py::none())
+        .def("vertical_distance", dimensionFn(ConstraintType::VerticalDistance), py::arg("value") = py::none(), py::arg("label") = py::none())
+        .def("radius", dimensionFn(ConstraintType::Radius), py::arg("value") = py::none(),
+             py::arg("label") = py::none())
+        .def("diameter", dimensionFn(ConstraintType::Diameter), py::arg("value") = py::none(),
+             py::arg("label") = py::none())
+        .def("angle", dimensionFn(ConstraintType::Angle), py::arg("value") = py::none(),
+             py::arg("label") = py::none(), "(line, line), degrees from the first to the second")
+
+        // moving things
+        .def("drag", [](const SketchH&, py::handle points, double dx, double dy) {
+            std::vector<Id> ids;
+            for (py::handle h : points) {
+                ids.push_back(idOf(h));
+            }
+            dragPoints(ids, dx, dy);
+        }, py::arg("points"), py::arg("dx"), py::arg("dy"), "Drag points by an offset, as with the mouse.")
+        .def("drag_edge", [](const SketchH&, py::handle curve, py::handle grab, double dx, double dy) {
+            const Id id = idOf(curve);
+            const auto [x, y] = pairOf(grab, "grab");
+            Call call;
+            call.target().beginDragEdge(id, x, y);
+            call.target().dragTo(dx, dy);
+            call.target().endDrag();
+        }, py::arg("curve"), py::arg("grab"), py::arg("dx"), py::arg("dy"), "Drag a circle/arc rim from a grab point.")
+
+        // status
+        .def("solve", [](const SketchH&) { return doc().solveResult(); },
+             "Solve status (the sketch is re-solved after every change).")
+        .def_property_readonly("dof", [](const SketchH&) { return doc().solveResult().dof; })
+        .def("__repr__", [](const SketchH&) {
+            return "<Sketch " + std::to_string(sketch().entities().size()) + " items, "
+                + std::to_string(sketch().constraints().size()) + " constraints>";
+        });
+
+    // --- document ----------------------------------------------------------------------------
+
+    py::class_<Transaction>(m, "Transaction")
+        .def("__enter__", [](Transaction& t) -> Transaction& {
+            doc().beginTransaction();
+            return t;
+        })
+        .def("__exit__", [](Transaction&, py::args) {
+            doc().endTransaction();
+            return false;
+        });
+
+    py::class_<DocumentH>(m, "Document")
+        .def_property_readonly("sketch", [](const DocumentH&) { return SketchH{}; })
+        .def("undo", [](const DocumentH&) {
+            if (doc().inTransaction()) {
+                throw std::runtime_error("can't undo while a script or transaction is running");
+            }
+            Document::SilentRecording silent(doc());
+            doc().undo();
+        })
+        .def("redo", [](const DocumentH&) {
+            if (doc().inTransaction()) {
+                throw std::runtime_error("can't redo while a script or transaction is running");
+            }
+            Document::SilentRecording silent(doc());
+            doc().redo();
+        })
+        .def_property_readonly("can_undo", [](const DocumentH&) { return doc().canUndo(); })
+        .def_property_readonly("can_redo", [](const DocumentH&) { return doc().canRedo(); })
+        .def("save", [](const DocumentH&, const std::string& path) {
+            Document::SilentRecording silent(doc());
+            QString error;
+            if (!doc().save(QString::fromStdString(path), &error)) {
+                throw std::runtime_error(error.toStdString());
+            }
+        }, py::arg("path"))
+        .def("open", [](const DocumentH&, const std::string& path) {
+
+            Document::SilentRecording silent(doc());
+            QString error;
+            if (!doc().open(QString::fromStdString(path), &error)) {
+                throw std::runtime_error(error.toStdString());
+            }
+        }, py::arg("path"))
+        .def("new", [](const DocumentH&) {
+
+            Document::SilentRecording silent(doc());
+            doc().newSketch();
+        })
+        .def_property_readonly("path", [](const DocumentH&) { return doc().filePath().toStdString(); })
+        .def_property_readonly("modified", [](const DocumentH&) { return doc().isModified(); })
+        .def("transaction", [](const DocumentH&) { return Transaction{}; },
+             "with doc.transaction(): ... groups changes into one undo step")
+        .def("to_json", [](const DocumentH&) { return core::toJson(sketch()); });
+
+    m.def("document", []() {
+        doc();  // raises if there is none
+        return DocumentH{};
+    }, "The document scripts act on.");
+
+    // --- UI (only when running with a window) ------------------------------------------------
+
+    py::class_<AppH>(m, "App")
+        .def_property_readonly("has_ui", [](const AppH&) { return static_cast<bool>(g_ui.fit); })
+        .def("fit", [](const AppH&) { ui().fit(); }, "Zoom to show the whole drawing.")
+        .def_property(
+            "selection", [](const AppH&) {
+                const auto ids = ui().selection();
+                return wrapAll({ids.begin(), ids.end()});
+            },
+            [](const AppH&, py::handle items) {
+                std::set<Id> ids;
+                for (py::handle h : items) {
+                    ids.insert(idOf(h));
+                }
+                ui().select(ids);
+            })
+        .def_property(
+            "tool", [](const AppH&) { return ui().tool().toStdString(); },
+            [](const AppH&, const std::string& name) {
+                if (!ui().setTool(QString::fromStdString(name))) {
+                    throw py::value_error("unknown tool '" + name + "'");
+                }
+            },
+            "The active tool: select, line, rectangle, circle, arc, arc3, dimension, coincident, ...")
+        .def("message", [](const AppH&, const std::string& text) { ui().message(QString::fromStdString(text)); });
+    m.attr("app") = AppH{};
+
+    // Output hook used by the host's sys.stdout / sys.stderr replacements.
+    m.def("_emit", [](const std::string& text, bool isError) {
+        const QString t = QString::fromStdString(text);
+        if (g_output) {
+            g_output(t, isError);
+        }
+        else {
+            std::fputs(text.c_str(), isError ? stderr : stdout);
+            std::fflush(isError ? stderr : stdout);
+        }
+    });
+}
+
+// =============================================================================================
+// Host
+// =============================================================================================
+
+namespace script
+{
+namespace
+{
+// Python-side helpers: output redirection, running code, and the console's name lookup.
+constexpr const char* kHelpers = R"PY(
+import builtins
+import os
+import re
+import sys
+import traceback
+
+import drawapp
+
+
+class _Writer:
+    def __init__(self, is_error):
+        self._is_error = is_error
+
+    def write(self, text):
+        if text:
+            drawapp._emit(text, self._is_error)
+        return len(text)
+
+    def flush(self):
+        pass
+
+    def isatty(self):
+        return False
+
+
+sys.stdout = _Writer(False)
+sys.stderr = _Writer(True)
+
+
+def base_globals(name, path=None):
+    g = {
+        "__name__": name,
+        "__builtins__": builtins,
+        "drawapp": drawapp,
+        "doc": drawapp.document(),
+        "s": drawapp.document().sketch,
+        "app": drawapp.app,
+    }
+    if path:
+        g["__file__"] = path
+    return g
+
+
+def _run(source, filename, mode, g, l):
+    try:
+        code = compile(source, filename, mode)
+    except SyntaxError:
+        if mode != "single":
+            traceback.print_exc(limit=0)
+            return 1
+        try:
+            code = compile(source, filename, "exec")  # several statements pasted at once
+        except SyntaxError:
+            traceback.print_exc(limit=0)
+            return 1
+    try:
+        exec(code, g, l)
+        return 0
+    except SystemExit as e:
+        if e.code is None:
+            return 0
+        if isinstance(e.code, int):
+            return e.code
+        print(e.code, file=sys.stderr)
+        return 1
+    except BaseException:
+        etype, value, tb = sys.exc_info()
+        traceback.print_exception(etype, value, tb.tb_next)  # skip this frame
+        return 1
+
+
+def run_source(source, name):
+    g = base_globals("__main__")
+    return _run(source, name, "exec", g, g)
+
+
+def run_file(path, argv):
+    try:
+        with open(path, encoding="utf-8") as f:
+            source = f.read()
+    except OSError as e:
+        print(f"can't read {path}: {e}", file=sys.stderr)
+        return 1
+    g = base_globals("__main__", path)
+    old_argv, old_path = sys.argv, list(sys.path)
+    sys.argv = [path] + list(argv)
+    sys.path.insert(0, os.path.dirname(os.path.abspath(path)))
+    try:
+        return _run(source, path, "exec", g, g)
+    finally:
+        sys.argv, sys.path[:] = old_argv, old_path
+
+
+_NAME = re.compile(r"^([plcakd])(\d+)$")
+
+
+class ConsoleNamespace(dict):
+    """Console variables. Unknown names like p12, l7, d20 resolve to sketch items by id, so
+    recorded actions can be pasted back in."""
+
+    def __missing__(self, key):
+        m = _NAME.match(key)
+        if m:
+            try:
+                return drawapp.document().sketch[int(m.group(2))]
+            except (KeyError, ValueError):
+                pass
+        raise KeyError(key)
+
+
+def new_console():
+    return base_globals("__console__"), ConsoleNamespace()
+
+
+def run_console(source, g, l):
+    return _run(source, "<console>", "single", g, l)
+)PY";
+
+QString defaultHome()
+{
+    return QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("python"));
+}
+
+RunResult toResult(int code)
+{
+    RunResult r;
+    r.exitCode = code;
+    r.ok = code == 0;
+    return r;
+}
+
+// Runs fn with the document grouped into one undo step (if there is a document).
+template<typename F>
+RunResult inTransaction(bool transaction, F&& fn)
+{
+    if (!g_initialised) {
+        RunResult r;
+        r.ok = false;
+        r.exitCode = 1;
+        r.error = QStringLiteral("Python is not initialised");
+        return r;
+    }
+    if (transaction && g_doc) {
+        g_doc->beginTransaction();
+    }
+    int code = 1;
+    try {
+        code = fn();
+    }
+    catch (const py::error_already_set& e) {
+        if (g_output) {
+            g_output(QString::fromStdString(e.what()) + QLatin1Char('\n'), true);
+        }
+        else {
+            std::fprintf(stderr, "%s\n", e.what());
+        }
+    }
+    if (transaction && g_doc) {
+        g_doc->endTransaction();
+    }
+    return toResult(code);
+}
+}  // namespace
+
+bool initialise(QString* error, const QString& pythonHome)
+{
+    if (g_initialised) {
+        return true;
+    }
+    const QString home = pythonHome.isEmpty() ? defaultHome() : pythonHome;
+    if (!QFileInfo(home).isDir()) {
+        if (error) {
+            *error = QStringLiteral("Python runtime not found at %1").arg(QDir::toNativeSeparators(home));
+        }
+        return false;
+    }
+
+    PyConfig config;
+    PyConfig_InitIsolatedConfig(&config);  // ignore PYTHONPATH etc. and any installed Python
+    config.write_bytecode = 0;
+    config.install_signal_handlers = 0;
+    config.site_import = 0;
+    const std::wstring homeW = QDir::toNativeSeparators(home).toStdWString();
+    PyStatus status = PyConfig_SetString(&config, &config.home, homeW.c_str());
+    if (PyStatus_Exception(status)) {
+        PyConfig_Clear(&config);
+        if (error) {
+            *error = QStringLiteral("Couldn't configure Python");
+        }
+        return false;
+    }
+    try {
+        py::initialize_interpreter(&config, 0, nullptr, false);
+    }
+    catch (const std::exception& e) {
+        if (error) {
+            *error = QStringLiteral("Couldn't start Python: %1").arg(QString::fromUtf8(e.what()));
+        }
+        return false;
+    }
+
+    try {
+        g_objects = std::make_unique<HostObjects>();
+        py::module_ helpers = py::module_::import("types").attr("ModuleType")("_drawapp_host");
+        py::exec(kHelpers, helpers.attr("__dict__"));
+        g_objects->helpers = helpers;
+    }
+    catch (const py::error_already_set& e) {
+        if (error) {
+            *error = QStringLiteral("Couldn't set up the Python environment: %1").arg(QString::fromUtf8(e.what()));
+        }
+        g_objects.reset();
+        py::finalize_interpreter();
+        return false;
+    }
+    g_initialised = true;
+    return true;
+}
+
+void shutdown()
+{
+    if (!g_initialised) {
+        return;
+    }
+    g_objects.reset();
+    py::finalize_interpreter();
+    g_initialised = false;
+}
+
+bool isInitialised()
+{
+    return g_initialised;
+}
+
+void setDocument(Document* document)
+{
+    g_doc = document;
+}
+
+Document* document()
+{
+    return g_doc;
+}
+
+void setUiHooks(UiHooks hooks)
+{
+    g_ui = std::move(hooks);
+}
+
+void setOutput(std::function<void(const QString&, bool)> sink)
+{
+    g_output = std::move(sink);
+}
+
+RunResult runFile(const QString& path, const QStringList& argv)
+{
+    return inTransaction(true, [&] {
+        py::list args;
+        for (const QString& a : argv) {
+            args.append(a.toStdString());
+        }
+        return g_objects->helpers.attr("run_file")(path.toStdString(), args).cast<int>();
+    });
+}
+
+RunResult runSource(const QString& source, const QString& name)
+{
+    return inTransaction(true, [&] {
+        return g_objects->helpers.attr("run_source")(source.toStdString(), name.toStdString()).cast<int>();
+    });
+}
+
+RunResult runConsole(const QString& source)
+{
+    // Not one transaction: each API call is its own undo step, exactly like the UI action it
+    // may have been recorded from (so doc.undo() works from the console too).
+    return inTransaction(false, [&] {
+        if (!g_objects->consoleLocals) {
+            resetConsole();
+        }
+        return g_objects->helpers.attr("run_console")(source.toStdString(), g_objects->consoleGlobals,
+                                                      g_objects->consoleLocals)
+            .cast<int>();
+    });
+}
+
+void resetConsole()
+{
+    if (!g_initialised || !g_doc) {
+        return;
+    }
+    py::tuple ns = g_objects->helpers.attr("new_console")();
+    g_objects->consoleGlobals = ns[0].cast<py::dict>();
+    g_objects->consoleLocals = ns[1];
+}
+
+}  // namespace script

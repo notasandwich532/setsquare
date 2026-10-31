@@ -2,7 +2,11 @@
 
 #include <catch2/catch_session.hpp>
 
+#include "PythonHost.h"
+
 #include <QApplication>
+
+#include <cstdio>
 
 int main(int argc, char* argv[])
 {
@@ -17,5 +21,11 @@ int main(int argc, char* argv[])
     }
 #endif
     QApplication app(argc, argv);
-    return Catch::Session().run(argc, argv);
+    QString error;
+    if (!script::initialise(&error)) {
+        std::fprintf(stderr, "warning: %s (scripting tests will fail)\n", qPrintable(error));
+    }
+    const int result = Catch::Session().run(argc, argv);
+    script::shutdown();
+    return result;
 }

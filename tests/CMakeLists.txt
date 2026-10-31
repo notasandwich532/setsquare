@@ -24,11 +24,24 @@ add_executable(app_tests
     app/main.cpp
     app/test_constraint_tools.cpp
     app/test_document.cpp
+    app/test_scripting.cpp
     app/test_tools.cpp
 )
 target_link_libraries(app_tests PRIVATE drawapp_lib Qt6::Test Catch2::Catch2)
 drawapp_warnings(app_tests)
+drawapp_embeds_python(app_tests)
+add_dependencies(app_tests python_runtime)
 catch_discover_tests(app_tests
     DL_PATHS "${QT_BIN_DIR}"
     PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
 )
+
+# --- Python scenario scripts, run headless: each tests/scripts/test_*.py is one test ---
+file(GLOB script_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_*.py")
+foreach(script IN LISTS script_tests)
+    get_filename_component(name "${script}" NAME_WE)
+    add_test(NAME "script: ${name}" COMMAND drawapp-cli "${script}")
+    set_tests_properties("script: ${name}" PROPERTIES
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${QT_BIN_DIR}"
+    )
+endforeach()

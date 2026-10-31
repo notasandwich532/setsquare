@@ -2,14 +2,21 @@
 
 #include "ConstraintPanel.h"
 #include "Document.h"
+#include "PythonHost.h"
+#include "ScriptConsole.h"
 #include "SketchView.h"
 #include "Theme.h"
+
+#include <QDesktopServices>
+#include <QMenu>
+#include <QUrl>
 
 #include <QAction>
 #include <QActionGroup>
 #include <QCloseEvent>
 #include <QDir>
 #include <QDockWidget>
+#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QKeySequence>
@@ -52,6 +59,23 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_doc, &Document::changed, this, &MainWindow::updateSolveStatus);
     connect(m_doc, &Document::fileStateChanged, this, &MainWindow::updateTitle);
 
+    // Python scripts act on this window's document and can drive its view.
+    script::setDocument(m_doc);
+    script::UiHooks hooks;
+    hooks.fit = [this] { m_view->fitAll(); };
+    hooks.selection = [this] { return m_view->selection(); };
+    hooks.select = [this](const std::set<core::Id>& ids) { m_view->setSelection(ids); };
+    hooks.tool = [this] { return toolName(m_view->toolKind()); };
+    hooks.setTool = [this](const QString& name) {
+        const auto kind = toolFromName(name);
+        if (kind) {
+            m_view->setTool(*kind);
+        }
+        return kind.has_value();
+    };
+    hooks.message = [this](const QString& text) { statusBar()->showMessage(text, 5000); };
+    script::setUiHooks(std::move(hooks));
+
     createActions();
     m_hintLabel->setText(m_view->hint());
     updateSolveStatus();
@@ -59,9 +83,69 @@ MainWindow::MainWindow(QWidget* parent)
     m_view->setFocus();
 }
 
+MainWindow::~MainWindow()
+{
+    script::setUiHooks({});
+    script::setDocument(nullptr);
+}
+
 namespace
 {
 const QString kFileFilter = QObject::tr("Sketches (*.dsk);;All files (*)");
+
+const std::pair<ToolKind, const char*> kToolNames[] = {
+    {ToolKind::Select, "select"},
+    {ToolKind::Line, "line"},
+    {ToolKind::Rectangle, "rectangle"},
+    {ToolKind::Circle, "circle"},
+    {ToolKind::ArcCenter, "arc"},
+    {ToolKind::Arc3Point, "arc3"},
+    {ToolKind::Dimension, "dimension"},
+    {ToolKind::Coincident, "coincident"},
+    {ToolKind::HorizontalVertical, "horizontal_vertical"},
+    {ToolKind::Parallel, "parallel"},
+    {ToolKind::Perpendicular, "perpendicular"},
+    {ToolKind::Tangent, "tangent"},
+    {ToolKind::Equal, "equal"},
+    {ToolKind::Midpoint, "midpoint"},
+    {ToolKind::Concentric, "concentric"},
+    {ToolKind::Symmetric, "symmetric"},
+    {ToolKind::Fix, "fix"},
+};
+
+QString macrosFolder()
+{
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + QStringLiteral("/macros");
+    QDir().mkpath(dir);
+    return dir;
+}
+}  // namespace
+
+QString MainWindow::toolName(ToolKind kind)
+{
+    for (const auto& [k, name] : kToolNames) {
+        if (k == kind) {
+            return QString::fromLatin1(name);
+        }
+    }
+    return {};
+}
+
+std::optional<ToolKind> MainWindow::toolFromName(const QString& name)
+{
+    for (const auto& [k, n] : kToolNames) {
+        if (name == QLatin1String(n)) {
+            return k;
+        }
+    }
+    return std::nullopt;
+}
+
+void MainWindow::runScript(const QString& path)
+{
+    m_consoleDock->show();
+    m_console->runFile(path);
+    m_view->setFocus();
 }
 
 void MainWindow::updateTitle()
@@ -277,10 +361,11 @@ void MainWindow::createActions()
     construction->setShortcut(Qt::Key_X);
     connect(construction, &QAction::triggered, this, [this] {
         const auto selection = m_view->selection();
-        m_view->tryModify(tr("Construction"), [&](core::Sketch& s) {
+        m_view->tryEdit(tr("Construction"), [&](Editor& ed) {
             for (core::Id id : selection) {
+                const core::Sketch& s = ed.sketch();
                 if (s.hasEntity(id) && s.entity(id).kind() != core::EntityKind::Point) {
-                    s.entity(id).construction = !s.entity(id).construction;
+                    ed.setConstruction(id, !s.entity(id).construction);
                 }
             }
         });
@@ -299,9 +384,61 @@ void MainWindow::createActions()
     addDockWidget(Qt::RightDockWidgetArea, constraintsDock);
     resizeDocks({constraintsDock}, {300}, Qt::Horizontal);
 
+    m_console = new ScriptConsole(*m_doc, this);
+    m_consoleDock = new QDockWidget(tr("Python"), this);
+    m_consoleDock->setObjectName("PythonDock");
+    m_consoleDock->setWidget(m_console);
+    addDockWidget(Qt::BottomDockWidgetArea, m_consoleDock);
+    resizeDocks({m_consoleDock}, {180}, Qt::Vertical);
+
+    // --- Macros ---
+    auto* macroMenu = menuBar()->addMenu(tr("&Macros"));
+    auto* runScriptAction = macroMenu->addAction(tr("&Run Script..."));
+    runScriptAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_R));
+    connect(runScriptAction, &QAction::triggered, this, [this] {
+        const QString path = QFileDialog::getOpenFileName(this, tr("Run Script"), macrosFolder(), tr("Python (*.py)"));
+        if (!path.isEmpty()) {
+            runScript(path);
+        }
+    });
+    auto* openFolder = macroMenu->addAction(tr("Open Macros &Folder"));
+    connect(openFolder, &QAction::triggered, this,
+            [] { QDesktopServices::openUrl(QUrl::fromLocalFile(macrosFolder())); });
+    auto* saveRecording = macroMenu->addAction(tr("&Save Recording as Macro..."));
+    connect(saveRecording, &QAction::triggered, this, [this] {
+        const QString path = QFileDialog::getSaveFileName(this, tr("Save Recording"), macrosFolder() + "/recorded.py",
+                                                          tr("Python (*.py)"));
+        if (path.isEmpty()) {
+            return;
+        }
+        QFile file(path);
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            QMessageBox::critical(this, tr("Save failed"), file.errorString());
+            return;
+        }
+        const QString body = QStringLiteral("# Recorded with Drawing App. `doc` and `s` (the sketch) are predefined.\n")
+            + m_console->recording().join(QLatin1Char('\n')) + QLatin1Char('\n');
+        file.write(body.toUtf8());
+    });
+    macroMenu->addSeparator();
+    // The macros folder's scripts, listed fresh each time the menu opens.
+    auto* macroList = macroMenu->addMenu(tr("Macros Folder"));
+    connect(macroList, &QMenu::aboutToShow, this, [this, macroList] {
+        macroList->clear();
+        const QFileInfoList files = QDir(macrosFolder()).entryInfoList({QStringLiteral("*.py")}, QDir::Files, QDir::Name);
+        if (files.isEmpty()) {
+            macroList->addAction(tr("(none yet)"))->setEnabled(false);
+        }
+        for (const QFileInfo& fi : files) {
+            connect(macroList->addAction(fi.completeBaseName()), &QAction::triggered, this,
+                    [this, path = fi.absoluteFilePath()] { runScript(path); });
+        }
+    });
+
     // --- View ---
     auto* viewMenu = menuBar()->addMenu(tr("&View"));
     viewMenu->addAction(constraintsDock->toggleViewAction());
+    viewMenu->addAction(m_consoleDock->toggleViewAction());
     auto* home = viewMenu->addAction(tr("&Fit All"));
     home->setShortcut(Qt::Key_Home);
     connect(home, &QAction::triggered, m_view, &SketchView::fitAll);

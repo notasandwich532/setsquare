@@ -22,6 +22,14 @@ function(drawapp_warnings target)
     endif()
 endfunction()
 
+# Executables that embed Python: on Linux they must export the interpreter's symbols so the
+# standard library's extension modules (.so) can load.
+function(drawapp_embeds_python target)
+    if(NOT WIN32)
+        set_target_properties(${target} PROPERTIES ENABLE_EXPORTS ON)
+    endif()
+endfunction()
+
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets)
 qt_standard_project_setup()
 

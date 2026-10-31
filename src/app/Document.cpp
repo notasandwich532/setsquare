@@ -2,13 +2,27 @@
 
 #include <core/Serialize.h>
 
+#include <QDir>
 #include <QFile>
 #include <QSaveFile>
 
 namespace
 {
 constexpr size_t kMaxUndo = 200;
+
+// A Python string literal for a file path.
+QString pyString(const QString& s)
+{
+    QString escaped = QDir::fromNativeSeparators(s);
+    escaped.replace(QLatin1Char('\\'), QStringLiteral("\\\\")).replace(QLatin1Char('"'), QStringLiteral("\\\""));
+    return QLatin1Char('"') + escaped + QLatin1Char('"');
 }
+
+QString errorText(const core::SketchError& e)
+{
+    return QString::fromStdString(e.what());
+}
+}  // namespace
 
 Document::Document(QObject* parent)
     : QObject(parent)
@@ -17,66 +31,31 @@ Document::Document(QObject* parent)
     resolve();
 }
 
-bool Document::save(const QString& path, QString* error)
-{
-    QSaveFile file(path);  // writes to a temp file and renames, so a failed save can't truncate
-    const std::string json = core::toJson(m_sketch);
-    if (!file.open(QIODevice::WriteOnly) || file.write(json.data(), qint64(json.size())) != qint64(json.size())
-        || !file.commit()) {
-        if (error) {
-            *error = tr("Couldn't save %1: %2").arg(path, file.errorString());
-        }
-        return false;
-    }
-    m_filePath = path;
-    m_savedRevision = m_revision;
-    emit fileStateChanged();
-    return true;
-}
-
-bool Document::open(const QString& path, QString* error)
-{
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly)) {
-        if (error) {
-            *error = tr("Couldn't open %1: %2").arg(path, file.errorString());
-        }
-        return false;
-    }
-    core::Sketch loaded;
-    try {
-        loaded = core::fromJson(file.readAll().toStdString());
-    }
-    catch (const core::SketchError& e) {
-        if (error) {
-            *error = tr("Couldn't read %1: %2").arg(path, QString::fromStdString(e.what()));
-        }
-        return false;
-    }
-    reset(std::move(loaded));
-    m_filePath = path;
-    emit fileStateChanged();
-    return true;
-}
-
-void Document::newSketch()
-{
-    reset();
-    m_filePath.clear();
-    emit fileStateChanged();
-}
-
 Document::~Document() = default;
 
-void Document::modify(const QString& /*label*/, const std::function<void(core::Sketch&)>& edit)
+// ---------------------------------------------------------------------------------------------
+// Edits
+// ---------------------------------------------------------------------------------------------
+
+void Document::modify(const QString& /*label*/, const std::function<void(core::Sketch&)>& fn)
 {
     core::Sketch working = m_sketch;
-    edit(working);  // may throw; m_sketch is untouched in that case
-
-    pushUndo(std::move(m_sketch));
-    m_sketch = std::move(working);
+    fn(working);  // may throw; m_sketch is untouched in that case
+    commit(std::move(working));
     resolve();
     emit changed();
+}
+
+void Document::edit(const QString& /*label*/, const std::function<void(Editor&)>& fn)
+{
+    core::Sketch working = m_sketch;
+    QStringList python;
+    Editor editor(working, &python);
+    fn(editor);  // may throw; m_sketch is untouched in that case
+    commit(std::move(working));
+    resolve();
+    emit changed();
+    record(python.join(QLatin1Char('\n')));
 }
 
 core::Id Document::addConstraint(core::ConstraintType type, std::vector<core::Id> refs, double value,
@@ -92,11 +71,15 @@ core::Id Document::addConstraint(core::ConstraintType type, std::vector<core::Id
     }
     catch (const core::SketchError& e) {
         if (error) {
-            *error = QString::fromStdString(e.what());
+            *error = errorText(e);
         }
         return core::kNoId;
     }
-    return commitChecked(std::move(working), error) ? id : core::kNoId;
+    if (!commitChecked(std::move(working), error)) {
+        return core::kNoId;
+    }
+    record(Editor::constraintCall(m_sketch, id));
+    return id;
 }
 
 bool Document::setDimensionValue(core::Id dimension, double value, QString* error)
@@ -107,11 +90,15 @@ bool Document::setDimensionValue(core::Id dimension, double value, QString* erro
     }
     catch (const core::SketchError& e) {
         if (error) {
-            *error = QString::fromStdString(e.what());
+            *error = errorText(e);
         }
         return false;
     }
-    return commitChecked(std::move(working), error);
+    if (!commitChecked(std::move(working), error)) {
+        return false;
+    }
+    record(QStringLiteral("%1.value = %2").arg(Editor::name(m_sketch, dimension), Editor::number(value)));
+    return true;
 }
 
 bool Document::commitChecked(core::Sketch working, QString* error)
@@ -133,18 +120,22 @@ bool Document::commitChecked(core::Sketch working, QString* error)
         }
         return false;
     }
-    pushUndo(std::move(m_sketch));
-    m_sketch = std::move(working);
+    commit(std::move(working));
     m_result = std::move(result);
     emit changed();
     return true;
 }
+
+// ---------------------------------------------------------------------------------------------
+// Dimension labels
+// ---------------------------------------------------------------------------------------------
 
 void Document::beginLabelDrag()
 {
     m_beforeDrag = m_sketch;
     m_labelDragging = true;
     m_dragMoved = false;
+    m_labelDimension = core::kNoId;
 }
 
 void Document::moveLabel(core::Id dimension, double dx, double dy)
@@ -154,22 +145,38 @@ void Document::moveLabel(core::Id dimension, double dx, double dy)
     }
     m_sketch.setConstraintLabel(dimension, dx, dy);
     m_dragMoved = true;
+    m_labelDimension = dimension;
     emit changed();
 }
 
 void Document::endLabelDrag()
 {
     if (m_labelDragging && m_dragMoved) {
-        pushUndo(std::move(m_beforeDrag));
+        core::Sketch before = std::move(m_beforeDrag);
+        core::Sketch now = std::move(m_sketch);
+        m_sketch = std::move(before);
+        commit(std::move(now));
+        if (m_sketch.hasConstraint(m_labelDimension)) {
+            const core::Constraint& c = m_sketch.constraint(m_labelDimension);
+            record(QStringLiteral("%1.label = (%2, %3)")
+                       .arg(Editor::name(m_sketch, c.id), Editor::number(c.labelX), Editor::number(c.labelY)));
+        }
     }
     m_beforeDrag = {};
     m_labelDragging = false;
 }
 
+// ---------------------------------------------------------------------------------------------
+// Dragging geometry
+// ---------------------------------------------------------------------------------------------
+
 void Document::beginDrag(const std::vector<core::Id>& points)
 {
     m_beforeDrag = m_sketch;
     m_dragMoved = false;
+    m_dragPoints = points;
+    m_dragEdge = core::kNoId;
+    m_dragDx = m_dragDy = 0.0;
     m_dragSolver = std::make_unique<core::Solver>(m_sketch);
     m_dragSolver->beginDrag(points);
 }
@@ -178,6 +185,11 @@ void Document::beginDragEdge(core::Id roundEntity, double x, double y)
 {
     m_beforeDrag = m_sketch;
     m_dragMoved = false;
+    m_dragPoints.clear();
+    m_dragEdge = roundEntity;
+    m_dragGrabX = x;
+    m_dragGrabY = y;
+    m_dragDx = m_dragDy = 0.0;
     m_dragSolver = std::make_unique<core::Solver>(m_sketch);
     m_dragSolver->beginDragEdge(roundEntity, x, y);
 }
@@ -190,6 +202,8 @@ void Document::dragTo(double dx, double dy)
     if (m_dragSolver->dragTo(dx, dy)) {
         m_dragSolver->writeBack(m_sketch);
         m_dragMoved = true;
+        m_dragDx = dx;
+        m_dragDy = dy;
         emit changed();
     }
 }
@@ -201,7 +215,25 @@ void Document::endDrag()
     }
     m_dragSolver.reset();
     if (m_dragMoved) {
-        pushUndo(std::move(m_beforeDrag));
+        core::Sketch now = std::move(m_sketch);
+        m_sketch = std::move(m_beforeDrag);
+        const core::Sketch& before = m_sketch;  // name things as they were when the drag began
+        QString python;
+        if (m_dragEdge != core::kNoId) {
+            python = QStringLiteral("s.drag_edge(%1, (%2, %3), %4, %5)")
+                         .arg(Editor::name(before, m_dragEdge), Editor::number(m_dragGrabX),
+                              Editor::number(m_dragGrabY), Editor::number(m_dragDx), Editor::number(m_dragDy));
+        }
+        else {
+            QStringList names;
+            for (core::Id p : m_dragPoints) {
+                names << Editor::name(before, p);
+            }
+            python = QStringLiteral("s.drag([%1], %2, %3)")
+                         .arg(names.join(QStringLiteral(", ")), Editor::number(m_dragDx), Editor::number(m_dragDy));
+        }
+        commit(std::move(now));
+        record(python);
     }
     m_beforeDrag = {};
     resolve();
@@ -220,9 +252,13 @@ void Document::cancelDrag()
     emit changed();
 }
 
+// ---------------------------------------------------------------------------------------------
+// History
+// ---------------------------------------------------------------------------------------------
+
 void Document::undo()
 {
-    if (m_undo.empty() || isDragging()) {
+    if (m_undo.empty() || isDragging() || inTransaction()) {
         return;
     }
     m_redo.push_back({std::move(m_sketch), m_revision});
@@ -233,11 +269,12 @@ void Document::undo()
     emit changed();
     emit undoStateChanged();
     emit fileStateChanged();
+    record(QStringLiteral("doc.undo()"));
 }
 
 void Document::redo()
 {
-    if (m_redo.empty() || isDragging()) {
+    if (m_redo.empty() || isDragging() || inTransaction()) {
         return;
     }
     m_undo.push_back({std::move(m_sketch), m_revision});
@@ -248,20 +285,40 @@ void Document::redo()
     emit changed();
     emit undoStateChanged();
     emit fileStateChanged();
+    record(QStringLiteral("doc.redo()"));
 }
 
-void Document::reset(core::Sketch sketch)
+void Document::beginTransaction()
 {
-    m_dragSolver.reset();
-    m_sketch = std::move(sketch);
-    m_sketch.ensureOrigin();
-    m_undo.clear();
-    m_redo.clear();
-    m_revision = m_savedRevision = m_nextRevision++;
-    resolve();
-    emit changed();
-    emit undoStateChanged();
-    emit fileStateChanged();
+    if (m_transactionDepth++ == 0) {
+        m_beforeTransaction = m_sketch;
+        m_revisionBeforeTransaction = m_revision;
+        m_transactionChanged = false;
+    }
+}
+
+void Document::endTransaction()
+{
+    if (m_transactionDepth == 0 || --m_transactionDepth > 0) {
+        return;
+    }
+    if (m_transactionChanged) {
+        m_revision = m_revisionBeforeTransaction;  // undo returns to the pre-transaction state
+        pushUndo(std::move(m_beforeTransaction));  // the whole transaction is one step
+    }
+    m_beforeTransaction = {};
+    m_transactionChanged = false;
+}
+
+void Document::commit(core::Sketch next)
+{
+    core::Sketch before = std::move(m_sketch);
+    m_sketch = std::move(next);
+    if (inTransaction()) {
+        m_transactionChanged = true;
+        return;
+    }
+    pushUndo(std::move(before));
 }
 
 void Document::pushUndo(core::Sketch snapshot)
@@ -276,7 +333,90 @@ void Document::pushUndo(core::Sketch snapshot)
     emit fileStateChanged();
 }
 
+void Document::reset(core::Sketch sketch)
+{
+    m_dragSolver.reset();
+    m_sketch = std::move(sketch);
+    m_sketch.ensureOrigin();
+    m_undo.clear();
+    m_redo.clear();
+    m_revision = m_savedRevision = m_nextRevision++;
+    if (inTransaction()) {
+        // A script opened a file / started over: the transaction continues from the new sketch.
+        m_beforeTransaction = m_sketch;
+        m_revisionBeforeTransaction = m_revision;
+        m_transactionChanged = false;
+    }
+    resolve();
+    emit changed();
+    emit undoStateChanged();
+    emit fileStateChanged();
+}
+
 void Document::resolve()
 {
     m_result = core::solve(m_sketch);
+}
+
+void Document::record(const QString& python)
+{
+    if (m_silence == 0 && !python.isEmpty()) {
+        emit recorded(python);
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Files
+// ---------------------------------------------------------------------------------------------
+
+bool Document::save(const QString& path, QString* error)
+{
+    QSaveFile file(path);  // writes to a temp file and renames, so a failed save can't truncate
+    const std::string json = core::toJson(m_sketch);
+    if (!file.open(QIODevice::WriteOnly) || file.write(json.data(), qint64(json.size())) != qint64(json.size())
+        || !file.commit()) {
+        if (error) {
+            *error = tr("Couldn't save %1: %2").arg(path, file.errorString());
+        }
+        return false;
+    }
+    m_filePath = path;
+    m_savedRevision = m_revision;
+    emit fileStateChanged();
+    record(QStringLiteral("doc.save(%1)").arg(pyString(path)));
+    return true;
+}
+
+bool Document::open(const QString& path, QString* error)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        if (error) {
+            *error = tr("Couldn't open %1: %2").arg(path, file.errorString());
+        }
+        return false;
+    }
+    core::Sketch loaded;
+    try {
+        loaded = core::fromJson(file.readAll().toStdString());
+    }
+    catch (const core::SketchError& e) {
+        if (error) {
+            *error = tr("Couldn't read %1: %2").arg(path, errorText(e));
+        }
+        return false;
+    }
+    reset(std::move(loaded));
+    m_filePath = path;
+    emit fileStateChanged();
+    record(QStringLiteral("doc.open(%1)").arg(pyString(path)));
+    return true;
+}
+
+void Document::newSketch()
+{
+    reset();
+    m_filePath.clear();
+    emit fileStateChanged();
+    record(QStringLiteral("doc.new()"));
 }

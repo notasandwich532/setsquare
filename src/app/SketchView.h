@@ -71,7 +71,7 @@ public:
     bool showStats() const { return m_showStats; }
 
     // Runs a document edit; on failure shows the error and returns false.
-    bool tryModify(const QString& label, const std::function<void(core::Sketch&)>& edit);
+    bool tryEdit(const QString& label, const std::function<void(Editor&)>& edit);
 
     // --- overlay drawing helpers for tools ---
     void drawPreviewLine(QPainter& painter, core::Vec2 a, core::Vec2 b) const;

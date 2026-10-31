@@ -5,6 +5,7 @@
 #include <QMainWindow>
 
 #include <map>
+#include <optional>
 
 class Document;
 class QAction;
@@ -17,8 +18,14 @@ class MainWindow : public QMainWindow
 
 public:
     explicit MainWindow(QWidget* parent = nullptr);
+    ~MainWindow() override;
 
     bool openFile(const QString& path);  // reports errors in a dialog
+    void runScript(const QString& path);  // in the Python console
+
+    // Tool names as used by Python's app.tool.
+    static QString toolName(ToolKind kind);
+    static std::optional<ToolKind> toolFromName(const QString& name);
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -41,4 +48,6 @@ private:
     QLabel* m_solveLabel = nullptr;
     QLabel* m_cursorLabel = nullptr;
     std::map<ToolKind, QAction*> m_toolActions;
+    class ScriptConsole* m_console = nullptr;
+    class QDockWidget* m_consoleDock = nullptr;
 };

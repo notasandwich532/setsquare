@@ -23,7 +23,17 @@ The first configure builds Eigen, Boost.Graph and Catch2 through vcpkg, which ta
 
 On Windows, `windeployqt build\windows-msvc\drawapp.exe` copies the Qt DLLs next to the exe. Alternatively, add `%QT_ROOT_DIR%\bin` to PATH.
 
+## Scripting
+Everything in the UI can be done from Python (bundled CPython 3.14, no system Python needed), and UI actions are recorded as Python in the console. You can run Python in three places:
+- the in-app **Python** dock
+- **Macros → Run Script…**
+- headless, with `drawapp-cli script.py`
+
+See [docs/scripting.md](docs/scripting.md).
+
 ## Layout
 - `third_party/planegcs/`: vendored solver (see its README for the local patches)
-- `src/app/`: Qt application (main window, sketch canvas, theme)
-- `tests/`: Catch2 unit tests
+- `src/core/`: sketch model, solver adapter, geometry, file format (no Qt)
+- `src/app/`: `Document` + the recording `Editor` (the command layer), and the Qt application
+- `src/script/`: embedded Python host, the `drawapp` module, and `drawapp-cli`
+- `tests/`: Catch2 unit/GUI tests, plus `tests/scripts/*.py` run headless

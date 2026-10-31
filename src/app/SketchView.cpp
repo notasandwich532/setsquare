@@ -227,10 +227,10 @@ void SketchView::deleteSelection()
     if (doomed.empty()) {
         return;
     }
-    tryModify(tr("Delete"), [&](core::Sketch& s) {
+    tryEdit(tr("Delete"), [&](Editor& ed) {
         for (core::Id id : doomed) {
-            if (s.hasEntity(id) || s.hasConstraint(id)) {
-                s.remove(id);  // may already be gone via an earlier cascade
+            if (ed.sketch().hasEntity(id) || ed.sketch().hasConstraint(id)) {
+                ed.remove(id);  // may already be gone via an earlier cascade
             }
         }
     });
@@ -272,10 +272,10 @@ void SketchView::fitAll()
     scheduleRepaint();
 }
 
-bool SketchView::tryModify(const QString& label, const std::function<void(core::Sketch&)>& edit)
+bool SketchView::tryEdit(const QString& label, const std::function<void(Editor&)>& edit)
 {
     try {
-        m_doc.modify(label, edit);
+        m_doc.edit(label, edit);
         return true;
     }
     catch (const core::SketchError& e) {

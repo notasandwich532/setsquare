@@ -26,9 +26,9 @@ double distance(Vec2 a, Vec2 b)
 
 constexpr double kAxisSnapDegrees = 3.0;  // lines this close to horizontal/vertical snap to it
 
-Id resolvePoint(Sketch& s, const Snap& snap)
+Id resolvePoint(Editor& ed, const Snap& snap)
 {
-    return resolveSnap(s, snap);
+    return resolveSnap(ed, snap);
 }
 
 QString formatLength(double v)
@@ -37,17 +37,18 @@ QString formatLength(double v)
 }
 }  // namespace
 
-Id resolveSnap(Sketch& s, const Snap& snap)
+Id resolveSnap(Editor& ed, const Snap& snap)
 {
+    const Sketch& s = ed.sketch();
     if (snap.point != kNoId && s.hasEntity(snap.point) && s.entity(snap.point).kind() == core::EntityKind::Point) {
         return snap.point;
     }
-    const Id p = s.addPoint(snap.pos.x, snap.pos.y);
+    const Id p = ed.point(snap.pos.x, snap.pos.y);
     if (snap.midpointOf != kNoId && s.hasEntity(snap.midpointOf)) {
-        s.addConstraint(core::ConstraintType::Midpoint, {p, snap.midpointOf});
+        ed.constrain(core::ConstraintType::Midpoint, {p, snap.midpointOf});
     }
     else if (snap.onCurve != kNoId && s.hasEntity(snap.onCurve)) {
-        s.addConstraint(core::ConstraintType::Coincident, {p, snap.onCurve});
+        ed.constrain(core::ConstraintType::Coincident, {p, snap.onCurve});
     }
     return p;
 }
@@ -87,15 +88,15 @@ void LineTool::press(const ToolEvent& e)
 
     Id a = kNoId, b = kNoId;
     const Axis axis = m_axis;
-    const bool ok = view().tryModify(QObject::tr("Line"), [&](Sketch& s) {
-        a = resolvePoint(s, m_start);
-        b = resolvePoint(s, snap);
-        const Id line = s.addLine(a, b);
+    const bool ok = view().tryEdit(QObject::tr("Line"), [&](Editor& ed) {
+        a = resolvePoint(ed, m_start);
+        b = resolvePoint(ed, snap);
+        const Id line = ed.line(a, b);
         if (axis == Axis::Horizontal) {
-            s.addConstraint(core::ConstraintType::Horizontal, {line});
+            ed.constrain(core::ConstraintType::Horizontal, {line});
         }
         else if (axis == Axis::Vertical) {
-            s.addConstraint(core::ConstraintType::Vertical, {line});
+            ed.constrain(core::ConstraintType::Vertical, {line});
         }
     });
     if (!ok) {
@@ -215,20 +216,10 @@ void RectangleTool::press(const ToolEvent& e)
         return;
     }
 
-    view().tryModify(QObject::tr("Rectangle"), [&](Sketch& s) {
-        // Corners go round the rectangle: first, (x2,y1), opposite, (x1,y2).
-        const Id c0 = resolvePoint(s, m_first);
-        const Id c1 = s.addPoint(snap.pos.x, m_first.pos.y);
-        const Id c2 = resolvePoint(s, snap);
-        const Id c3 = s.addPoint(m_first.pos.x, snap.pos.y);
-        const Id l0 = s.addLine(c0, c1);
-        const Id l1 = s.addLine(c1, c2);
-        const Id l2 = s.addLine(c2, c3);
-        const Id l3 = s.addLine(c3, c0);
-        s.addConstraint(core::ConstraintType::Horizontal, {l0});
-        s.addConstraint(core::ConstraintType::Vertical, {l1});
-        s.addConstraint(core::ConstraintType::Horizontal, {l2});
-        s.addConstraint(core::ConstraintType::Vertical, {l3});
+    view().tryEdit(QObject::tr("Rectangle"), [&](Editor& ed) {
+        const Id corner = resolvePoint(ed, m_first);
+        const Id opposite = resolvePoint(ed, snap);
+        ed.rectangle(corner, opposite);
     });
     m_active = false;
     refresh();
@@ -291,10 +282,10 @@ void CircleTool::press(const ToolEvent& e)
     if (r * view().zoom() < kMinSizePx) {
         return;
     }
-    view().tryModify(QObject::tr("Circle"), [&](Sketch& s) {
-        const Id circle = s.addCircle(resolvePoint(s, m_center), r);
-        if (snap.point != kNoId && s.hasEntity(snap.point)) {
-            s.addConstraint(core::ConstraintType::Coincident, {snap.point, circle});  // rim through it
+    view().tryEdit(QObject::tr("Circle"), [&](Editor& ed) {
+        const Id circle = ed.circle(resolvePoint(ed, m_center), r);
+        if (snap.point != kNoId && ed.sketch().hasEntity(snap.point)) {
+            ed.constrain(core::ConstraintType::Coincident, {snap.point, circle});  // rim through it
         }
     });
     m_active = false;
@@ -388,11 +379,11 @@ void CenterArcTool::press(const ToolEvent& e)
                             m_center.pos.y + shape.radius * std::sin(endAngle)},
                            snap.point};
             const bool ccw = m_sweep >= 0.0;
-            view().tryModify(QObject::tr("Arc"), [&](Sketch& s) {
-                const Id c = resolvePoint(s, m_center);
-                const Id a = resolvePoint(s, m_start);
-                const Id b = resolvePoint(s, end);
-                ccw ? s.addArc(c, a, b) : s.addArc(c, b, a);
+            view().tryEdit(QObject::tr("Arc"), [&](Editor& ed) {
+                const Id c = resolvePoint(ed, m_center);
+                const Id a = resolvePoint(ed, m_start);
+                const Id b = resolvePoint(ed, end);
+                ccw ? ed.arc(c, a, b) : ed.arc(c, b, a);
             });
             m_step = 0;
             break;
@@ -510,11 +501,11 @@ void ThreePointArcTool::press(const ToolEvent& e)
             if (!preview(shape, reversed)) {
                 return;
             }
-            view().tryModify(QObject::tr("Arc"), [&](Sketch& s) {
-                const Id c = s.addPoint(shape.center.x, shape.center.y);
-                const Id a = resolvePoint(s, m_start);
-                const Id b = resolvePoint(s, m_end);
-                reversed ? s.addArc(c, b, a) : s.addArc(c, a, b);
+            view().tryEdit(QObject::tr("Arc"), [&](Editor& ed) {
+                const Id c = ed.point(shape.center.x, shape.center.y);
+                const Id a = resolvePoint(ed, m_start);
+                const Id b = resolvePoint(ed, m_end);
+                reversed ? ed.arc(c, b, a) : ed.arc(c, a, b);
             });
             m_step = 0;
             break;

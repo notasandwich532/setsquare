@@ -122,10 +122,10 @@ ConstraintTool::Outcome ConstraintTool::tryApply(const std::vector<Id>& refs)
             emit view().message(QObject::tr("The origin is always fixed"));
             return Outcome::Rejected;
         }
-        view().tryModify(QObject::tr("Fix"), [&](Sketch& sk) {
+        view().tryEdit(QObject::tr("Fix"), [&](Editor& ed) {
             for (Id id : ids) {
-                if (!sk.isOrigin(id)) {
-                    sk.entity(id).fixed = !sk.entity(id).fixed;
+                if (!ed.sketch().isOrigin(id)) {
+                    ed.setFixed(id, !ed.sketch().entity(id).fixed);
                 }
             }
         });
