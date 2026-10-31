@@ -37,6 +37,7 @@ public:
     core::Vec2 toWorld(QPointF screen) const;
     double zoom() const { return m_zoom; }  // pixels per world unit
     void resetView();
+    void fitAll();  // zoom to show the whole drawing (or reset when it's empty)
 
     // --- tools ---
     void setTool(ToolKind kind);
@@ -111,7 +112,15 @@ private:
     double m_zoom = 4.0;  // pixels per world unit
     bool m_panning = false;
     QPointF m_lastMouse;
-    bool m_initialised = false;
+
+    // Until the user pans or zooms, the last fit/reset is re-applied when the canvas resizes
+    // (first layout, DPI changes, window resizes right after opening a file).
+    enum class AutoView
+    {
+        None,
+        Reset,
+        Fit,
+    } m_autoView = AutoView::Reset;
 
     std::unique_ptr<Tool> m_tool;
     ToolKind m_toolKind = ToolKind::Select;

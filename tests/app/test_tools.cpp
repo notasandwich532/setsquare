@@ -134,15 +134,36 @@ TEST_CASE("Rectangle tool adds four constrained sides", "[tools][rectangle]")
 {
     Fixture f;
     f.view.setTool(ToolKind::Rectangle);
-    f.click(0, 0);
-    f.click(30, 20);
+    f.click(10, 10);
+    f.click(40, 30);
 
     CHECK(f.ofKind(EntityKind::Line).size() == 4);
-    CHECK(f.ofKind(EntityKind::Point).size() == 4);
+    CHECK(f.ofKind(EntityKind::Point).size() == 5);  // 4 corners + the origin
     CHECK(f.sketch().constraints().size() == 4);
     const SolveResult& r = f.doc.solveResult();
     CHECK(r.ok);
     CHECK(r.dof == 4);
+}
+
+TEST_CASE("Geometry drawn from the origin is anchored to it", "[tools][origin]")
+{
+    Fixture f;
+    const Id origin = f.sketch().origin();
+    REQUIRE(origin != kNoId);
+    CHECK(f.sketch().entity(origin).fixed);
+
+    f.view.setTool(ToolKind::Rectangle);
+    f.click(0.5, -0.5);  // snaps onto the origin
+    f.click(30, 20);
+    CHECK(f.ofKind(EntityKind::Point).size() == 4);  // the origin is one of the corners
+    CHECK(f.doc.solveResult().dof == 2);             // only width and height left
+
+    // The origin survives deleting everything.
+    f.view.setTool(ToolKind::Select);
+    f.view.selectAll();
+    f.key(Qt::Key_Delete);
+    CHECK(f.sketch().entities().size() == 1);
+    CHECK(f.sketch().hasEntity(origin));
 }
 
 TEST_CASE("Circle tool: centre then radius", "[tools][circle]")
@@ -219,7 +240,7 @@ TEST_CASE("Esc abandons a shape in progress", "[tools]")
     f.click(0, 0);
     f.key(Qt::Key_Escape);
     f.click(30, 20);  // starts a fresh rectangle rather than finishing the old one
-    CHECK(f.sketch().entities().empty());
+    CHECK(f.sketch().entities().size() == 1);  // just the origin
 }
 
 TEST_CASE("Select, delete and undo", "[tools][select]")

@@ -7,10 +7,17 @@
 
 #include <QAction>
 #include <QActionGroup>
+#include <QCloseEvent>
+#include <QDir>
 #include <QDockWidget>
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QKeySequence>
 #include <QLabel>
 #include <QMenuBar>
+#include <QMessageBox>
+#include <QScreen>
+#include <QStandardPaths>
 #include <QStatusBar>
 #include <QToolBar>
 
@@ -24,7 +31,10 @@ MainWindow::MainWindow(QWidget* parent)
 {
     setWindowTitle(tr("Drawing App"));
     setCentralWidget(m_view);
-    resize(1280, 800);
+    // 1280x800, but never bigger than the screen we open on (high-DPI laptops, small monitors).
+    const QRect available = screen() ? screen()->availableGeometry() : QRect(0, 0, 1280, 800);
+    resize(std::min(1280, available.width() * 9 / 10), std::min(800, available.height() * 9 / 10));
+    move(available.center() - rect().center());
 
     m_cursorLabel->setMinimumWidth(170);
     m_solveLabel->setMinimumWidth(170);
@@ -40,11 +50,122 @@ MainWindow::MainWindow(QWidget* parent)
         statusBar()->showMessage(text, 5000);
     });
     connect(m_doc, &Document::changed, this, &MainWindow::updateSolveStatus);
+    connect(m_doc, &Document::fileStateChanged, this, &MainWindow::updateTitle);
 
     createActions();
     m_hintLabel->setText(m_view->hint());
     updateSolveStatus();
+    updateTitle();
     m_view->setFocus();
+}
+
+namespace
+{
+const QString kFileFilter = QObject::tr("Sketches (*.dsk);;All files (*)");
+}
+
+void MainWindow::updateTitle()
+{
+    const QString path = m_doc->filePath();
+    const QString name = path.isEmpty() ? tr("Untitled") : QFileInfo(path).fileName();
+    setWindowTitle(QStringLiteral("%1%2 - %3").arg(name, m_doc->isModified() ? QStringLiteral("*") : QString(),
+                                                   tr("Drawing App")));
+}
+
+bool MainWindow::maybeSave()
+{
+    if (!m_doc->isModified()) {
+        return true;
+    }
+    const auto answer = QMessageBox::warning(
+        this, tr("Unsaved changes"), tr("Save changes to %1?").arg(m_doc->filePath().isEmpty()
+                                                                      ? tr("Untitled")
+                                                                      : QFileInfo(m_doc->filePath()).fileName()),
+        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
+    if (answer == QMessageBox::Save) {
+        return save();
+    }
+    return answer == QMessageBox::Discard;
+}
+
+bool MainWindow::save()
+{
+    if (m_doc->filePath().isEmpty()) {
+        return saveAs();
+    }
+    QString error;
+    if (!m_doc->save(m_doc->filePath(), &error)) {
+        QMessageBox::critical(this, tr("Save failed"), error);
+        return false;
+    }
+    statusBar()->showMessage(tr("Saved %1").arg(QDir::toNativeSeparators(m_doc->filePath())), 3000);
+    return true;
+}
+
+bool MainWindow::saveAs()
+{
+    const QString start = m_doc->filePath().isEmpty()
+        ? QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + QStringLiteral("/untitled.dsk")
+        : m_doc->filePath();
+    QString path = QFileDialog::getSaveFileName(this, tr("Save Sketch"), start, kFileFilter);
+    if (path.isEmpty()) {
+        return false;
+    }
+    if (QFileInfo(path).suffix().isEmpty()) {
+        path += QStringLiteral(".dsk");
+    }
+    QString error;
+    if (!m_doc->save(path, &error)) {
+        QMessageBox::critical(this, tr("Save failed"), error);
+        return false;
+    }
+    statusBar()->showMessage(tr("Saved %1").arg(QDir::toNativeSeparators(path)), 3000);
+    return true;
+}
+
+void MainWindow::open()
+{
+    if (!maybeSave()) {
+        return;
+    }
+    const QString start = m_doc->filePath().isEmpty()
+        ? QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
+        : QFileInfo(m_doc->filePath()).absolutePath();
+    const QString path = QFileDialog::getOpenFileName(this, tr("Open Sketch"), start, kFileFilter);
+    if (!path.isEmpty()) {
+        openFile(path);
+    }
+}
+
+bool MainWindow::openFile(const QString& path)
+{
+    QString error;
+    if (!m_doc->open(path, &error)) {
+        QMessageBox::critical(this, tr("Open failed"), error);
+        return false;
+    }
+    m_view->setTool(ToolKind::Select);
+    m_view->fitAll();
+    return true;
+}
+
+void MainWindow::newSketch()
+{
+    if (maybeSave()) {
+        m_doc->newSketch();
+        m_view->setTool(ToolKind::Select);
+        m_view->resetView();
+    }
+}
+
+void MainWindow::closeEvent(QCloseEvent* event)
+{
+    if (maybeSave()) {
+        event->accept();
+    }
+    else {
+        event->ignore();
+    }
 }
 
 void MainWindow::createActions()
@@ -53,7 +174,16 @@ void MainWindow::createActions()
     auto* fileMenu = menuBar()->addMenu(tr("&File"));
     auto* newSketch = fileMenu->addAction(tr("&New Sketch"));
     newSketch->setShortcut(QKeySequence::New);
-    connect(newSketch, &QAction::triggered, this, [this] { m_doc->reset(); });
+    connect(newSketch, &QAction::triggered, this, &MainWindow::newSketch);
+    auto* open = fileMenu->addAction(tr("&Open..."));
+    open->setShortcut(QKeySequence::Open);
+    connect(open, &QAction::triggered, this, &MainWindow::open);
+    auto* save = fileMenu->addAction(tr("&Save"));
+    save->setShortcut(QKeySequence::Save);
+    connect(save, &QAction::triggered, this, &MainWindow::save);
+    auto* saveAs = fileMenu->addAction(tr("Save &As..."));
+    saveAs->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S));
+    connect(saveAs, &QAction::triggered, this, &MainWindow::saveAs);
     fileMenu->addSeparator();
     auto* quit = fileMenu->addAction(tr("&Quit"));
     quit->setShortcut(QKeySequence::Quit);
@@ -172,9 +302,9 @@ void MainWindow::createActions()
     // --- View ---
     auto* viewMenu = menuBar()->addMenu(tr("&View"));
     viewMenu->addAction(constraintsDock->toggleViewAction());
-    auto* home = viewMenu->addAction(tr("&Home View"));
+    auto* home = viewMenu->addAction(tr("&Fit All"));
     home->setShortcut(Qt::Key_Home);
-    connect(home, &QAction::triggered, m_view, &SketchView::resetView);
+    connect(home, &QAction::triggered, m_view, &SketchView::fitAll);
     auto* stats = viewMenu->addAction(tr("Performance &Stats"));
     stats->setCheckable(true);
     stats->setShortcut(Qt::Key_F12);

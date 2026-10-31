@@ -118,9 +118,15 @@ ConstraintTool::Outcome ConstraintTool::tryApply(const std::vector<Id>& refs)
 
     if (m_kind == ToolKind::Fix) {
         const std::vector<Id> ids = refs;
+        if (std::ranges::all_of(ids, [&](Id id) { return s.isOrigin(id); })) {
+            emit view().message(QObject::tr("The origin is always fixed"));
+            return Outcome::Rejected;
+        }
         view().tryModify(QObject::tr("Fix"), [&](Sketch& sk) {
             for (Id id : ids) {
-                sk.entity(id).fixed = !sk.entity(id).fixed;
+                if (!sk.isOrigin(id)) {
+                    sk.entity(id).fixed = !sk.entity(id).fixed;
+                }
             }
         });
         return Outcome::Applied;

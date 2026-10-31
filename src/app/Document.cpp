@@ -1,5 +1,10 @@
 #include "Document.h"
 
+#include <core/Serialize.h>
+
+#include <QFile>
+#include <QSaveFile>
+
 namespace
 {
 constexpr size_t kMaxUndo = 200;
@@ -8,7 +13,57 @@ constexpr size_t kMaxUndo = 200;
 Document::Document(QObject* parent)
     : QObject(parent)
 {
+    m_sketch.ensureOrigin();
     resolve();
+}
+
+bool Document::save(const QString& path, QString* error)
+{
+    QSaveFile file(path);  // writes to a temp file and renames, so a failed save can't truncate
+    const std::string json = core::toJson(m_sketch);
+    if (!file.open(QIODevice::WriteOnly) || file.write(json.data(), qint64(json.size())) != qint64(json.size())
+        || !file.commit()) {
+        if (error) {
+            *error = tr("Couldn't save %1: %2").arg(path, file.errorString());
+        }
+        return false;
+    }
+    m_filePath = path;
+    m_savedRevision = m_revision;
+    emit fileStateChanged();
+    return true;
+}
+
+bool Document::open(const QString& path, QString* error)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        if (error) {
+            *error = tr("Couldn't open %1: %2").arg(path, file.errorString());
+        }
+        return false;
+    }
+    core::Sketch loaded;
+    try {
+        loaded = core::fromJson(file.readAll().toStdString());
+    }
+    catch (const core::SketchError& e) {
+        if (error) {
+            *error = tr("Couldn't read %1: %2").arg(path, QString::fromStdString(e.what()));
+        }
+        return false;
+    }
+    reset(std::move(loaded));
+    m_filePath = path;
+    emit fileStateChanged();
+    return true;
+}
+
+void Document::newSketch()
+{
+    reset();
+    m_filePath.clear();
+    emit fileStateChanged();
 }
 
 Document::~Document() = default;
@@ -170,12 +225,14 @@ void Document::undo()
     if (m_undo.empty() || isDragging()) {
         return;
     }
-    m_redo.push_back(std::move(m_sketch));
-    m_sketch = std::move(m_undo.back());
+    m_redo.push_back({std::move(m_sketch), m_revision});
+    m_sketch = std::move(m_undo.back().sketch);
+    m_revision = m_undo.back().revision;
     m_undo.pop_back();
     resolve();
     emit changed();
     emit undoStateChanged();
+    emit fileStateChanged();
 }
 
 void Document::redo()
@@ -183,33 +240,40 @@ void Document::redo()
     if (m_redo.empty() || isDragging()) {
         return;
     }
-    m_undo.push_back(std::move(m_sketch));
-    m_sketch = std::move(m_redo.back());
+    m_undo.push_back({std::move(m_sketch), m_revision});
+    m_sketch = std::move(m_redo.back().sketch);
+    m_revision = m_redo.back().revision;
     m_redo.pop_back();
     resolve();
     emit changed();
     emit undoStateChanged();
+    emit fileStateChanged();
 }
 
 void Document::reset(core::Sketch sketch)
 {
     m_dragSolver.reset();
     m_sketch = std::move(sketch);
+    m_sketch.ensureOrigin();
     m_undo.clear();
     m_redo.clear();
+    m_revision = m_savedRevision = m_nextRevision++;
     resolve();
     emit changed();
     emit undoStateChanged();
+    emit fileStateChanged();
 }
 
 void Document::pushUndo(core::Sketch snapshot)
 {
-    m_undo.push_back(std::move(snapshot));
+    m_undo.push_back({std::move(snapshot), m_revision});
     if (m_undo.size() > kMaxUndo) {
         m_undo.erase(m_undo.begin());
     }
     m_redo.clear();
+    m_revision = m_nextRevision++;  // pushUndo always precedes a new current state
     emit undoStateChanged();
+    emit fileStateChanged();
 }
 
 void Document::resolve()

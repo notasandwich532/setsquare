@@ -6,6 +6,7 @@
     "eigen3",
     "boost-graph",
     "boost-math",
-    "catch2"
+    "catch2",
+    "nlohmann-json"
   ]
 }

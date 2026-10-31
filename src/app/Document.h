@@ -53,13 +53,22 @@ public:
     void undo();
     void redo();
 
-    // Replaces the sketch wholesale (new document / load); clears history.
+    // Replaces the sketch wholesale (new document / load); clears history. Every sketch gets
+    // an origin point.
     void reset(core::Sketch sketch = {});
+
+    // --- files ---
+    QString filePath() const { return m_filePath; }  // empty until saved or opened
+    bool isModified() const { return m_revision != m_savedRevision; }
+    bool save(const QString& path, QString* error = nullptr);
+    bool open(const QString& path, QString* error = nullptr);
+    void newSketch();
 
 signals:
     // Geometry and/or structure changed; listeners should repaint and re-query.
     void changed();
     void undoStateChanged();
+    void fileStateChanged();  // path or modified flag
 
 private:
     void pushUndo(core::Sketch snapshot);
@@ -70,8 +79,19 @@ private:
     core::Sketch m_sketch;
     core::SolveResult m_result;
 
-    std::vector<core::Sketch> m_undo;
-    std::vector<core::Sketch> m_redo;
+    // Each history entry remembers its revision so undoing back to the saved state counts as
+    // unmodified.
+    struct Snapshot
+    {
+        core::Sketch sketch;
+        quint64 revision;
+    };
+    std::vector<Snapshot> m_undo;
+    std::vector<Snapshot> m_redo;
+    quint64 m_revision = 0;       // identifies the current state
+    quint64 m_nextRevision = 1;
+    quint64 m_savedRevision = 0;  // state last saved/opened
+    QString m_filePath;
 
     std::unique_ptr<core::Solver> m_dragSolver;
     core::Sketch m_beforeDrag;

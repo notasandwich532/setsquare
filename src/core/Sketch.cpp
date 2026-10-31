@@ -5,6 +5,7 @@
 #include <numbers>
 #include <set>
 #include <string>
+#include <type_traits>
 
 namespace core
 {
@@ -46,6 +47,99 @@ const char* toString(ConstraintType type)
 bool isDimension(ConstraintType type)
 {
     return type >= ConstraintType::Distance;
+}
+
+bool constraintTypeFromString(const std::string& name, ConstraintType& out)
+{
+    for (int i = 0; i <= static_cast<int>(ConstraintType::Angle); ++i) {
+        const auto type = static_cast<ConstraintType>(i);
+        if (name == toString(type)) {
+            out = type;
+            return true;
+        }
+    }
+    return false;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Origin and loading
+// ---------------------------------------------------------------------------------------------
+
+Id Sketch::ensureOrigin()
+{
+    if (m_origin == kNoId) {
+        m_origin = addPoint(0.0, 0.0);
+        m_entities.at(m_origin).fixed = true;
+    }
+    return m_origin;
+}
+
+void Sketch::setOrigin(Id point)
+{
+    if (kindOf(point) != EntityKind::Point) {
+        throw SketchError("the origin must be a point");
+    }
+    m_origin = point;
+    Entity& e = m_entities.at(point);
+    e.fixed = true;
+    e.geom = Point{0.0, 0.0};
+}
+
+void Sketch::checkGeometry(const Entity& e) const
+{
+    const std::vector<Id> points = std::visit(
+        [](const auto& g) -> std::vector<Id> {
+            using T = std::decay_t<decltype(g)>;
+            if constexpr (std::is_same_v<T, Line>) {
+                return {g.p1, g.p2};
+            }
+            else if constexpr (std::is_same_v<T, Circle>) {
+                return {g.center};
+            }
+            else if constexpr (std::is_same_v<T, Arc>) {
+                return {g.center, g.start, g.end};
+            }
+            else {
+                return {};
+            }
+        },
+        e.geom);
+    for (Id p : points) {
+        if (!hasEntity(p) || kindOf(p) != EntityKind::Point) {
+            throw SketchError(std::string(toString(e.kind())) + " " + std::to_string(e.id) + " refers to missing point "
+                              + std::to_string(p));
+        }
+    }
+    if (std::set<Id>(points.begin(), points.end()).size() != points.size()) {
+        throw SketchError(std::string(toString(e.kind())) + " " + std::to_string(e.id) + " repeats a point");
+    }
+    if (const auto* c = std::get_if<Circle>(&e.geom); c && !(c->radius > 0.0)) {
+        throw SketchError("circle " + std::to_string(e.id) + " has a non-positive radius");
+    }
+}
+
+void Sketch::insertEntity(const Entity& e)
+{
+    if (e.id == kNoId || hasEntity(e.id) || hasConstraint(e.id)) {
+        throw SketchError("duplicate or invalid id " + std::to_string(e.id));
+    }
+    checkGeometry(e);
+    m_entities.emplace(e.id, e);
+    m_nextId = std::max(m_nextId, e.id + 1);
+}
+
+void Sketch::insertConstraint(const Constraint& c)
+{
+    if (c.id == kNoId || hasEntity(c.id) || hasConstraint(c.id)) {
+        throw SketchError("duplicate or invalid id " + std::to_string(c.id));
+    }
+    std::vector<Id> refs = c.refs;
+    normalize(c.type, refs);
+    validate(c.type, refs, c.value);
+    Constraint stored = c;
+    stored.refs = std::move(refs);
+    m_constraints.emplace(c.id, std::move(stored));
+    m_nextId = std::max(m_nextId, c.id + 1);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -335,6 +429,9 @@ void Sketch::remove(Id id)
     if (!hasEntity(id)) {
         throw SketchError("unknown id " + std::to_string(id));
     }
+    if (isOrigin(id)) {
+        throw SketchError("the origin can't be deleted");
+    }
 
     std::set<Id> doomed{id};
 
@@ -357,6 +454,9 @@ void Sketch::remove(Id id)
         }
     }
     for (Id p : candidates) {
+        if (isOrigin(p)) {
+            continue;  // curves ending on the origin don't take it with them
+        }
         const bool used = std::ranges::any_of(m_entities, [&](const auto& kv) {
             return !doomed.contains(kv.first) && referencesPoint(kv.second, p);
         });
@@ -377,6 +477,7 @@ void Sketch::clear()
 {
     m_entities.clear();
     m_constraints.clear();
+    m_origin = kNoId;
 }
 
 // ---------------------------------------------------------------------------------------------

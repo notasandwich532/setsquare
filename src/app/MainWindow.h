@@ -18,9 +18,22 @@ class MainWindow : public QMainWindow
 public:
     explicit MainWindow(QWidget* parent = nullptr);
 
+    bool openFile(const QString& path);  // reports errors in a dialog
+
+protected:
+    void closeEvent(QCloseEvent* event) override;
+
 private:
     void createActions();
     void updateSolveStatus();
+    void updateTitle();
+
+    // File actions; each returns false if the user cancelled or it failed.
+    bool maybeSave();  // offers to save unsaved changes before they'd be lost
+    bool save();
+    bool saveAs();
+    void open();
+    void newSketch();
 
     Document* m_doc = nullptr;
     SketchView* m_view = nullptr;

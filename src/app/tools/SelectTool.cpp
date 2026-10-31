@@ -25,8 +25,8 @@ QString SelectTool::hint() const
                 ? QObject::tr("Window select: entities fully inside")
                 : QObject::tr("Crossing select: anything touched");
         default:
-            return QObject::tr("Click to select, Shift+click to add, drag geometry to move it, "
-                               "drag empty space to box-select");
+            return QObject::tr("Click to select (Shift adds). Drag geometry to move it. Drag on empty space to "
+                               "box-select: left-to-right takes what's inside, right-to-left anything touched");
     }
 }
 

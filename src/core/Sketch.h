@@ -101,6 +101,7 @@ enum class ConstraintType
 
 const char* toString(ConstraintType type);
 bool isDimension(ConstraintType type);
+bool constraintTypeFromString(const std::string& name, ConstraintType& out);
 
 struct Constraint
 {
@@ -143,9 +144,23 @@ public:
 
     // Removes an entity or constraint. Removing geometry also removes everything that depends
     // on it (curves using a deleted point, constraints referencing deleted ids) and the
-    // endpoints of deleted curves that nothing else uses.
+    // endpoints of deleted curves that nothing else uses. The origin can't be removed.
     void remove(Id id);
     void clear();
+
+    // --- origin ---
+    // A fixed point at (0, 0) that geometry can snap to and be constrained against. Created on
+    // demand; a sketch has at most one, and it can't be moved, unfixed or deleted.
+    Id ensureOrigin();
+    Id origin() const { return m_origin; }
+    bool isOrigin(Id id) const { return id != kNoId && id == m_origin; }
+
+    // --- loading ---
+    // Insert items with known ids (e.g. from a file). Points must go in before the curves that
+    // use them, and geometry before constraints. Throws SketchError on bad references.
+    void insertEntity(const Entity& entity);
+    void insertConstraint(const Constraint& constraint);
+    void setOrigin(Id point);  // marks an existing point as the origin
 
     // --- lookup ---
     bool hasEntity(Id id) const { return m_entities.contains(id); }
@@ -182,10 +197,12 @@ private:
     void normalize(ConstraintType type, std::vector<Id>& refs) const;
     void validate(ConstraintType type, const std::vector<Id>& refs, double value) const;
     bool referencesPoint(const Entity& e, Id point) const;
+    void checkGeometry(const Entity& e) const;  // a curve's points exist and are distinct points
 
     std::map<Id, Entity> m_entities;
     std::map<Id, Constraint> m_constraints;
     Id m_nextId = 1;
+    Id m_origin = kNoId;
 };
 
 }  // namespace core

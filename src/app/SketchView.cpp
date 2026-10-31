@@ -90,6 +90,7 @@ void SketchView::resetView()
 {
     m_zoom = 4.0;
     m_pan = QPointF(width() / 2.0, height() / 2.0);
+    m_autoView = AutoView::Reset;
     scheduleRepaint();
 }
 
@@ -212,17 +213,20 @@ void SketchView::selectAll()
 {
     std::set<core::Id> all;
     for (const auto& [id, e] : m_doc.sketch().entities()) {
-        all.insert(id);
+        if (!m_doc.sketch().isOrigin(id)) {
+            all.insert(id);
+        }
     }
     setSelection(std::move(all));
 }
 
 void SketchView::deleteSelection()
 {
-    if (m_selection.empty()) {
+    std::set<core::Id> doomed = m_selection;
+    std::erase_if(doomed, [&](core::Id id) { return m_doc.sketch().isOrigin(id); });  // permanent
+    if (doomed.empty()) {
         return;
     }
-    const std::set<core::Id> doomed = m_selection;
     tryModify(tr("Delete"), [&](core::Sketch& s) {
         for (core::Id id : doomed) {
             if (s.hasEntity(id) || s.hasConstraint(id)) {
@@ -230,6 +234,42 @@ void SketchView::deleteSelection()
             }
         }
     });
+}
+
+void SketchView::fitAll()
+{
+    const core::Sketch& s = m_doc.sketch();
+    double minX = 0, minY = 0, maxX = 0, maxY = 0;  // always include the origin
+    auto include = [&](core::Vec2 p) {
+        minX = std::min(minX, p.x);
+        minY = std::min(minY, p.y);
+        maxX = std::max(maxX, p.x);
+        maxY = std::max(maxY, p.y);
+    };
+    for (const auto& [id, e] : s.entities()) {
+        for (const core::Vec2& p : core::sample(s, id, 32)) {
+            include(p);
+        }
+    }
+    for (const auto& [id, c] : s.constraints()) {
+        if (core::isDimension(c.type)) {
+            if (const core::DimensionLayout L = core::layoutDimension(s, c); L.valid) {
+                include(L.label);  // dimensions often sit outside the geometry
+            }
+        }
+    }
+    const double w = maxX - minX, h = maxY - minY;
+    if (w < 1e-9 && h < 1e-9) {
+        resetView();
+        return;
+    }
+    const double margin = 0.8;  // leave room for label text and symbols
+    m_zoom = std::clamp(std::min(width() * margin / std::max(w, 1e-9), height() * margin / std::max(h, 1e-9)),
+                        kMinZoom, kMaxZoom);
+    const core::Vec2 centre{(minX + maxX) / 2, (minY + maxY) / 2};
+    m_pan = QPointF(width() / 2.0 - centre.x * m_zoom, height() / 2.0 + centre.y * m_zoom);
+    m_autoView = AutoView::Fit;
+    scheduleRepaint();
 }
 
 bool SketchView::tryModify(const QString& label, const std::function<void(core::Sketch&)>& edit)
@@ -268,9 +308,11 @@ void SketchView::onDocumentChanged()
 void SketchView::resizeEvent(QResizeEvent* event)
 {
     QWidget::resizeEvent(event);
-    if (!m_initialised) {
+    if (m_autoView == AutoView::Reset) {
         resetView();
-        m_initialised = true;
+    }
+    else if (m_autoView == AutoView::Fit) {
+        fitAll();
     }
 }
 
@@ -470,7 +512,13 @@ void SketchView::drawSketch(QPainter& painter) const
         painter.setPen(Qt::NoPen);
         painter.setBrush(pen.color());
         painter.drawEllipse(toScreen({p.x, p.y}), r, r);
-        if (e.fixed) {
+        if (sketch.isOrigin(id)) {
+            // The origin: a ring around the dot.
+            painter.setBrush(Qt::NoBrush);
+            painter.setPen(QPen(pen.color(), 1.5));
+            painter.drawEllipse(toScreen({p.x, p.y}), 6.0, 6.0);
+        }
+        else if (e.fixed) {
             // Fixed points get a small square outline, a stand-in for Fusion's lock glyph.
             painter.setBrush(Qt::NoBrush);
             painter.setPen(QPen(pen.color(), 1.0));
@@ -556,6 +604,7 @@ void SketchView::wheelEvent(QWheelEvent* event)
     const QPointF mouse = event->position();
     const core::Vec2 anchor = toWorld(mouse);
     m_zoom = std::clamp(m_zoom * std::pow(kZoomStep, notches), kMinZoom, kMaxZoom);
+    m_autoView = AutoView::None;  // the user has taken over the view
     m_pan = QPointF(mouse.x() - anchor.x * m_zoom, mouse.y() + anchor.y * m_zoom);
     scheduleRepaint();
     event->accept();
@@ -577,6 +626,7 @@ void SketchView::mouseMoveEvent(QMouseEvent* event)
 {
     if (m_panning) {
         m_pan += event->position() - m_lastMouse;
+        m_autoView = AutoView::None;
         m_lastMouse = event->position();
         scheduleRepaint();
     }
