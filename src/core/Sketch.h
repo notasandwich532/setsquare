@@ -155,6 +155,17 @@ public:
     void remove(Id id);
     void clear();
 
+    // --- low-level editing (used by trim, fillet, ...) ---
+    // Makes `curve` use `newPoint` where it used `oldPoint` (line ends, arc start/end/centre).
+    void rebindPoint(Id curve, Id oldPoint, Id newPoint);
+    // Whether any curve is built on this point.
+    bool isPointUsed(Id point) const;
+    // Removes a point if no curve uses it (and it isn't the origin/axes); returns whether it did.
+    bool removeIfUnused(Id point);
+    // Moves every constraint reference from one entity to another (e.g. a circle that became an
+    // arc). Throws SketchError, changing nothing, if a constraint wouldn't be valid afterwards.
+    void retarget(Id from, Id to);
+
     // --- origin and axes ---
     // A fixed point at (0, 0) plus fixed X and Y axis lines through it, which geometry can snap
     // to and be constrained/dimensioned against (e.g. an angle to the X axis). Created on

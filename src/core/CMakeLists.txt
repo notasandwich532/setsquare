@@ -5,6 +5,8 @@ add_library(drawcore STATIC
     Dimensions.h
     Geometry.cpp
     Geometry.h
+    Modify.cpp
+    Modify.h
     Serialize.cpp
     Serialize.h
     Sketch.cpp

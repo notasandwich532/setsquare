@@ -85,6 +85,17 @@ public:
     int polygonSides() const { return m_polygonSides; }
     void setPolygonSides(int sides);
 
+    // Default sizes for fillets and chamfers (each is then editable as a dimension).
+    struct ModifyOptions
+    {
+        double filletRadius = 5.0;
+        double chamferDistance = 5.0;
+        double chamferDistance2 = 5.0;
+        double chamferAngle = 45.0;
+    };
+    ModifyOptions& modifyOptions() { return m_modifyOptions; }
+    const ModifyOptions& modifyOptions() const { return m_modifyOptions; }
+
     // Constraint symbols on the canvas (dimensions are always shown).
     bool showConstraints() const { return m_showConstraints; }
     void setShowConstraints(bool show);
@@ -139,6 +150,7 @@ private:
     std::set<core::Id> m_selection;
     core::Id m_hovered = core::kNoId;
     int m_polygonSides = 6;
+    ModifyOptions m_modifyOptions;
     bool m_showConstraints = true;
 
     // Constraint symbols and dimension labels, laid out in screen space. Computed on demand for

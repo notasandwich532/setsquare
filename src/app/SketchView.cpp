@@ -4,6 +4,7 @@
 #include "FrameClock.h"
 #include "Theme.h"
 #include "tools/ConstraintTools.h"
+#include "tools/ModifyTools.h"
 #include "tools/SelectTool.h"
 #include "tools/ShapeTools.h"
 
@@ -133,6 +134,17 @@ void SketchView::setTool(ToolKind kind)
         case ToolKind::SlotCenterPoint: m_tool = std::make_unique<SlotTool>(*this, SlotTool::Kind::CenterPoint); break;
         case ToolKind::SlotArc3Point: m_tool = std::make_unique<ArcSlotTool>(*this, true); break;
         case ToolKind::SlotArcCenter: m_tool = std::make_unique<ArcSlotTool>(*this, false); break;
+        case ToolKind::Trim: m_tool = std::make_unique<CurveOpTool>(*this, CurveOpTool::Op::Trim); break;
+        case ToolKind::Extend: m_tool = std::make_unique<CurveOpTool>(*this, CurveOpTool::Op::Extend); break;
+        case ToolKind::Break: m_tool = std::make_unique<CurveOpTool>(*this, CurveOpTool::Op::Break); break;
+        case ToolKind::Fillet: m_tool = std::make_unique<CornerTool>(*this, CornerTool::Kind::Fillet); break;
+        case ToolKind::ChamferEqual: m_tool = std::make_unique<CornerTool>(*this, CornerTool::Kind::ChamferEqual); break;
+        case ToolKind::ChamferTwoDistances:
+            m_tool = std::make_unique<CornerTool>(*this, CornerTool::Kind::ChamferTwoDistances);
+            break;
+        case ToolKind::ChamferDistanceAngle:
+            m_tool = std::make_unique<CornerTool>(*this, CornerTool::Kind::ChamferDistanceAngle);
+            break;
         case ToolKind::Dimension: m_tool = std::make_unique<DimensionTool>(*this); break;
         default: m_tool = std::make_unique<ConstraintTool>(*this, kind); break;
     }

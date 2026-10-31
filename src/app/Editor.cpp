@@ -220,6 +220,56 @@ build::Slot Editor::arcSlot3(core::Vec2 start, core::Vec2 end, core::Vec2 throug
     return s;
 }
 
+namespace modify = core::modify;
+
+void Editor::trim(Id curve, core::Vec2 near)
+{
+    const QString what = name(m_sketch, curve);  // before it changes (it may disappear)
+    modify::trim(m_sketch, curve, near);
+    log(QStringLiteral("s.trim(%1, near=%2)").arg(what, pair(near)));
+}
+
+void Editor::extend(Id curve, core::Vec2 near)
+{
+    const QString what = name(m_sketch, curve);
+    modify::extend(m_sketch, curve, near);
+    log(QStringLiteral("s.extend(%1, near=%2)").arg(what, pair(near)));
+}
+
+std::vector<Id> Editor::breakCurve(Id curve, core::Vec2 near)
+{
+    const QString what = name(m_sketch, curve);
+    std::vector<Id> pieces = modify::breakCurve(m_sketch, curve, near);
+    log(QStringLiteral("s.break_curve(%1, near=%2)").arg(what, pair(near)));
+    return pieces;
+}
+
+modify::Corner Editor::fillet(Id a, core::Vec2 nearA, Id b, core::Vec2 nearB, double radius)
+{
+    const QString na = name(m_sketch, a), nb = name(m_sketch, b);
+    modify::Corner c = modify::fillet(m_sketch, a, nearA, b, nearB, radius);
+    log(QStringLiteral("%1 = s.fillet(%2, %3, %4, near=(%5, %6))")
+            .arg(name(m_sketch, c.joint), na, nb, number(radius), pair(nearA), pair(nearB)));
+    return c;
+}
+
+modify::Corner Editor::chamfer(Id a, core::Vec2 nearA, Id b, core::Vec2 nearB, modify::ChamferKind kind,
+                               double value1, double value2)
+{
+    const QString na = name(m_sketch, a), nb = name(m_sketch, b);
+    modify::Corner c = modify::chamfer(m_sketch, a, nearA, b, nearB, kind, value1, value2);
+    QString extra;
+    if (kind == modify::ChamferKind::TwoDistances) {
+        extra = QStringLiteral(", distance2=") + number(value2);
+    }
+    else if (kind == modify::ChamferKind::DistanceAngle) {
+        extra = QStringLiteral(", angle=") + number(value2);
+    }
+    log(QStringLiteral("%1 = s.chamfer(%2, %3, %4%5, near=(%6, %7))")
+            .arg(name(m_sketch, c.joint), na, nb, number(value1), extra, pair(nearA), pair(nearB)));
+    return c;
+}
+
 Id Editor::constrain(ConstraintType type, std::vector<Id> refs, double value)
 {
     const Id id = m_sketch.addConstraint(type, std::move(refs), value);

@@ -28,6 +28,8 @@ add_library(drawapp_lib STATIC
     tools/ConstraintTools.cpp
     tools/ConstraintTools.h
     tools/DrawTools.cpp
+    tools/ModifyTools.cpp
+    tools/ModifyTools.h
     tools/DrawTools.h
     tools/SelectTool.cpp
     tools/SelectTool.h

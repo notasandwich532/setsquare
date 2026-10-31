@@ -9,6 +9,8 @@
 
 #include <QDesktopServices>
 #include <QMenu>
+#include <QDoubleSpinBox>
+#include <functional>
 #include <QSpinBox>
 #include <QToolButton>
 #include <QUrl>
@@ -119,6 +121,13 @@ const std::pair<ToolKind, const char*> kToolNames[] = {
     {ToolKind::SlotArc3Point, "arc_slot_3point"},
     {ToolKind::SlotArcCenter, "arc_slot"},
     {ToolKind::Collinear, "collinear"},
+    {ToolKind::Trim, "trim"},
+    {ToolKind::Extend, "extend"},
+    {ToolKind::Break, "break"},
+    {ToolKind::Fillet, "fillet"},
+    {ToolKind::ChamferEqual, "chamfer"},
+    {ToolKind::ChamferTwoDistances, "chamfer_2distances"},
+    {ToolKind::ChamferDistanceAngle, "chamfer_angle"},
     {ToolKind::Dimension, "dimension"},
     {ToolKind::Coincident, "coincident"},
     {ToolKind::HorizontalVertical, "horizontal_vertical"},
@@ -407,6 +416,19 @@ void MainWindow::createActions()
                     {ToolKind::SlotArcCenter, tr("Center Point Arc Slot"), {}},
                 });
     addTools(toolbar, {{ToolKind::Point, tr("Point"), QKeySequence(Qt::Key_P)}});
+    toolbar->addSeparator();
+    addTools(toolbar, {{ToolKind::Fillet, tr("Fillet"), {}}});
+    addDropdown(toolbar, tr("Chamfer"),
+                {
+                    {ToolKind::ChamferEqual, tr("Equal Distance Chamfer"), {}},
+                    {ToolKind::ChamferTwoDistances, tr("Distance-Distance Chamfer"), {}},
+                    {ToolKind::ChamferDistanceAngle, tr("Distance-Angle Chamfer"), {}},
+                });
+    addTools(toolbar, {
+                          {ToolKind::Trim, tr("Trim"), QKeySequence(Qt::Key_T)},
+                          {ToolKind::Extend, tr("Extend"), {}},
+                          {ToolKind::Break, tr("Break"), {}},
+                      });
 
     // Tool options: only shown while a tool that uses them is active.
     auto* sidesBox = new QSpinBox(toolbar);
@@ -427,6 +449,34 @@ void MainWindow::createActions()
                                 || kind == ToolKind::PolygonEdge);
     });
 
+    // Default fillet/chamfer sizes, shown while those tools are active.
+    auto addSize = [&](const QString& prefix, const QString& suffix, double value, double max,
+                       std::function<void(double)> set, std::initializer_list<ToolKind> tools) {
+        auto* box = new QDoubleSpinBox(toolbar);
+        box->setRange(0.001, max);
+        box->setDecimals(3);
+        box->setValue(value);
+        box->setPrefix(prefix);
+        box->setSuffix(suffix);
+        connect(box, &QDoubleSpinBox::valueChanged, this, set);
+        QAction* action = toolbar->addWidget(box);
+        action->setVisible(false);
+        const std::vector<ToolKind> kinds(tools);
+        connect(m_view, &SketchView::toolChanged, action, [action, kinds](ToolKind kind) {
+            action->setVisible(std::ranges::find(kinds, kind) != kinds.end());
+        });
+    };
+    SketchView::ModifyOptions& o = m_view->modifyOptions();
+    addSize(tr("Radius: "), {}, o.filletRadius, 1e6, [this](double v) { m_view->modifyOptions().filletRadius = v; },
+            {ToolKind::Fillet});
+    addSize(tr("Distance: "), {}, o.chamferDistance, 1e6,
+            [this](double v) { m_view->modifyOptions().chamferDistance = v; },
+            {ToolKind::ChamferEqual, ToolKind::ChamferTwoDistances, ToolKind::ChamferDistanceAngle});
+    addSize(tr("Distance 2: "), {}, o.chamferDistance2, 1e6,
+            [this](double v) { m_view->modifyOptions().chamferDistance2 = v; }, {ToolKind::ChamferTwoDistances});
+    addSize(tr("Angle: "), QStringLiteral("°"), o.chamferAngle, 179.0,
+            [this](double v) { m_view->modifyOptions().chamferAngle = v; }, {ToolKind::ChamferDistanceAngle});
+
     sketchMenu->addSeparator();
     addToolBarBreak();
     auto* constraintBar = addToolBar(tr("Constraints"));
@@ -439,7 +489,7 @@ void MainWindow::createActions()
                                 {ToolKind::HorizontalVertical, tr("Horiz/Vert"), QKeySequence(Qt::Key_H)},
                                 {ToolKind::Parallel, tr("Parallel"), {}},
                                 {ToolKind::Perpendicular, tr("Perpendicular"), {}},
-                                {ToolKind::Tangent, tr("Tangent"), QKeySequence(Qt::Key_T)},
+                                {ToolKind::Tangent, tr("Tangent"), {}},  // (T is Trim, as in Fusion)
                                 {ToolKind::Equal, tr("Equal"), QKeySequence(Qt::Key_E)},
                                 {ToolKind::Midpoint, tr("Midpoint"), {}},
                                 {ToolKind::Concentric, tr("Concentric"), {}},

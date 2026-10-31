@@ -10,6 +10,7 @@
 #include "Editor.h"
 
 #include <core/Dimensions.h>
+#include <core/Modify.h>
 #include <core/Serialize.h>
 #include <core/Solver.h>
 
@@ -213,6 +214,29 @@ py::list editCurves(const char* label, F&& f)
         call.target().edit(QString::fromLatin1(label), [&](Editor& ed) { ids = f(ed); });
     }
     return wrapAll(ids);
+}
+
+core::Vec2 vecArg(py::handle h);
+
+// Which side of each curve to keep for a fillet/chamfer: given as near=(pos_a, pos_b), or, when
+// the curves share an end, worked out (their other ends).
+std::pair<core::Vec2, core::Vec2> cornerNear(Id a, Id b, const py::object& near)
+{
+    if (!near.is_none()) {
+        const auto seq = near.cast<py::sequence>();
+        if (seq.size() != 2) {
+            throw py::type_error("near must be (position_on_a, position_on_b)");
+        }
+        return {vecArg(seq[0]), vecArg(seq[1])};
+    }
+    for (Id p : sketch().definingPoints(a)) {
+        Id ca, cb;
+        core::Vec2 na, nb;
+        if (core::modify::cornerAt(sketch(), p, ca, na, cb, nb) && ((ca == a && cb == b) || (ca == b && cb == a))) {
+            return ca == a ? std::pair{na, nb} : std::pair{nb, na};
+        }
+    }
+    throw py::value_error("these curves don't share a corner; say which sides to keep with near=(pos_a, pos_b)");
 }
 
 // A position argument: an (x, y) pair, or a Point's current position.
@@ -655,6 +679,55 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
             });
         }, py::arg("start"), py::arg("end"), py::arg("through"), py::arg("width"),
              "Arc slot along the arc through three points.")
+        .def("trim", [](const SketchH&, py::handle curve, py::handle near) {
+            const Id id = idOf(curve);
+            const core::Vec2 at = vecArg(near);
+            editReturningId("Trim", [&](Editor& ed) {
+                ed.trim(id, at);
+                return id;
+            });
+        }, py::arg("curve"), py::arg("near"),
+             "Remove the part of a curve around `near`, up to where other curves cross it.")
+        .def("extend", [](const SketchH&, py::handle curve, py::handle near) {
+            const Id id = idOf(curve);
+            const core::Vec2 at = vecArg(near);
+            editReturningId("Extend", [&](Editor& ed) {
+                ed.extend(id, at);
+                return id;
+            });
+        }, py::arg("curve"), py::arg("near"), "Lengthen the end of a line/arc nearest `near` to the next curve.")
+        .def("break_curve", [](const SketchH&, py::handle curve, py::handle near) {
+            const Id id = idOf(curve);
+            const core::Vec2 at = vecArg(near);
+            return editCurves("Break", [&](Editor& ed) { return ed.breakCurve(id, at); });
+        }, py::arg("curve"), py::arg("near"), "Split a curve where others cross it either side of `near`. Returns the pieces.")
+        .def("fillet", [](const SketchH&, py::handle a, py::handle b, double radius, py::object near) {
+            const Id ia = idOf(a), ib = idOf(b);
+            const auto [na, nb] = cornerNear(ia, ib, near);
+            return wrap(editReturningId("Fillet", [&](Editor& ed) { return ed.fillet(ia, na, ib, nb, radius).joint; }));
+        }, py::arg("a"), py::arg("b"), py::arg("radius"), py::arg("near") = py::none(),
+             "Round the corner between two lines/arcs. The originals become construction. near=(pos_a, pos_b) "
+             "picks which side of each to keep (needed unless they share an end). Returns the arc.")
+        .def("chamfer", [](const SketchH&, py::handle a, py::handle b, double distance, py::object distance2,
+                           py::object angle, py::object near) {
+            const Id ia = idOf(a), ib = idOf(b);
+            const auto [na, nb] = cornerNear(ia, ib, near);
+            auto kind = core::modify::ChamferKind::EqualDistance;
+            double second = 0.0;
+            if (!angle.is_none()) {
+                kind = core::modify::ChamferKind::DistanceAngle;
+                second = angle.cast<double>();
+            }
+            else if (!distance2.is_none()) {
+                kind = core::modify::ChamferKind::TwoDistances;
+                second = distance2.cast<double>();
+            }
+            return wrap(editReturningId("Chamfer", [&](Editor& ed) {
+                return ed.chamfer(ia, na, ib, nb, kind, distance, second).joint;
+            }));
+        }, py::arg("a"), py::arg("b"), py::arg("distance"), py::arg("distance2") = py::none(),
+             py::arg("angle") = py::none(), py::arg("near") = py::none(),
+             "Cut the corner between two lines: equal distances, or distance2=, or angle= (degrees). Returns the chamfer.")
         .def("delete", [](const SketchH&, py::args items) {
             const std::vector<Id> ids = idsOf(items);
             Call call;

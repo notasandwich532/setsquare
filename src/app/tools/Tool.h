@@ -35,6 +35,14 @@ enum class ToolKind
     SlotArc3Point,
     SlotArcCenter,
 
+    Trim,
+    Extend,
+    Break,
+    Fillet,
+    ChamferEqual,
+    ChamferTwoDistances,
+    ChamferDistanceAngle,
+
     Dimension,
     Coincident,
     HorizontalVertical,

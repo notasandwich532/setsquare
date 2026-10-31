@@ -516,6 +516,65 @@ void Sketch::remove(Id id)
     });
 }
 
+void Sketch::rebindPoint(Id curve, Id oldPoint, Id newPoint)
+{
+    if (kindOf(newPoint) != EntityKind::Point) {
+        throw SketchError("rebind: not a point");
+    }
+    Entity& e = entity(curve);
+    bool found = false;
+    auto swap = [&](Id& slot) {
+        if (slot == oldPoint) {
+            slot = newPoint;
+            found = true;
+        }
+    };
+    if (auto* l = std::get_if<Line>(&e.geom)) {
+        swap(l->p1);
+        swap(l->p2);
+    }
+    else if (auto* a = std::get_if<Arc>(&e.geom)) {
+        swap(a->center);
+        swap(a->start);
+        swap(a->end);
+    }
+    else if (auto* c = std::get_if<Circle>(&e.geom)) {
+        swap(c->center);
+    }
+    if (!found) {
+        throw SketchError("rebind: the curve doesn't use that point");
+    }
+    checkGeometry(e);
+}
+
+bool Sketch::isPointUsed(Id point) const
+{
+    return std::ranges::any_of(m_entities, [&](const auto& kv) { return referencesPoint(kv.second, point); });
+}
+
+bool Sketch::removeIfUnused(Id point)
+{
+    if (!hasEntity(point) || isReference(point) || isPointUsed(point)) {
+        return false;
+    }
+    remove(point);
+    return true;
+}
+
+void Sketch::retarget(Id from, Id to)
+{
+    std::map<Id, Constraint> updated = m_constraints;
+    for (auto& [id, c] : updated) {
+        if (std::ranges::find(c.refs, from) == c.refs.end()) {
+            continue;
+        }
+        std::ranges::replace(c.refs, from, to);
+        normalize(c.type, c.refs);
+        validate(c.type, c.refs, core::isDimension(c.type) ? c.value : 1.0);
+    }
+    m_constraints = std::move(updated);
+}
+
 void Sketch::clear()
 {
     m_entities.clear();

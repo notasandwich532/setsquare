@@ -17,7 +17,7 @@ geometry tests, GUI tool tests, and Python scenario scripts.
 - **Toolbar** regrouped into Fusion-style dropdowns (Rectangle ▾, Circle ▾, Arc ▾, Polygon ▾,
   Slot ▾). Each button remembers the last variant used.
 
-## M7: Trim family
+## M7: Trim family (done)
 - **Curve-curve intersections** for lines, circles and arcs. Ellipse and spline intersections are
   added in M9.
 - **Trim, Extend, Break.** New ends get coincident/point-on-curve constraints where they meet other

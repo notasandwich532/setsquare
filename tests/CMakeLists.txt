@@ -10,6 +10,7 @@ add_executable(core_tests
     core/test_builders.cpp
     core/test_dimensions.cpp
     core/test_geometry.cpp
+    core/test_modify.cpp
     core/test_planegcs.cpp
     core/test_serialize.cpp
     core/test_sketch.cpp
@@ -25,6 +26,7 @@ add_executable(app_tests
     app/main.cpp
     app/test_constraint_tools.cpp
     app/test_document.cpp
+    app/test_modify_tools.cpp
     app/test_scripting.cpp
     app/test_shape_tools.cpp
     app/test_tools.cpp

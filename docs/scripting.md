@@ -99,6 +99,20 @@ d.value = 40                  # re-solves; ValueError if impossible
 d.label = (0, -8)
 ```
 
+### Trimming and corners
+`near` is where you would click; it picks the part of the curve that's meant.
+
+```python
+s.trim(curve, near=(x, y))          # remove the piece around near, up to the crossings
+s.extend(line_or_arc, near=(x, y))  # stretch the nearer end to the next curve
+s.break_curve(curve, near=(x, y))   # split at the crossings around near; returns the pieces
+arc = s.fillet(l1, l2, 5)           # lines/arcs sharing a corner; originals become construction
+arc = s.fillet(a, b, 5, near=((x1, y1), (x2, y2)))   # crossing curves: say which sides to keep
+cut = s.chamfer(l1, l2, 5)                 # equal distances
+cut = s.chamfer(l1, l2, 5, distance2=8)    # two distances
+cut = s.chamfer(l1, l2, 5, angle=30)       # distance + angle
+```
+
 ### Moving things
 ```python
 s.drag([p, q], dx, dy)        # like dragging with the mouse; constraints still hold

@@ -4,7 +4,8 @@
 
 #include <algorithm>
 #include <cmath>
-#include <deque>
+#include <stdexcept>
+#include <vector>
 #include <map>
 #include <numbers>
 
@@ -43,10 +44,18 @@ double wrapPi(double a)
 
 struct Solver::Impl
 {
-    // deque: push_back never moves existing elements, so the double* handed to GCS stay valid.
-    std::deque<double> store;
+    // All solver parameters live in one contiguous block, reserved up front and never
+    // reallocated (GCS keeps the pointers). Contiguity matters for determinism, not just
+    // validity: PlaneGCS orders parameters by *address* (std::set<double*>), and with an
+    // under-constrained sketch that order decides which of the possible solutions comes out.
+    // With one block, address order is creation order, the same on every run; a std::deque's
+    // blocks can land in any order and made results vary between runs.
+    std::vector<double> store;
     double* alloc(double v)
     {
+        if (store.size() == store.capacity()) {
+            throw std::logic_error("solver parameter block too small");  // would move live pointers
+        }
         store.push_back(v);
         return &store.back();
     }
@@ -122,6 +131,15 @@ void Solver::Impl::build(const Sketch& sketch)
     // looks independent because of leftover solver noise, and the sketch is wrongly reported as
     // fully constrained.
     sys.qrpivotThreshold = 1e-9;
+
+    // Enough for every parameter: 2 per point, 3 per arc, 1 per circle, at most 2 values per
+    // constraint, plus drag targets (2 per point, and a held centre).
+    size_t pointCount = 0, roundCount = 0;
+    for (const auto& [id, e] : sketch.entities()) {
+        pointCount += e.kind() == EntityKind::Point;
+        roundCount += e.kind() == EntityKind::Circle || e.kind() == EntityKind::Arc;
+    }
+    store.reserve(4 * pointCount + 3 * roundCount + 2 * sketch.constraints().size() + 16);
 
     // Points that may not move: fixed points, and the defining points of fixed curves.
     std::set<Id> fixedPoints;
@@ -306,10 +324,15 @@ void Solver::Impl::addConstraint(const Sketch& sketch, const Constraint& c)
             break;
 
         case ConstraintType::Collinear: {
-            // Both ends of the second line lie on the first.
-            GCS::Line& l2 = ln(r[1]);
-            sys.addConstraintPointOnLine(l2.p1, ln(r[0]), tag);
-            sys.addConstraintPointOnLine(l2.p2, ln(r[0]), tag);
+            // The ends of the second line lie on the first. An end the lines share is on it
+            // already (and constraining it anyway is a degenerate, "redundant" equation).
+            const Line& first = sketch.line(r[0]);
+            const Line& second = sketch.line(r[1]);
+            for (Id end : {second.p1, second.p2}) {
+                if (end != first.p1 && end != first.p2) {
+                    sys.addConstraintPointOnLine(pt(end), ln(r[0]), tag);
+                }
+            }
             break;
         }
 
