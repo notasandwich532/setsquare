@@ -5,9 +5,11 @@
 
 #include <core/Geometry.h>
 
+#include <QElapsedTimer>
 #include <QPointF>
 #include <QWidget>
 
+#include <deque>
 #include <functional>
 #include <memory>
 #include <set>
@@ -50,6 +52,10 @@ public:
     void setHovered(core::Id id);
     void selectAll();
     void deleteSelection();
+
+    // Performance overlay: paint rate, input rate and per-frame costs.
+    void setShowStats(bool show);
+    bool showStats() const { return m_showStats; }
 
     // Runs a document edit; on failure shows the error and returns false.
     bool tryModify(const QString& label, const std::function<void(core::Sketch&)>& edit);
@@ -99,4 +105,25 @@ private:
 
     std::set<core::Id> m_selection;
     core::Id m_hovered = core::kNoId;
+
+    // Events per second over a sliding one-second window.
+    struct RateCounter
+    {
+        std::deque<qint64> stamps;
+        void tick(qint64 nowMs);
+        int rate(qint64 nowMs);
+    };
+    void drawStats(QPainter& painter);
+
+    // Repaints are paced to the display's vblank rather than painted as input arrives.
+    void scheduleRepaint();
+    class FrameClock* m_frameClock = nullptr;
+    bool m_inPaint = false;
+
+    bool m_showStats = false;
+    QElapsedTimer m_clock;
+    RateCounter m_paintRate;
+    RateCounter m_inputRate;
+    double m_paintMs = 0.0;  // last paint
+    double m_inputMs = 0.0;  // last mouse-move handling (tool + solve)
 };

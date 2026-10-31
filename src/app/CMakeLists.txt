@@ -2,6 +2,8 @@
 add_library(drawapp_lib STATIC
     Document.cpp
     Document.h
+    FrameClock.cpp
+    FrameClock.h
     MainWindow.cpp
     MainWindow.h
     SketchView.cpp
@@ -16,6 +18,9 @@ add_library(drawapp_lib STATIC
 )
 target_include_directories(drawapp_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(drawapp_lib PUBLIC drawcore Qt6::Widgets)
+if(WIN32)
+    target_link_libraries(drawapp_lib PRIVATE dxgi dwmapi)  # vblank pacing (FrameClock)
+endif()
 drawapp_warnings(drawapp_lib)
 
 qt_add_executable(drawapp main.cpp)

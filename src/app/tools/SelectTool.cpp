@@ -104,8 +104,9 @@ void SelectTool::move(const ToolEvent& e)
             [[fallthrough]];
         }
         case State::Dragging:
-            doc().dragTo(e.world.x - m_pressWorld.x, e.world.y - m_pressWorld.y);
-            refresh();
+            m_dragOffset = {e.world.x - m_pressWorld.x, e.world.y - m_pressWorld.y};
+            m_dragPending = true;
+            refresh();  // requests a frame; the solve happens in beforePaint()
             return;
 
         case State::BoxSelecting:
@@ -121,6 +122,9 @@ void SelectTool::release(const ToolEvent& e)
         return;
     }
     if (m_state == State::Dragging) {
+        m_dragOffset = {e.world.x - m_pressWorld.x, e.world.y - m_pressWorld.y};
+        m_dragPending = true;
+        applyPendingDrag();  // land exactly where the mouse was released
         doc().endDrag();
     }
     else if (m_state == State::BoxSelecting) {
@@ -144,6 +148,7 @@ void SelectTool::release(const ToolEvent& e)
 bool SelectTool::cancel()
 {
     if (m_state == State::Dragging) {
+        m_dragPending = false;
         doc().cancelDrag();  // Esc mid-drag puts everything back
         m_state = State::Idle;
         refresh();
@@ -155,6 +160,19 @@ bool SelectTool::cancel()
         return true;
     }
     return false;
+}
+
+void SelectTool::applyPendingDrag()
+{
+    if (m_dragPending && m_state == State::Dragging) {
+        m_dragPending = false;
+        doc().dragTo(m_dragOffset.x, m_dragOffset.y);
+    }
+}
+
+void SelectTool::beforePaint()
+{
+    applyPendingDrag();
 }
 
 void SelectTool::paintOverlay(QPainter& painter)

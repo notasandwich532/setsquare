@@ -14,9 +14,12 @@ public:
     void move(const ToolEvent& e) override;
     void release(const ToolEvent& e) override;
     bool cancel() override;
+    void beforePaint() override;
     void paintOverlay(QPainter& painter) override;
 
 private:
+    void applyPendingDrag();
+
     enum class State
     {
         Idle,
@@ -33,4 +36,8 @@ private:
     core::Vec2 m_pressWorld;
     QPointF m_boxEnd;
     bool m_additive = false;
+
+    // Latest drag offset not yet solved; solved once per frame in beforePaint().
+    bool m_dragPending = false;
+    core::Vec2 m_dragOffset;
 };

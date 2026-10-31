@@ -1,6 +1,7 @@
 #include "SketchView.h"
 
 #include "Document.h"
+#include "FrameClock.h"
 #include "Theme.h"
 #include "tools/SelectTool.h"
 
@@ -8,6 +9,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
+#include <QScreen>
 #include <QWheelEvent>
 
 #include <algorithm>
@@ -48,7 +50,23 @@ SketchView::SketchView(Document& document, QWidget* parent)
     setAttribute(Qt::WA_OpaquePaintEvent);
     setMinimumSize(200, 150);
     connect(&m_doc, &Document::changed, this, &SketchView::onDocumentChanged);
+    m_clock.start();
+
+    m_frameClock = new FrameClock(this);
+    connect(m_frameClock, &FrameClock::frame, this, [this] {
+        if (isVisible()) {
+            repaint();  // paint now, right after the vblank
+        }
+    });
+
     setTool(ToolKind::Select);
+}
+
+void SketchView::scheduleRepaint()
+{
+    if (!m_inPaint) {  // changes made while painting are already in this frame
+        m_frameClock->request();
+    }
 }
 
 SketchView::~SketchView() = default;
@@ -71,7 +89,7 @@ void SketchView::resetView()
 {
     m_zoom = 4.0;
     m_pan = QPointF(width() / 2.0, height() / 2.0);
-    update();
+    scheduleRepaint();
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -105,7 +123,7 @@ QString SketchView::hint() const
 
 void SketchView::refreshTool()
 {
-    update();
+    scheduleRepaint();
     emit hintChanged(hint());
 }
 
@@ -139,7 +157,7 @@ void SketchView::setSelection(std::set<core::Id> ids)
         return;
     }
     m_selection = std::move(ids);
-    update();
+    scheduleRepaint();
     emit selectionChanged();
 }
 
@@ -147,7 +165,7 @@ void SketchView::setHovered(core::Id id)
 {
     if (id != m_hovered) {
         m_hovered = id;
-        update();
+        scheduleRepaint();
     }
 }
 
@@ -201,7 +219,7 @@ void SketchView::onDocumentChanged()
         m_hovered = core::kNoId;
     }
     setSelection(std::move(kept));
-    update();
+    scheduleRepaint();
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -219,6 +237,11 @@ void SketchView::resizeEvent(QResizeEvent* event)
 
 void SketchView::paintEvent(QPaintEvent*)
 {
+    const qint64 start = m_clock.nsecsElapsed();
+    m_inPaint = true;
+    if (m_tool) {
+        m_tool->beforePaint();  // e.g. run this frame's drag solve with the latest mouse position
+    }
     QPainter painter(this);
     painter.fillRect(rect(), theme::canvas().background);
     drawGrid(painter);
@@ -227,6 +250,55 @@ void SketchView::paintEvent(QPaintEvent*)
     if (m_tool) {
         m_tool->paintOverlay(painter);
     }
+    m_paintMs = (m_clock.nsecsElapsed() - start) / 1e6;
+    if (m_showStats) {
+        m_paintRate.tick(m_clock.elapsed());
+        drawStats(painter);
+    }
+    m_inPaint = false;
+}
+
+void SketchView::setShowStats(bool show)
+{
+    m_showStats = show;
+    m_paintRate.stamps.clear();
+    m_inputRate.stamps.clear();
+    scheduleRepaint();
+}
+
+void SketchView::RateCounter::tick(qint64 nowMs)
+{
+    stamps.push_back(nowMs);
+    rate(nowMs);
+}
+
+int SketchView::RateCounter::rate(qint64 nowMs)
+{
+    while (!stamps.empty() && stamps.front() <= nowMs - 1000) {
+        stamps.pop_front();
+    }
+    return static_cast<int>(stamps.size());
+}
+
+void SketchView::drawStats(QPainter& painter)
+{
+    const qint64 now = m_clock.elapsed();
+    const QString text = QStringLiteral("paint %1 fps  %2 ms\ninput %3 Hz  %4 ms\nscreen %5 Hz")
+                             .arg(m_paintRate.rate(now))
+                             .arg(m_paintMs, 0, 'f', 2)
+                             .arg(m_inputRate.rate(now))
+                             .arg(m_inputMs, 0, 'f', 2)
+                             .arg(screen() ? screen()->refreshRate() : 0.0, 0, 'f', 0);
+    QFont mono(QStringLiteral("Consolas"));
+    mono.setStyleHint(QFont::Monospace);
+    painter.setFont(mono);
+    const QRectF box = QRectF(8, 8, 220, 56);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor(0, 0, 0, 170));
+    painter.drawRoundedRect(box, 4, 4);
+    painter.setBrush(Qt::NoBrush);
+    painter.setPen(QColor(0x9f, 0xff, 0x9f));
+    painter.drawText(box.adjusted(8, 4, -8, -4), Qt::AlignLeft | Qt::AlignVCenter, text);
 }
 
 void SketchView::drawGrid(QPainter& painter) const
@@ -436,7 +508,7 @@ void SketchView::wheelEvent(QWheelEvent* event)
     const core::Vec2 anchor = toWorld(mouse);
     m_zoom = std::clamp(m_zoom * std::pow(kZoomStep, notches), kMinZoom, kMaxZoom);
     m_pan = QPointF(mouse.x() - anchor.x * m_zoom, mouse.y() + anchor.y * m_zoom);
-    update();
+    scheduleRepaint();
     event->accept();
 }
 
@@ -457,10 +529,16 @@ void SketchView::mouseMoveEvent(QMouseEvent* event)
     if (m_panning) {
         m_pan += event->position() - m_lastMouse;
         m_lastMouse = event->position();
-        update();
+        scheduleRepaint();
     }
     else {
+        const qint64 start = m_clock.nsecsElapsed();
         m_tool->move(makeEvent(event));
+        m_inputMs = (m_clock.nsecsElapsed() - start) / 1e6;
+    }
+    if (m_showStats) {
+        m_inputRate.tick(m_clock.elapsed());
+        scheduleRepaint();
     }
     const core::Vec2 w = toWorld(event->position());
     emit cursorMoved(QPointF(w.x, w.y));

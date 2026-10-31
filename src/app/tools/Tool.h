@@ -50,6 +50,10 @@ public:
     // otherwise the view falls back to the select tool.
     virtual bool cancel() { return false; }
 
+    // Called once per frame before painting. Tools defer expensive work (like the drag solve)
+    // to here so it runs at most once per displayed frame, with the newest input.
+    virtual void beforePaint() {}
+
     virtual void paintOverlay(QPainter&) {}
 
 protected:

@@ -126,6 +126,10 @@ void MainWindow::createActions()
     auto* home = viewMenu->addAction(tr("&Home View"));
     home->setShortcut(Qt::Key_Home);
     connect(home, &QAction::triggered, m_view, &SketchView::resetView);
+    auto* stats = viewMenu->addAction(tr("Performance &Stats"));
+    stats->setCheckable(true);
+    stats->setShortcut(Qt::Key_F12);
+    connect(stats, &QAction::toggled, m_view, &SketchView::setShowStats);
 }
 
 void MainWindow::updateSolveStatus()
@@ -151,6 +155,13 @@ void MainWindow::updateSolveStatus()
     if (!r.redundant.empty()) {
         text += tr("  (%n redundant)", nullptr, static_cast<int>(r.redundant.size()));
     }
-    m_solveLabel->setText(text);
-    m_solveLabel->setStyleSheet(QStringLiteral("color: %1").arg(color.name()));
+    // Runs on every drag step: only touch the label when something changed, since
+    // setStyleSheet() forces a style recalculation.
+    if (text != m_solveLabel->text()) {
+        m_solveLabel->setText(text);
+    }
+    const QString style = QStringLiteral("color: %1").arg(color.name());
+    if (style != m_solveLabel->styleSheet()) {
+        m_solveLabel->setStyleSheet(style);
+    }
 }
