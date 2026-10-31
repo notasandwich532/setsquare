@@ -7,6 +7,7 @@
 
 #include <core/Features.h>
 #include <core/Geometry.h>
+#include <core/Solver.h>
 #include <core/Transform.h>
 
 #include <QCheckBox>
@@ -653,11 +654,20 @@ void ScaleTool::paintPreview(QPainter& painter)
     if (!ready()) {
         return;
     }
+    // The real outcome: scaled in a scratch copy and solved (fixed geometry and the origin stay,
+    // so what's attached to them may not simply grow).
     const std::vector<Id>& objects = picked(m_objects);
     const Vec2 centre = about();
-    drawGhost(view(), painter, [&](core::Sketch& s) {
-        core::xform::copy(s, objects, core::Affine::scaling(centre, m_factor->value()), false);
-    });
+    core::Sketch scratch = doc().sketch();
+    try {
+        core::xform::apply(scratch, objects, core::Affine::scaling(centre, m_factor->value()));
+        core::solve(scratch);
+    }
+    catch (const core::SketchError&) {
+        return;
+    }
+    const std::vector<Id> shown = core::xform::expand(scratch, objects);
+    view().drawPreviewSketch(painter, scratch, [&](Id id) { return std::ranges::find(shown, id) != shown.end(); });
     view().drawSnapMarker(painter, Snap{centre});
 }
 

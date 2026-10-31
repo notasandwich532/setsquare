@@ -204,14 +204,23 @@ void apply(Sketch& s, const std::vector<Id>& selection, const Affine& t)
         throw SketchError("can't mirror in place");
     }
     const std::vector<Id> ids = expand(s, selection);
+    // Fixed geometry (and the origin) stays put; the solve afterwards fits the rest around it.
+    std::set<Id> pinned;
     for (Id id : ids) {
-        if (s.entity(id).fixed || s.isReference(id)) {
-            throw SketchError("fixed geometry can't be moved");
+        const Entity& e = s.entity(id);
+        if (e.fixed || s.isReference(id)) {
+            pinned.insert(id);
+            for (Id p : s.definingPoints(id)) {
+                pinned.insert(p);
+            }
         }
     }
     const std::set<Id> moving(ids.begin(), ids.end());
     const double scale = t.scale();
     for (Id id : ids) {
+        if (pinned.contains(id)) {
+            continue;
+        }
         Entity& e = s.entity(id);
         if (auto* p = std::get_if<Point>(&e.geom)) {
             const Vec2 q = t.apply({p->x, p->y});

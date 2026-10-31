@@ -53,8 +53,8 @@ inline std::map<Id, Id> copy(Sketch& sketch, const std::vector<Id>& selection, c
 }
 
 // Moves the selected entities in place, without solving: positions and radii are set directly,
-// and length dimensions between them scale with the map. Throws SketchError for fixed geometry
-// or a mirroring map.
+// and length dimensions between them scale with the map. Fixed geometry and the origin stay where
+// they are (solve afterwards to fit the rest around them). Throws SketchError for a mirroring map.
 void apply(Sketch& sketch, const std::vector<Id>& selection, const Affine& t);
 
 // The selection as a sketch of its own, with the constraints among it: what the clipboard holds.

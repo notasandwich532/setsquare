@@ -13,6 +13,7 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -181,6 +182,61 @@ TEST_CASE("Scale: pick the point, set the factor", "[transform][scale]")
     f.ok();
     CHECK(f.pos(f.rect.corners[2]).x == Approx(20.0).margin(1e-6));
     CHECK(f.sketch().constraint(f.feature(ConstraintType::Distance)).value == Approx(10.0));
+}
+
+TEST_CASE("Scale: Enter applies it", "[transform][scale]")
+{
+    Fixture f;
+    const bool fromOrigin = GENERATE(false, true);
+    const bool inPanel = GENERATE(false, true);
+    if (fromOrigin) {  // a rectangle drawn from the origin uses the origin as a corner
+        f.doc.modify("origin rectangle", [&](Sketch& s) {
+            f.rect = build::rectangle(s, s.origin(), s.addPoint(20, 10));
+        });
+    }
+    INFO("from origin " << fromOrigin << ", Enter in panel " << inPanel);
+    f.selectRect();
+    f.view.setTool(ToolKind::Scale);
+    f.click(50, 50);  // empty space: scale about here
+    QDoubleSpinBox* factor = f.field<QDoubleSpinBox>("factor");
+    factor->setValue(2);
+    const Id corner = f.rect.corners[2];
+    const Vec2 before = f.pos(corner);
+    if (inPanel) {
+        factor->setFocus();
+        QTest::keyClick(factor, Qt::Key_Return);
+    }
+    else {
+        f.view.setFocus();
+        QTest::keyClick(&f.view, Qt::Key_Return);
+    }
+    f.settle();
+    CHECK(f.view.toolKind() == ToolKind::Select);
+    REQUIRE(f.sketch().hasEntity(corner));
+    CHECK(f.doc.solveResult().ok);
+    if (fromOrigin) {
+        // The origin can't move, so the shape stays on it; the rest still scales.
+        CHECK(f.pos(f.rect.corners[0]).x == 0.0);
+        CHECK(f.pos(corner).x != Approx(before.x));
+    }
+    else {
+        CHECK(f.pos(corner).x == Approx(50 + 2 * (before.x - 50)).margin(1e-6));
+        CHECK(f.pos(corner).y == Approx(50 + 2 * (before.y - 50)).margin(1e-6));
+    }
+}
+
+TEST_CASE("Scale about the origin when the shape is on it", "[transform][scale]")
+{
+    Fixture f;
+    f.doc.modify("origin rectangle", [&](Sketch& s) { f.rect = build::rectangle(s, s.origin(), s.addPoint(20, 10)); });
+    f.selectRect();
+    f.view.setTool(ToolKind::Scale);
+    f.click(0, 0);  // the origin itself
+    f.field<QDoubleSpinBox>("factor")->setValue(2);
+    QTest::keyClick(&f.view, Qt::Key_Return);
+    f.settle();
+    CHECK(f.pos(f.rect.corners[2]).x == Approx(40.0).margin(1e-6));
+    CHECK(f.pos(f.rect.corners[2]).y == Approx(20.0).margin(1e-6));
 }
 
 TEST_CASE("Mirror: pick objects, then the line", "[transform][mirror]")
