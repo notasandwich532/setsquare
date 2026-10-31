@@ -158,6 +158,47 @@ TEST_CASE("Trim, extend and break with the mouse", "[modify]")
     CHECK(f.count(EntityKind::Line) == 4);  // h split at x = 30
 }
 
+TEST_CASE("Drag across lines to trim them all at once", "[modify][trim]")
+{
+    Fixture f;
+    std::vector<Id> verticals;
+    f.doc.modify("lines", [&](Sketch& s) {
+        s.addLine(0, 10, 80, 10);
+        for (double x : {20.0, 40.0, 60.0}) {
+            verticals.push_back(s.addLine(x, 0, x, 30));
+        }
+    });
+    f.view.setTool(ToolKind::Trim);
+    // A path above the horizontal line, across the tops of all three verticals.
+    QTest::mousePress(&f.view, Qt::LeftButton, {}, f.at(10, 20));
+    for (int i = 1; i <= 10; ++i) {
+        f.move(10 + i * 6.0, 20 + (i % 2));
+    }
+    QTest::mouseRelease(&f.view, Qt::LeftButton, {}, f.at(70, 20));
+
+    for (Id v : verticals) {
+        REQUIRE(f.sketch().hasEntity(v));
+        const Line l = f.sketch().line(v);
+        const double top = std::max(f.sketch().point(l.p1).y, f.sketch().point(l.p2).y);
+        CHECK(top == Approx(10.0));  // cut back to the horizontal line
+    }
+    f.doc.undo();  // one step for the whole drag
+    for (Id v : verticals) {
+        const Line l = f.sketch().line(v);
+        CHECK(std::max(f.sketch().point(l.p1).y, f.sketch().point(l.p2).y) == Approx(30.0));
+    }
+}
+
+TEST_CASE("Right-click cancels what's in progress first", "[tools]")
+{
+    Fixture f;
+    f.view.setTool(ToolKind::Line);
+    f.click(10, 10);  // a chain has started
+    QTest::mouseClick(&f.view, Qt::RightButton, {}, f.at(20, 20));
+    f.click(30, 10);  // starts a new chain rather than adding a segment
+    CHECK(f.count(EntityKind::Line) == 0);
+}
+
 TEST_CASE("Replaying recorded modify tools reproduces the sketch", "[modify][recorder]")
 {
     Fixture f;

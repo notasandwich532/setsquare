@@ -522,6 +522,36 @@ void MainWindow::createActions()
         if (auto it = m_toolActions.find(kind); it != m_toolActions.end()) {
             it->second->setChecked(true);
         }
+        // Most recently used first, no repeats; Select doesn't count.
+        if (kind != ToolKind::Select) {
+            std::erase(m_recentTools, kind);
+            m_recentTools.insert(m_recentTools.begin(), kind);
+            if (m_recentTools.size() > kRecentTools) {
+                m_recentTools.resize(kRecentTools);
+            }
+        }
+    });
+
+    // Right-click on the canvas: the last few tools, at the cursor.
+    m_recentMenu = new QMenu(this);
+    m_recentMenu->setObjectName(QStringLiteral("recentToolsMenu"));
+    connect(m_view, &SketchView::recentToolsRequested, this, [this](QPoint at) {
+        m_recentMenu->clear();
+        for (ToolKind kind : m_recentTools) {
+            if (auto it = m_toolActions.find(kind); it != m_toolActions.end()) {
+                QAction* tool = it->second;
+                QAction* item = m_recentMenu->addAction(tool->text());
+                item->setShortcut(tool->shortcut());  // shown for reference
+                connect(item, &QAction::triggered, tool, &QAction::trigger);
+            }
+        }
+        if (m_recentTools.empty()) {
+            m_recentMenu->addAction(tr("(no recent tools yet)"))->setEnabled(false);
+        }
+        m_recentMenu->addSeparator();
+        connect(m_recentMenu->addAction(tr("Select")), &QAction::triggered, m_toolActions[ToolKind::Select],
+                &QAction::trigger);
+        m_recentMenu->popup(at);
     });
 
     // --- Docks ---

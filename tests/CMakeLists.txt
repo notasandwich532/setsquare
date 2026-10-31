@@ -26,6 +26,7 @@ add_executable(app_tests
     app/main.cpp
     app/test_constraint_tools.cpp
     app/test_document.cpp
+    app/test_mainwindow.cpp
     app/test_modify_tools.cpp
     app/test_scripting.cpp
     app/test_shape_tools.cpp

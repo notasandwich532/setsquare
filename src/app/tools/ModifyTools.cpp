@@ -9,6 +9,8 @@
 
 #include <QPainter>
 
+#include <cmath>
+
 using core::Id;
 using core::kNoId;
 using core::Vec2;
@@ -17,6 +19,7 @@ namespace modify = core::modify;
 namespace
 {
 constexpr double kPickPixels = 7.0;
+constexpr double kDragPixels = 4.0;  // a press that moves further than this is a drag
 
 void drawPolyline(SketchView& view, QPainter& painter, const std::vector<Vec2>& pts, const QPen& pen)
 {
@@ -34,9 +37,10 @@ void drawPolyline(SketchView& view, QPainter& painter, const std::vector<Vec2>& 
 QString CurveOpTool::hint() const
 {
     switch (m_op) {
-        case Op::Trim: return QObject::tr("Trim: click the part of a curve to remove");
+        case Op::Trim: return QObject::tr("Trim: click the part of a curve to remove, or drag across several");
         case Op::TrimToConstruction:
-            return QObject::tr("Trim to construction: click the part of a curve to turn into construction");
+            return QObject::tr("Trim to construction: click a part of a curve, or drag across several, to turn them "
+                               "into construction");
         case Op::Extend: return QObject::tr("Extend: click near the end of a line or arc to extend");
         case Op::Break: return QObject::tr("Break: click a curve to split it where other curves cross it");
     }
@@ -52,10 +56,27 @@ Id CurveOpTool::curveAt(QPointF screen) const
     return doc().sketch().isReference(id) ? kNoId : id;
 }
 
+bool CurveOpTool::trims() const
+{
+    return m_op == Op::Trim || m_op == Op::TrimToConstruction;
+}
+
 void CurveOpTool::move(const ToolEvent& e)
 {
-    m_hover = curveAt(e.screen);
     m_mouse = e.world;
+    if (m_pressed && trims()) {
+        const QPointF moved = e.screen - m_pressScreen;
+        if (!m_dragging && std::hypot(moved.x(), moved.y()) >= kDragPixels) {
+            m_dragging = true;  // a press that travels becomes a trim path
+            view().setHovered(kNoId);
+        }
+        if (m_dragging) {
+            m_path.push_back(e.world);
+            refresh();
+            return;
+        }
+    }
+    m_hover = curveAt(e.screen);
     view().setHovered(m_hover);
     refresh();
 }
@@ -65,11 +86,53 @@ void CurveOpTool::press(const ToolEvent& e)
     if (e.button != Qt::LeftButton) {
         return;
     }
-    const Id curve = curveAt(e.screen);
+    if (trims()) {
+        // Wait for the release: a click trims one piece, a drag trims everything it crosses.
+        m_pressed = true;
+        m_dragging = false;
+        m_pressScreen = e.screen;
+        m_path = {e.world};
+        return;
+    }
+    clickAt(e.screen, e.world);
+}
+
+void CurveOpTool::release(const ToolEvent& e)
+{
+    if (e.button != Qt::LeftButton || !m_pressed) {
+        return;
+    }
+    m_pressed = false;
+    if (m_dragging) {
+        m_dragging = false;
+        m_path.push_back(e.world);
+        trimPath();
+        m_path.clear();
+    }
+    else {
+        clickAt(e.screen, e.world);
+    }
+    m_hover = curveAt(e.screen);
+    refresh();
+}
+
+bool CurveOpTool::cancel()
+{
+    if (!m_dragging) {
+        return false;
+    }
+    m_pressed = m_dragging = false;
+    m_path.clear();
+    refresh();
+    return true;
+}
+
+void CurveOpTool::clickAt(QPointF screen, Vec2 at)
+{
+    const Id curve = curveAt(screen);
     if (curve == kNoId) {
         return;
     }
-    const Vec2 at = e.world;
     switch (m_op) {
         case Op::Trim: view().tryEdit(QObject::tr("Trim"), [&](Editor& ed) { ed.trim(curve, at); }); break;
         case Op::TrimToConstruction:
@@ -78,13 +141,59 @@ void CurveOpTool::press(const ToolEvent& e)
         case Op::Extend: view().tryEdit(QObject::tr("Extend"), [&](Editor& ed) { ed.extend(curve, at); }); break;
         case Op::Break: view().tryEdit(QObject::tr("Break"), [&](Editor& ed) { ed.breakCurve(curve, at); }); break;
     }
-    m_hover = curveAt(e.screen);
+    m_hover = curveAt(screen);
     refresh();
+}
+
+std::vector<modify::Crossing> CurveOpTool::pathCrossings() const
+{
+    std::vector<modify::Crossing> hits;
+    for (size_t i = 0; i + 1 < m_path.size(); ++i) {
+        for (const modify::Crossing& c : modify::crossings(doc().sketch(), m_path[i], m_path[i + 1])) {
+            hits.push_back(c);
+        }
+    }
+    return hits;
+}
+
+void CurveOpTool::trimPath()
+{
+    const std::vector<modify::Crossing> hits = pathCrossings();
+    if (hits.empty()) {
+        return;
+    }
+    const bool construction = m_op == Op::TrimToConstruction;
+    const double tolerance = kPickPixels / view().zoom();
+    // All in one undo step. Each trim changes the sketch, so a later crossing only applies if
+    // its spot is still on that curve (crossing the same piece twice trims it once).
+    view().tryEdit(QObject::tr("Trim"), [&](Editor& ed) {
+        for (const modify::Crossing& c : hits) {
+            const core::Sketch& s = ed.sketch();
+            if (!s.hasEntity(c.curve) || core::distanceTo(s, c.curve, c.at) > tolerance) {
+                continue;
+            }
+            if (construction && s.entity(c.curve).construction) {
+                continue;  // already done
+            }
+            ed.trim(c.curve, c.at, construction);
+        }
+    });
 }
 
 void CurveOpTool::paintOverlay(QPainter& painter)
 {
     const core::Sketch& s = doc().sketch();
+    if (m_dragging) {
+        // The path, and every piece it will take.
+        const QPen piecePen = m_op == Op::TrimToConstruction
+            ? QPen(theme::canvas().construction, 3.0, Qt::DashLine, Qt::RoundCap)
+            : QPen(theme::canvas().conflict, 3.0, Qt::SolidLine, Qt::RoundCap);
+        for (const modify::Crossing& c : pathCrossings()) {
+            drawPolyline(view(), painter, modify::trimPreview(s, c.curve, c.at), piecePen);
+        }
+        drawPolyline(view(), painter, m_path, QPen(theme::canvas().hover, 1.0, Qt::DotLine));
+        return;
+    }
     if (m_hover == kNoId || !s.hasEntity(m_hover)) {
         return;
     }

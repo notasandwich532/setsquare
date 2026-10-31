@@ -108,6 +108,7 @@ signals:
     void selectionChanged();
     void message(const QString& text);
     void polygonSidesChanged(int sides);
+    void recentToolsRequested(QPoint globalPos);  // right-click with nothing to cancel
 
 protected:
     void paintEvent(QPaintEvent* event) override;

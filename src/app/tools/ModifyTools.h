@@ -29,14 +29,25 @@ public:
     QString hint() const override;
     void press(const ToolEvent& e) override;
     void move(const ToolEvent& e) override;
+    void release(const ToolEvent& e) override;
+    bool cancel() override;
     void paintOverlay(QPainter& painter) override;
 
 private:
     core::Id curveAt(QPointF screen) const;
+    bool trims() const;  // trim variants also take a dragged path
+    void clickAt(QPointF screen, core::Vec2 at);
+    std::vector<core::modify::Crossing> pathCrossings() const;
+    void trimPath();
 
     Op m_op;
     core::Id m_hover = core::kNoId;
     core::Vec2 m_mouse;
+
+    bool m_pressed = false;
+    bool m_dragging = false;
+    QPointF m_pressScreen;
+    std::vector<core::Vec2> m_path;  // world points of the drag
 };
 
 // Fillet / Chamfer: click two curves (or the corner point where they meet). The corner is

@@ -6,6 +6,7 @@
 
 #include <map>
 #include <optional>
+#include <vector>
 
 class Document;
 class QAction;
@@ -48,6 +49,9 @@ private:
     QLabel* m_solveLabel = nullptr;
     QLabel* m_cursorLabel = nullptr;
     std::map<ToolKind, QAction*> m_toolActions;
+    static constexpr size_t kRecentTools = 5;
+    std::vector<ToolKind> m_recentTools;  // most recent first
+    class QMenu* m_recentMenu = nullptr;
     class ScriptConsole* m_console = nullptr;
     class QDockWidget* m_consoleDock = nullptr;
 };

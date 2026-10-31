@@ -303,6 +303,35 @@ std::vector<Vec2> intersections(const Sketch& s, Id a, Id b)
     return out;
 }
 
+std::vector<Crossing> crossings(const Sketch& s, Vec2 a, Vec2 b)
+{
+    if (dist(a, b) < kPosEps) {
+        return {};
+    }
+    Geo path;
+    path.kind = Geo::Kind::Line;
+    path.a = a;
+    path.b = b;
+    std::vector<std::pair<double, Crossing>> found;
+    for (const auto& [id, e] : s.entities()) {
+        if (e.kind() == EntityKind::Point || s.isReference(id)) {
+            continue;
+        }
+        const Geo g = geoOf(s, id);
+        for (const Vec2& p : rawIntersect(path, g)) {
+            if (path.contains(p) && g.contains(p)) {
+                found.push_back({path.param(p), Crossing{id, p}});
+            }
+        }
+    }
+    std::ranges::sort(found, {}, &std::pair<double, Crossing>::first);
+    std::vector<Crossing> out;
+    for (const auto& [t, c] : found) {
+        out.push_back(c);
+    }
+    return out;
+}
+
 // =============================================================================================
 // Trim / break / extend
 // =============================================================================================

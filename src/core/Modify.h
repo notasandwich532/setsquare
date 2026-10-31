@@ -18,6 +18,15 @@ namespace core::modify
 // Where two curves cross or touch, within their actual extents.
 std::vector<Vec2> intersections(const Sketch& sketch, Id a, Id b);
 
+// The curves the segment from `a` to `b` crosses (construction included, origin/axes not), with
+// where, in order from `a`. For drag-to-trim.
+struct Crossing
+{
+    Id curve = kNoId;
+    Vec2 at;
+};
+std::vector<Crossing> crossings(const Sketch& sketch, Vec2 a, Vec2 b);
+
 // Removes the part of `curve` around `near`, up to the nearest crossings with other curves; a
 // curve that crosses nothing is removed whole. A circle cut at two or more crossings becomes
 // an arc (keeping its constraints). New ends stay on the curves that cut them.

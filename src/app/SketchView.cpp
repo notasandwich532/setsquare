@@ -729,6 +729,15 @@ void SketchView::mousePressEvent(QMouseEvent* event)
         event->accept();
         return;
     }
+    if (event->button() == Qt::RightButton) {
+        // Right-click backs out of whatever the tool is in the middle of; with nothing to back
+        // out of, it offers the recently used tools at the cursor.
+        if (!m_tool->cancel()) {
+            emit recentToolsRequested(event->globalPosition().toPoint());
+        }
+        event->accept();
+        return;
+    }
     m_tool->press(makeEvent(event));
 }
 

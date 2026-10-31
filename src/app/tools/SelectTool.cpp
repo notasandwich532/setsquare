@@ -26,7 +26,7 @@ QString SelectTool::hint() const
                 : QObject::tr("Crossing select: anything touched");
         default:
             return QObject::tr("Click to select (Shift adds). Drag geometry to move it. Drag on empty space to "
-                               "box-select: left-to-right takes what's inside, right-to-left anything touched");
+                               "box-select: left-to-right takes what's inside, right-to-left anything touched. Right-click: recent tools");
     }
 }
 
