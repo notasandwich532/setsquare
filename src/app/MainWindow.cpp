@@ -498,37 +498,42 @@ void MainWindow::createActions()
                     {ToolKind::SlotArcCenter, tr("Center Point Arc Slot"), {}},
                 });
     addTools(toolbar, {{ToolKind::Point, tr("Point"), QKeySequence(Qt::Key_P)}});
-    toolbar->addSeparator();
-    addTools(toolbar, {{ToolKind::Fillet, tr("Fillet"), {}}});
-    addDropdown(toolbar, tr("Chamfer"),
+    // Modify tools (and their options) on a row of their own: one row is too narrow for everything.
+    addToolBarBreak();
+    auto* modifyBar = addToolBar(tr("Modify"));
+    modifyBar->setObjectName("ModifyToolbar");
+    modifyBar->setMovable(false);
+    modifyBar->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    addTools(modifyBar, {{ToolKind::Fillet, tr("Fillet"), {}}});
+    addDropdown(modifyBar, tr("Chamfer"),
                 {
                     {ToolKind::ChamferEqual, tr("Equal Distance Chamfer"), {}},
                     {ToolKind::ChamferTwoDistances, tr("Distance-Distance Chamfer"), {}},
                     {ToolKind::ChamferDistanceAngle, tr("Distance-Angle Chamfer"), {}},
                 });
-    addDropdown(toolbar, tr("Trim"),
+    addDropdown(modifyBar, tr("Trim"),
                 {
                     {ToolKind::Trim, tr("Trim"), QKeySequence(Qt::Key_T)},
                     {ToolKind::TrimToConstruction, tr("Trim to Construction"), QKeySequence(Qt::SHIFT | Qt::Key_T)},
                 });
-    addTools(toolbar, {
+    addTools(modifyBar, {
                           {ToolKind::Extend, tr("Extend"), {}},
                           {ToolKind::Break, tr("Break"), {}},
                       });
-    toolbar->addSeparator();
-    addDropdown(toolbar, tr("Move"),
+    modifyBar->addSeparator();
+    addDropdown(modifyBar, tr("Move"),
                 {
                     {ToolKind::Move, tr("Move/Copy"), QKeySequence(Qt::Key_M)},
                     {ToolKind::Rotate, tr("Rotate"), QKeySequence(Qt::SHIFT | Qt::Key_M)},
                     {ToolKind::Scale, tr("Scale"), {}},
                 });
-    addTools(toolbar, {{ToolKind::Mirror, tr("Mirror"), {}}});
-    addDropdown(toolbar, tr("Pattern"),
+    addTools(modifyBar, {{ToolKind::Mirror, tr("Mirror"), {}}});
+    addDropdown(modifyBar, tr("Pattern"),
                 {
                     {ToolKind::RectangularPattern, tr("Rectangular Pattern"), {}},
                     {ToolKind::CircularPattern, tr("Circular Pattern"), {}},
                 });
-    addTools(toolbar, {{ToolKind::Offset, tr("Offset"), {}}});
+    addTools(modifyBar, {{ToolKind::Offset, tr("Offset"), {}}});
 
     // Tool options: only shown while a tool that uses them is active.
     auto* sidesBox = new QSpinBox(toolbar);
@@ -550,16 +555,17 @@ void MainWindow::createActions()
     });
 
     // Default fillet/chamfer sizes, shown while those tools are active.
+    modifyBar->addSeparator();
     auto addSize = [&](const QString& prefix, const QString& suffix, double value, double max,
                        std::function<void(double)> set, std::initializer_list<ToolKind> tools) {
-        auto* box = new QDoubleSpinBox(toolbar);
+        auto* box = new QDoubleSpinBox(modifyBar);
         box->setRange(0.001, max);
         box->setDecimals(3);
         box->setValue(value);
         box->setPrefix(prefix);
         box->setSuffix(suffix);
         connect(box, &QDoubleSpinBox::valueChanged, this, set);
-        QAction* action = toolbar->addWidget(box);
+        QAction* action = modifyBar->addWidget(box);
         action->setVisible(false);
         const std::vector<ToolKind> kinds(tools);
         connect(m_view, &SketchView::toolChanged, action, [action, kinds](ToolKind kind) {
@@ -586,7 +592,7 @@ void MainWindow::createActions()
     };
     auto addCount = [&](const QString& prefix, int value, int min, std::function<void(int)> set,
                         std::vector<ToolKind> tools) {
-        auto* box = new QSpinBox(toolbar);
+        auto* box = new QSpinBox(modifyBar);
         box->setRange(min, 1000);
         box->setValue(value);
         box->setPrefix(prefix);
@@ -594,11 +600,11 @@ void MainWindow::createActions()
             set(v);
             m_view->refreshTool();  // previews follow
         });
-        showFor(toolbar->addWidget(box), std::move(tools));
+        showFor(modifyBar->addWidget(box), std::move(tools));
     };
     auto addValue = [&](const QString& prefix, const QString& suffix, double value, double min, double max,
                         std::function<void(double)> set, std::vector<ToolKind> tools) {
-        auto* box = new QDoubleSpinBox(toolbar);
+        auto* box = new QDoubleSpinBox(modifyBar);
         box->setRange(min, max);
         box->setDecimals(3);
         box->setValue(value);
@@ -608,12 +614,12 @@ void MainWindow::createActions()
             set(v);
             m_view->refreshTool();
         });
-        showFor(toolbar->addWidget(box), std::move(tools));
+        showFor(modifyBar->addWidget(box), std::move(tools));
     };
-    auto* copyBox = new QCheckBox(tr("Copy"), toolbar);
+    auto* copyBox = new QCheckBox(tr("Copy"), modifyBar);
     copyBox->setToolTip(tr("Copy the selection instead of moving it (or hold Ctrl on the last click)"));
     connect(copyBox, &QCheckBox::toggled, this, [this](bool on) { m_view->modifyOptions().copy = on; });
-    showFor(toolbar->addWidget(copyBox), {ToolKind::Move, ToolKind::Rotate});
+    showFor(modifyBar->addWidget(copyBox), {ToolKind::Move, ToolKind::Rotate});
     addValue(tr("Factor: "), {}, o.scaleFactor, 0.001, 1000.0, [this](double v) { m_view->modifyOptions().scaleFactor = v; },
              {ToolKind::Scale});
     addCount(tr("Count: "), o.patternCount, 1, [this](int v) { m_view->modifyOptions().patternCount = v; },
