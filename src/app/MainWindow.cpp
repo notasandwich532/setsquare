@@ -10,15 +10,12 @@
 #include <core/Serialize.h>
 #include <core/Transform.h>
 
-#include <QCheckBox>
 #include <QClipboard>
 #include <QDesktopServices>
 #include <QGuiApplication>
 #include <QMenu>
 #include <QMimeData>
-#include <QDoubleSpinBox>
 #include <functional>
-#include <QSpinBox>
 #include <QToolButton>
 #include <QUrl>
 
@@ -137,7 +134,6 @@ const std::pair<ToolKind, const char*> kToolNames[] = {
     {ToolKind::ChamferTwoDistances, "chamfer_2distances"},
     {ToolKind::ChamferDistanceAngle, "chamfer_angle"},
     {ToolKind::Move, "move"},
-    {ToolKind::Rotate, "rotate"},
     {ToolKind::Scale, "scale"},
     {ToolKind::Mirror, "mirror"},
     {ToolKind::RectangularPattern, "rectangular_pattern"},
@@ -498,7 +494,7 @@ void MainWindow::createActions()
                     {ToolKind::SlotArcCenter, tr("Center Point Arc Slot"), {}},
                 });
     addTools(toolbar, {{ToolKind::Point, tr("Point"), QKeySequence(Qt::Key_P)}});
-    // Modify tools (and their options) on a row of their own: one row is too narrow for everything.
+    // Modify tools on a row of their own: one row is too narrow for everything.
     addToolBarBreak();
     auto* modifyBar = addToolBar(tr("Modify"));
     modifyBar->setObjectName("ModifyToolbar");
@@ -524,7 +520,6 @@ void MainWindow::createActions()
     addDropdown(modifyBar, tr("Move"),
                 {
                     {ToolKind::Move, tr("Move/Copy"), QKeySequence(Qt::Key_M)},
-                    {ToolKind::Rotate, tr("Rotate"), QKeySequence(Qt::SHIFT | Qt::Key_M)},
                     {ToolKind::Scale, tr("Scale"), {}},
                 });
     addTools(modifyBar, {{ToolKind::Mirror, tr("Mirror"), {}}});
@@ -534,110 +529,7 @@ void MainWindow::createActions()
                     {ToolKind::CircularPattern, tr("Circular Pattern"), {}},
                 });
     addTools(modifyBar, {{ToolKind::Offset, tr("Offset"), {}}});
-
-    // Tool options: only shown while a tool that uses them is active.
-    auto* sidesBox = new QSpinBox(toolbar);
-    sidesBox->setRange(3, 64);
-    sidesBox->setValue(m_view->polygonSides());
-    sidesBox->setPrefix(tr("Sides: "));
-    sidesBox->setToolTip(tr("Number of polygon sides"));
-    connect(sidesBox, &QSpinBox::valueChanged, m_view, &SketchView::setPolygonSides);
-    connect(m_view, &SketchView::polygonSidesChanged, sidesBox, [sidesBox](int sides) {
-        const QSignalBlocker block(sidesBox);  // typed on the canvas: just mirror it
-        sidesBox->setValue(sides);
-    });
-    toolbar->addSeparator();
-    QAction* sidesAction = toolbar->addWidget(sidesBox);
-    sidesAction->setVisible(false);
-    connect(m_view, &SketchView::toolChanged, sidesAction, [sidesAction](ToolKind kind) {
-        sidesAction->setVisible(kind == ToolKind::PolygonInscribed || kind == ToolKind::PolygonCircumscribed
-                                || kind == ToolKind::PolygonEdge);
-    });
-
-    // Default fillet/chamfer sizes, shown while those tools are active.
-    modifyBar->addSeparator();
-    auto addSize = [&](const QString& prefix, const QString& suffix, double value, double max,
-                       std::function<void(double)> set, std::initializer_list<ToolKind> tools) {
-        auto* box = new QDoubleSpinBox(modifyBar);
-        box->setRange(0.001, max);
-        box->setDecimals(3);
-        box->setValue(value);
-        box->setPrefix(prefix);
-        box->setSuffix(suffix);
-        connect(box, &QDoubleSpinBox::valueChanged, this, set);
-        QAction* action = modifyBar->addWidget(box);
-        action->setVisible(false);
-        const std::vector<ToolKind> kinds(tools);
-        connect(m_view, &SketchView::toolChanged, action, [action, kinds](ToolKind kind) {
-            action->setVisible(std::ranges::find(kinds, kind) != kinds.end());
-        });
-    };
-    SketchView::ModifyOptions& o = m_view->modifyOptions();
-    addSize(tr("Radius: "), {}, o.filletRadius, 1e6, [this](double v) { m_view->modifyOptions().filletRadius = v; },
-            {ToolKind::Fillet});
-    addSize(tr("Distance: "), {}, o.chamferDistance, 1e6,
-            [this](double v) { m_view->modifyOptions().chamferDistance = v; },
-            {ToolKind::ChamferEqual, ToolKind::ChamferTwoDistances, ToolKind::ChamferDistanceAngle});
-    addSize(tr("Distance 2: "), {}, o.chamferDistance2, 1e6,
-            [this](double v) { m_view->modifyOptions().chamferDistance2 = v; }, {ToolKind::ChamferTwoDistances});
-    addSize(tr("Angle: "), QStringLiteral("°"), o.chamferAngle, 179.0,
-            [this](double v) { m_view->modifyOptions().chamferAngle = v; }, {ToolKind::ChamferDistanceAngle});
-
-    // Move / scale / pattern / offset options.
-    auto showFor = [this](QAction* action, std::vector<ToolKind> kinds) {
-        action->setVisible(false);
-        connect(m_view, &SketchView::toolChanged, action, [action, kinds](ToolKind kind) {
-            action->setVisible(std::ranges::find(kinds, kind) != kinds.end());
-        });
-    };
-    auto addCount = [&](const QString& prefix, int value, int min, std::function<void(int)> set,
-                        std::vector<ToolKind> tools) {
-        auto* box = new QSpinBox(modifyBar);
-        box->setRange(min, 1000);
-        box->setValue(value);
-        box->setPrefix(prefix);
-        connect(box, &QSpinBox::valueChanged, this, [this, set](int v) {
-            set(v);
-            m_view->refreshTool();  // previews follow
-        });
-        showFor(modifyBar->addWidget(box), std::move(tools));
-    };
-    auto addValue = [&](const QString& prefix, const QString& suffix, double value, double min, double max,
-                        std::function<void(double)> set, std::vector<ToolKind> tools) {
-        auto* box = new QDoubleSpinBox(modifyBar);
-        box->setRange(min, max);
-        box->setDecimals(3);
-        box->setValue(value);
-        box->setPrefix(prefix);
-        box->setSuffix(suffix);
-        connect(box, &QDoubleSpinBox::valueChanged, this, [this, set](double v) {
-            set(v);
-            m_view->refreshTool();
-        });
-        showFor(modifyBar->addWidget(box), std::move(tools));
-    };
-    auto* copyBox = new QCheckBox(tr("Copy"), modifyBar);
-    copyBox->setToolTip(tr("Copy the selection instead of moving it (or hold Ctrl on the last click)"));
-    connect(copyBox, &QCheckBox::toggled, this, [this](bool on) { m_view->modifyOptions().copy = on; });
-    showFor(modifyBar->addWidget(copyBox), {ToolKind::Move, ToolKind::Rotate});
-    addValue(tr("Factor: "), {}, o.scaleFactor, 0.001, 1000.0, [this](double v) { m_view->modifyOptions().scaleFactor = v; },
-             {ToolKind::Scale});
-    addCount(tr("Count: "), o.patternCount, 1, [this](int v) { m_view->modifyOptions().patternCount = v; },
-             {ToolKind::RectangularPattern});
-    addValue(tr("Spacing: "), {}, o.patternSpacing, 0.001, 1e6,
-             [this](double v) { m_view->modifyOptions().patternSpacing = v; }, {ToolKind::RectangularPattern});
-    addValue(tr("Direction: "), QStringLiteral("°"), o.patternAngle, -360.0, 360.0,
-             [this](double v) { m_view->modifyOptions().patternAngle = v; }, {ToolKind::RectangularPattern});
-    addCount(tr("Rows: "), o.patternCount2, 1, [this](int v) { m_view->modifyOptions().patternCount2 = v; },
-             {ToolKind::RectangularPattern});
-    addValue(tr("Row spacing: "), {}, o.patternSpacing2, 0.001, 1e6,
-             [this](double v) { m_view->modifyOptions().patternSpacing2 = v; }, {ToolKind::RectangularPattern});
-    addCount(tr("Count: "), o.circularCount, 2, [this](int v) { m_view->modifyOptions().circularCount = v; },
-             {ToolKind::CircularPattern});
-    addValue(tr("Angle: "), QStringLiteral("°"), o.circularAngle, 0.001, 360.0,
-             [this](double v) { m_view->modifyOptions().circularAngle = v; }, {ToolKind::CircularPattern});
-    addValue(tr("Distance: "), {}, o.offsetDistance, 0.001, 1e6,
-             [this](double v) { m_view->modifyOptions().offsetDistance = v; }, {ToolKind::Offset});
+    // (Tool settings are in panels on the canvas, not up here.)
 
     sketchMenu->addSeparator();
     addToolBarBreak();

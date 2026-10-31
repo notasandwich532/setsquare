@@ -906,14 +906,15 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
            "Mirror items across a line, kept symmetric to the originals. Returns the mirror images (items lying "
            "on the line have none).")
         .def("rectangular_pattern", [](const SketchH&, py::handle items, int count, double spacing, double angle,
-                                       int count2, double spacing2) {
+                                       int count2, double spacing2, bool symmetric, bool symmetric2) {
             const std::vector<Id> ids = itemsOf(items);
-            const core::feature::LinearPatternParams p{count, spacing, angle, count2, spacing2};
+            const core::feature::LinearPatternParams p{count, spacing, angle, count2, spacing2, symmetric, symmetric2};
             return wrap(editReturningId("Pattern", [&](Editor& ed) { return ed.rectangularPattern(ids, p); }));
         }, py::arg("items"), py::arg("count") = 3, py::arg("spacing") = 10.0, py::arg("angle") = 0.0,
-           py::arg("count2") = 1, py::arg("spacing2") = 10.0,
+           py::arg("count2") = 1, py::arg("spacing2") = 10.0, py::arg("symmetric") = false,
+           py::arg("symmetric2") = false,
            "Linked copies in rows: `count` along `angle` degrees, `count2` at right angles to it (counts include "
-           "the original). Returns the pattern; its value is the spacing.")
+           "the original; symmetric= repeats them both ways). Returns the pattern; its value is the spacing.")
         .def("circular_pattern", [](const SketchH&, py::handle items, py::handle center, int count, double angle) {
             const std::vector<Id> ids = itemsOf(items);
             const Id c = idOf(center);
@@ -923,7 +924,8 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
            "Linked copies around a centre point: `count` (including the original) over `angle` degrees. A full "
            "turn spaces them evenly. Returns the pattern; its value is the angle.")
         .def("set_pattern", [](const SketchH&, py::handle pattern, py::object count, py::object spacing,
-                               py::object angle, py::object count2, py::object spacing2) {
+                               py::object angle, py::object count2, py::object spacing2, py::object symmetric,
+                               py::object symmetric2) {
             const Id id = idOf(pattern);
             const core::Constraint& k = constraintOf(id);
             auto set = [](auto& field, const py::object& v) {
@@ -938,6 +940,8 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
                 set(p.angle, angle);
                 set(p.count2, count2);
                 set(p.spacing2, spacing2);
+                set(p.symmetric, symmetric);
+                set(p.symmetric2, symmetric2);
                 return wrap(editReturningId("Pattern", [&](Editor& ed) { return ed.setPattern(id, p); }));
             }
             if (k.type == ConstraintType::CircularPattern) {
@@ -949,6 +953,7 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
             throw py::value_error("not a pattern");
         }, py::arg("pattern"), py::arg("count") = py::none(), py::arg("spacing") = py::none(),
            py::arg("angle") = py::none(), py::arg("count2") = py::none(), py::arg("spacing2") = py::none(),
+           py::arg("symmetric") = py::none(), py::arg("symmetric2") = py::none(),
            "Change a pattern's settings. A new count remakes the copies; returns the pattern (a new one then).")
         .def("offset", [](const SketchH&, py::handle curves, double distance, py::handle toward) {
             std::vector<Id> ids = itemsOf(curves);
@@ -1185,7 +1190,7 @@ def run_source(source, name):
 
 def run_file(path, argv):
     try:
-        with open(path, encoding="utf-8") as f:
+        with open(path, encoding="utf-8-sig") as f:  # -sig: Windows editors may add a BOM
             source = f.read()
     except OSError as e:
         print(f"can't read {path}: {e}", file=sys.stderr)

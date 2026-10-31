@@ -57,7 +57,7 @@ public:
     void editDimension(core::Id dimension);  // inline value editor at the label
     // A dimension's or feature's value, in an inline editor centred at `at` (screen).
     void editValue(core::Id constraint, QPointF at);
-    // Patterns: a settings dialog; offsets: the inline distance editor.
+    // Patterns: their command, editing them; offsets: the inline distance editor.
     void editFeature(core::Id feature);
 
     // What Paste places (set before switching to ToolKind::Paste).
@@ -87,6 +87,9 @@ public:
     void drawSnapMarker(QPainter& painter, const Snap& snap) const;
     // Draws the entities of `sketch` with ids above `after`, in the preview style.
     void drawPreviewSketch(QPainter& painter, const core::Sketch& sketch, core::Id after) const;
+    // Draws the entities of `sketch` that `include` picks, in the preview style.
+    void drawPreviewSketch(QPainter& painter, const core::Sketch& sketch,
+                           const std::function<bool(core::Id)>& include) const;
 
     // --- tool options ---
     int polygonSides() const { return m_polygonSides; }
@@ -173,6 +176,10 @@ private:
     ModifyOptions m_modifyOptions;
     bool m_showConstraints = true;
     core::Sketch m_pasteFragment;
+    core::Id m_editFeature = core::kNoId;  // the pattern the next pattern command edits
+    // Settings panel for the tools that have settings but no command (fillet, polygon, ...).
+    class CommandPanel* m_optionsPanel = nullptr;
+    void showOptionsPanel(ToolKind kind);
 
     // Constraint symbols and dimension labels, laid out in screen space. Computed on demand for
     // both painting and picking, so picking never sees a stale layout.

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "DrawTools.h"
+#include "Handles.h"
 #include "Tool.h"
 
 #include "../Editor.h"
@@ -8,163 +9,298 @@
 #include <core/Sketch.h>
 
 #include <QObject>
+#include <QPointer>
 
+#include <functional>
 #include <vector>
 
-// Tools that act on a group of selected items: move/rotate, scale, mirror and patterns. If nothing
-// is selected when one starts, clicks pick the items first and Enter goes on; with a selection,
-// it goes straight to its own steps. Each previews the result before the final click.
-class SelectionTool : public Tool
+class CommandPanel;
+class QCheckBox;
+class QComboBox;
+class QDoubleSpinBox;
+class QSpinBox;
+class SelectionButton;
+
+// A Fusion-style command: a panel of inputs over the canvas, a live preview, and handles to drag.
+// Selection inputs (objects, a centre point, a mirror line, ...) take clicks on the canvas: the
+// current one is highlighted, and picking fills it (a single-item input then moves on to the
+// next empty one). OK or Enter makes the change and returns to Select; Cancel or Esc drops it.
+class CommandTool : public Tool
 {
 public:
-    using Tool::Tool;
+    explicit CommandTool(SketchView& view);
+    ~CommandTool() override;
 
     QString hint() const override;
     void activate() override;
     void press(const ToolEvent& e) override;
     void move(const ToolEvent& e) override;
+    void release(const ToolEvent& e) override;
     bool keyPress(int key, const QString& text) override;
     bool cancel() override;
     void paintOverlay(QPainter& painter) override;
 
+    // Makes the change now (as OK does). Returns false, with a message, if it can't.
+    bool accept();
+
 protected:
     virtual QString title() const = 0;
-    virtual QString stepHint() const = 0;
-    virtual void stepPress(const ToolEvent& e) = 0;
-    virtual void stepMove(const ToolEvent&) {}
-    virtual bool stepCancel() { return false; }  // true if it backed out of a step
-    virtual bool stepKey(int /*key*/) { return false; }
-    virtual void paintStep(QPainter&) {}
+    virtual void buildPanel() = 0;     // add inputs to panel(); pick inputs via addPick()
+    virtual bool ready() const = 0;    // everything required is filled in
+    virtual bool commit() = 0;         // make the change; false if it failed
+    virtual void paintPreview(QPainter&) {}
+    virtual std::vector<Handle> handles() const { return {}; }
+    virtual void beginHandleDrag(int /*id*/) {}
+    virtual void dragHandle(int /*id*/, core::Vec2 /*world*/, core::Vec2 /*pressedAt*/, Qt::KeyboardModifiers) {}
+    virtual QString dragLabel(int /*id*/) const { return {}; }  // shown by a handle being dragged
+    virtual void changed() {}          // inputs or picks changed
+    // A click on nothing the current pick input accepts; return true to use it (e.g. a location).
+    virtual bool pickLocation(int /*input*/, const Snap&) { return false; }
+    virtual void abandon() {}          // the command is being dropped without committing
 
-    bool picking() const { return m_picking; }
-    // The selected sketch items (geometry only).
-    std::vector<core::Id> items() const;
-    // Back to picking items, e.g. after the selection was used up.
-    void restart();
+    CommandPanel* panel() const { return m_panel; }
+    SelectionButton* pickButton(int input) const { return m_picks[static_cast<size_t>(input)].button; }
+    core::Vec2 mouse() const { return m_mouse; }  // the latest cursor position (world)
+
+    // A selection input. `accepts` says which items it takes; `multiple` toggles items in and
+    // out, otherwise a pick replaces the item. Returns the input's index.
+    int addPick(const QString& label, const char* name, const QString& prompt, std::function<bool(core::Id)> accepts,
+                bool multiple);
+    const std::vector<core::Id>& picked(int input) const { return m_picks[static_cast<size_t>(input)].ids; }
+    void setPicked(int input, std::vector<core::Id> ids);
+    void setCurrentPick(int input);
+    void setPickEnabled(int input, bool enabled);
+
+    // Geometry the selection inputs may take.
+    bool isGeometry(core::Id id) const;
+    bool isLine(core::Id id) const;
+    bool isPoint(core::Id id) const;
+    bool isCurve(core::Id id) const;
+
+    // Centre of the bounding box of these items' points.
+    core::Vec2 centreOf(const std::vector<core::Id>& items) const;
+    double sizeOf(const std::vector<core::Id>& items) const;  // half the bounding box diagonal
+
+    bool committed() const { return m_committed; }
 
 private:
-    bool m_picking = false;
+    struct Pick
+    {
+        SelectionButton* button = nullptr;
+        QString prompt;
+        std::function<bool(core::Id)> accepts;
+        bool multiple = false;
+        bool enabled = true;
+        std::vector<core::Id> ids;
+    };
+    void picksChanged();
+    void leave();  // back to Select, once the current event is done
+    int handleAt(QPointF screen) const;
+
+    QPointer<CommandPanel> m_panel;
+    std::vector<Pick> m_picks;
+    int m_current = -1;
+    int m_hotHandle = -1;
+    int m_dragHandle = -1;
+    core::Vec2 m_pressedAt;
+    core::Vec2 m_mouse;
+    bool m_committed = false;
+    bool m_leaving = false;
 };
 
-// Move (or Copy): click a base point, then where it goes. Rotate: click the centre, a reference
-// direction, then the new direction (Shift snaps to 15°). Moving drags the geometry live, so
-// whatever it's connected to follows; with the Copy option (or Ctrl on the last click) the
-// selection is copied instead.
-class MoveTool : public SelectionTool
+// Move/Copy: X and Y distances and an angle about the objects' centre, set in the panel or by
+// dragging the arrows, the rotation knob or the centre square. Moving drags the real geometry,
+// so what's attached follows; "Create copy" copies instead.
+class MoveTool : public CommandTool
 {
 public:
-    MoveTool(SketchView& view, bool rotate)
-        : SelectionTool(view)
-        , m_rotate(rotate)
-    {}
-
-    void beforePaint() override;
+    using CommandTool::CommandTool;
+    ~MoveTool() override;
 
 protected:
-    QString title() const override;
-    QString stepHint() const override;
-    void stepPress(const ToolEvent& e) override;
-    void stepMove(const ToolEvent& e) override;
-    bool stepCancel() override;
-    void paintStep(QPainter& painter) override;
+    QString title() const override { return QObject::tr("Move/Copy"); }
+    void buildPanel() override;
+    bool ready() const override;
+    bool commit() override;
+    void paintPreview(QPainter& painter) override;
+    std::vector<Handle> handles() const override;
+    void beginHandleDrag(int id) override;
+    void dragHandle(int id, core::Vec2 world, core::Vec2 pressedAt, Qt::KeyboardModifiers modifiers) override;
+    QString dragLabel(int id) const override;
+    void changed() override;
+    void abandon() override;
 
 private:
     struct Motion
     {
         double dx = 0.0, dy = 0.0, angle = 0.0;
-        core::Vec2 about;
     };
-    Motion motionTo(core::Vec2 cursor, Qt::KeyboardModifiers modifiers) const;
-    bool copying() const;
-    void finish(Qt::KeyboardModifiers modifiers);
+    Motion motion() const;
+    void stopLiveMove();
 
-    bool m_rotate;
-    std::vector<Snap> m_clicks;  // base (move) or centre + reference (rotate)
-    core::Vec2 m_cursor;
-    Qt::KeyboardModifiers m_modifiers;
-    bool m_dragging = false;  // a live move is in progress (not copying)
-    bool m_pending = false;   // the live move needs updating before the next frame
+    int m_objects = 0;
+    QDoubleSpinBox* m_dx = nullptr;
+    QDoubleSpinBox* m_dy = nullptr;
+    QDoubleSpinBox* m_angle = nullptr;
+    QCheckBox* m_copy = nullptr;
+    core::Vec2 m_pivot;             // the objects' centre when they were picked
+    std::vector<core::Id> m_moving;  // objects of the live move, if one is open
+    Motion m_dragStart;
 };
 
-// Scale: hover where the centre goes (snapping to points), click to scale the selection by the
-// factor set in the toolbar.
-class ScaleTool : public SelectionTool
+// Scale: objects, the point to scale about (a point, or anywhere clicked), and the factor (or
+// drag the arrow).
+class ScaleTool : public CommandTool
 {
 public:
-    using SelectionTool::SelectionTool;
+    using CommandTool::CommandTool;
 
 protected:
     QString title() const override { return QObject::tr("Scale"); }
-    QString stepHint() const override;
-    void stepPress(const ToolEvent& e) override;
-    void stepMove(const ToolEvent& e) override;
-    void paintStep(QPainter& painter) override;
+    void buildPanel() override;
+    bool ready() const override;
+    bool commit() override;
+    void paintPreview(QPainter& painter) override;
+    std::vector<Handle> handles() const override;
+    void beginHandleDrag(int id) override;
+    void dragHandle(int id, core::Vec2 world, core::Vec2 pressedAt, Qt::KeyboardModifiers modifiers) override;
+    QString dragLabel(int id) const override;
+    bool pickLocation(int input, const Snap& snap) override;
+    void changed() override;
 
 private:
-    Snap m_cursor;
+    core::Vec2 about() const;
+    double reach() const;  // arrow length at factor 1
+
+    int m_objects = 0;
+    int m_point = 0;
+    bool m_hasLocation = false;
+    core::Vec2 m_location;
+    QDoubleSpinBox* m_factor = nullptr;
+    double m_dragStart = 1.0;
 };
 
-// Mirror: click the line to mirror across (the axes work too).
-class MirrorTool : public SelectionTool
+// Mirror: objects and a mirror line (or axis).
+class MirrorTool : public CommandTool
 {
 public:
-    using SelectionTool::SelectionTool;
+    using CommandTool::CommandTool;
 
 protected:
     QString title() const override { return QObject::tr("Mirror"); }
-    QString stepHint() const override;
-    void stepPress(const ToolEvent& e) override;
-    void stepMove(const ToolEvent& e) override;
-    void paintStep(QPainter& painter) override;
+    void buildPanel() override;
+    bool ready() const override;
+    bool commit() override;
+    void paintPreview(QPainter& painter) override;
 
 private:
-    core::Id lineAt(QPointF screen) const;
-    core::Id m_line = core::kNoId;
+    int m_objects = 0;
+    int m_line = 0;
 };
 
-// Rectangular pattern: previews with the toolbar's counts, spacings and direction; click (or
-// Enter) to make it. Circular pattern: click the centre point.
-class PatternTool : public SelectionTool
+// Rectangular pattern: objects, an optional direction line (else the X/Y axes), and per
+// direction a quantity, a distance (the whole extent, or the spacing) and one-way/symmetric.
+// Drag the arrows to set the distances; a negative distance goes the other way. Started on an
+// existing pattern, it edits that pattern.
+class RectangularPatternTool : public CommandTool
 {
 public:
-    PatternTool(SketchView& view, bool circular)
-        : SelectionTool(view)
-        , m_circular(circular)
+    RectangularPatternTool(SketchView& view, core::Id editing = core::kNoId)
+        : CommandTool(view)
+        , m_editing(editing)
     {}
 
 protected:
-    QString title() const override;
-    QString stepHint() const override;
-    void stepPress(const ToolEvent& e) override;
-    void stepMove(const ToolEvent& e) override;
-    bool stepKey(int key) override;
-    void paintStep(QPainter& painter) override;
+    QString title() const override { return QObject::tr("Rectangular Pattern"); }
+    void buildPanel() override;
+    bool ready() const override;
+    bool commit() override;
+    void paintPreview(QPainter& painter) override;
+    std::vector<Handle> handles() const override;
+    void beginHandleDrag(int id) override;
+    void dragHandle(int id, core::Vec2 world, core::Vec2 pressedAt, Qt::KeyboardModifiers modifiers) override;
+    QString dragLabel(int id) const override;
+    void changed() override;
 
 private:
-    core::Id apply(Editor& ed, core::Id center) const;
-    void finish(core::Id center);
-    core::Id centerAt(QPointF screen) const;
+    core::feature::LinearPatternParams params() const;
+    double baseAngle() const;  // degrees: the first direction before any flip
+    core::Vec2 axis(int direction) const;
+    double extent(int direction) const;  // signed, along axis(direction)
 
-    bool m_circular;
-    core::Id m_center = core::kNoId;  // hovered centre (circular)
+    core::Id m_editing;
+    int m_objects = 0;
+    int m_direction = 0;
+    QComboBox* m_distribution = nullptr;
+    QSpinBox* m_count[2] = {};
+    QDoubleSpinBox* m_distance[2] = {};
+    QComboBox* m_symmetric[2] = {};
+    double m_angle = 0.0;  // first direction (degrees) when no direction line is picked
+    double m_dragStart = 0.0;  // extent when a handle drag began
 };
 
-// Offset: hover a curve to preview its chain offset to the side the cursor is on, click to make
-// it (at the toolbar's distance), then type the distance.
-class OffsetTool : public Tool
+// Circular pattern: objects, centre point, full turn or a given angle, and a quantity. Drag the
+// knob to set the angle. Started on an existing pattern, it edits that pattern.
+class CircularPatternTool : public CommandTool
 {
 public:
-    using Tool::Tool;
+    CircularPatternTool(SketchView& view, core::Id editing = core::kNoId)
+        : CommandTool(view)
+        , m_editing(editing)
+    {}
 
-    QString hint() const override;
-    void press(const ToolEvent& e) override;
-    void move(const ToolEvent& e) override;
-    void paintOverlay(QPainter& painter) override;
+protected:
+    QString title() const override { return QObject::tr("Circular Pattern"); }
+    void buildPanel() override;
+    bool ready() const override;
+    bool commit() override;
+    void paintPreview(QPainter& painter) override;
+    std::vector<Handle> handles() const override;
+    void dragHandle(int id, core::Vec2 world, core::Vec2 pressedAt, Qt::KeyboardModifiers modifiers) override;
+    QString dragLabel(int id) const override;
+    void changed() override;
 
 private:
-    std::vector<core::Id> chainAt(QPointF screen) const;
-    std::vector<core::Id> m_chain;
-    core::Vec2 m_mouse;
+    core::feature::CircularPatternParams params() const;
+
+    core::Id m_editing;
+    int m_objects = 0;
+    int m_center = 0;
+    QComboBox* m_type = nullptr;
+    QSpinBox* m_count = nullptr;
+    QDoubleSpinBox* m_angle = nullptr;
+};
+
+// Offset: click a curve (its whole chain, unless "Chain selection" is off), then set the
+// distance in the panel or with the arrow; a negative distance goes to the other side.
+class OffsetTool : public CommandTool
+{
+public:
+    using CommandTool::CommandTool;
+
+protected:
+    QString title() const override { return QObject::tr("Offset"); }
+    void buildPanel() override;
+    bool ready() const override;
+    bool commit() override;
+    void paintPreview(QPainter& painter) override;
+    std::vector<Handle> handles() const override;
+    void beginHandleDrag(int id) override;
+    void dragHandle(int id, core::Vec2 world, core::Vec2 pressedAt, Qt::KeyboardModifiers modifiers) override;
+    QString dragLabel(int id) const override;
+    void changed() override;
+
+private:
+    // Where the arrow starts (on the curve) and which way is positive.
+    bool frame(core::Vec2& foot, core::Vec2& normal) const;
+    core::Vec2 toward() const;
+
+    int m_curves = 0;
+    QDoubleSpinBox* m_distance = nullptr;
+    QCheckBox* m_chain = nullptr;
+    core::Vec2 m_clickedAt;  // where the first curve was picked: its side is positive
+    double m_dragStart = 0.0;
+    std::vector<core::Id> m_lastPick;
 };
 
 // Paste: the clipboard's contents follow the cursor; click to place them.

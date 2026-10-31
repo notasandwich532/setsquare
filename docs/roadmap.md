@@ -33,15 +33,20 @@ geometry tests, GUI tool tests, and Python scenario scripts.
   the solver expands into per-point equations, including custom PlaneGCS constraints for rotated
   copies. Arc ends and smooth joins get exactly as many equations as they need, so linked copies
   add no freedom and no redundancy. Changing the value keeps the original in place.
-- **Move/Copy** (M) and **Rotate** (Shift+M): base point then target, or centre, reference and new
-  direction (Shift snaps 15°). The move drags the real geometry live; the Copy option (or Ctrl on
-  the last click) copies instead.
+- **Command panels** (Fusion-style) float over the canvas for Move/Copy, Scale, Mirror, the
+  patterns and Offset: selection inputs ("4 selected"), values, OK/Cancel, with a live preview and
+  draggable handles (distance arrows, rotation knobs). Fillet, Chamfer and Polygon settings are in
+  small panels too; nothing is set from the toolbar.
+- **Move/Copy** (M): X/Y distances and an angle, typed or dragged on the triad. The move drags the
+  real geometry live; "Create copy" copies instead.
 - **Clipboard** copy, cut and paste (Ctrl+C/X/V). The paste follows the cursor; internal
   constraints come along with the copy.
 - **Scale** about a clicked point. Dimensions inside the selection scale with it.
 - **Mirror** about a line (or axis), linked by symmetric constraints (equal for circles).
 - **Rectangular and circular patterns,** linked: one spacing/angle value drives every copy.
-  Changing the count (double-click the pattern in the constraints panel) regenerates the copies.
+  Rectangular: extent or spacing distribution, one-way or symmetric per direction, any direction
+  line. Double-click a pattern in the constraints panel to edit it in its command; a new count
+  regenerates the copies.
 - **Offset,** linked: one distance drives the whole chain (lines go parallel, arcs concentric,
   corners meet).
 

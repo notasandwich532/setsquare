@@ -103,7 +103,8 @@ enum class ConstraintType
     // value (edited like a dimension) and further settings in Constraint::params. See
     // core/Features.h for the layout of the references.
     Offset,           // (sources..., offsets...): value = distance
-    LinearPattern,    // (sources..., copies...): value = spacing; params = {count, angle, count2, spacing2}
+    LinearPattern,    // (sources..., copies...): value = spacing;
+                      // params = {count, angle, count2, spacing2, symmetric, symmetric2}
     CircularPattern,  // (centre point, sources..., copies...): value = total angle; params = {count}
 };
 

@@ -525,16 +525,22 @@ void Sketch::validateFeature(ConstraintType type, const std::vector<Id>& refs, d
             break;
         }
         case ConstraintType::LinearPattern: {
-            if (params.size() != 4) {
-                fail("expects params {count, angle, count2, spacing2}");
+            if (params.size() != 4 && params.size() != 6) {
+                fail("expects params {count, angle, count2, spacing2[, symmetric, symmetric2]}");
             }
-            const size_t total = count(0) * count(2);
+            // Symmetric: `count` each way, sharing the original.
+            auto along = [&](size_t countIndex, size_t symmetricIndex) {
+                const size_t n = count(countIndex);
+                return params.size() > symmetricIndex && params[symmetricIndex] != 0.0 ? 2 * n - 1 : n;
+            };
+            const size_t total = along(0, 4) * along(2, 5);
             if (total < 2) {
                 fail("needs at least two instances");
             }
             matchingGroups(0, total, "sources then each copy");
-            if (!(value > 0.0) || !(params[3] > 0.0)) {
-                fail("spacing must be positive");
+            // The second spacing may be negative: rows on the other side of the first direction.
+            if (!(value > 0.0) || !(params[3] != 0.0) || !std::isfinite(params[3])) {
+                fail("spacing must be positive (the second one non-zero)");
             }
             break;
         }

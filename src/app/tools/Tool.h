@@ -45,7 +45,6 @@ enum class ToolKind
     ChamferDistanceAngle,
 
     Move,
-    Rotate,
     Scale,
     Mirror,
     RectangularPattern,

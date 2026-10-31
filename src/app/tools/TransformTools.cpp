@@ -1,5 +1,6 @@
 #include "TransformTools.h"
 
+#include "../CommandPanel.h"
 #include "../Document.h"
 #include "../SketchView.h"
 #include "ShapeTools.h"
@@ -8,8 +9,15 @@
 #include <core/Geometry.h>
 #include <core/Transform.h>
 
+#include <QCheckBox>
+#include <QComboBox>
+#include <QDoubleSpinBox>
 #include <QPainter>
+#include <QSignalBlocker>
+#include <QSpinBox>
+#include <QTimer>
 
+#include <algorithm>
 #include <cmath>
 #include <functional>
 #include <numbers>
@@ -20,8 +28,9 @@ using core::Vec2;
 
 namespace
 {
-constexpr double kPickPixels = 7.0;
 constexpr double kRadToDeg = 180.0 / std::numbers::pi;
+constexpr double kDegToRad = std::numbers::pi / 180.0;
+constexpr double kHandleGap = 18.0;  // pixels between an origin and the arrows/knob around it
 
 // Draws what `make` adds to a scratch copy of the sketch, in the preview style.
 void drawGhost(SketchView& view, QPainter& painter, const std::function<void(core::Sketch&)>& make)
@@ -32,517 +41,1147 @@ void drawGhost(SketchView& view, QPainter& painter, const std::function<void(cor
         make(scratch);
     }
     catch (const core::SketchError&) {
-        return;  // can't be done from here: nothing to show
+        return;  // can't be done like this: nothing to show
     }
     view.drawPreviewSketch(painter, scratch, before);
 }
 
-bool isEnter(int key)
+// A pattern's copies after `edit` changes it, drawn over the sketch (for editing a pattern).
+void drawPatternEdit(SketchView& view, QPainter& painter, const std::function<Id(core::Sketch&)>& edit)
 {
-    return key == Qt::Key_Return || key == Qt::Key_Enter;
+    core::Sketch scratch = view.document().sketch();
+    std::set<Id> copies;
+    try {
+        const Id k = edit(scratch);
+        for (const auto& instance : core::feature::pattern(scratch.constraint(k)).copies) {
+            for (Id e : instance) {
+                copies.insert(e);
+                for (Id p : scratch.definingPoints(e)) {
+                    copies.insert(p);
+                }
+            }
+        }
+    }
+    catch (const core::SketchError&) {
+        return;
+    }
+    view.drawPreviewSketch(painter, scratch, [&](Id id) { return copies.contains(id); });
+}
+
+Vec2 operator+(Vec2 a, Vec2 b) { return {a.x + b.x, a.y + b.y}; }
+Vec2 operator-(Vec2 a, Vec2 b) { return {a.x - b.x, a.y - b.y}; }
+Vec2 operator*(double k, Vec2 v) { return {k * v.x, k * v.y}; }
+double dot(Vec2 a, Vec2 b) { return a.x * b.x + a.y * b.y; }
+double norm(Vec2 v) { return std::hypot(v.x, v.y); }
+
+double wrapDegrees(double a)  // to (-180, 180]
+{
+    while (a > 180.0) {
+        a -= 360.0;
+    }
+    while (a <= -180.0) {
+        a += 360.0;
+    }
+    return a;
+}
+
+void setQuietly(QDoubleSpinBox* box, double value)
+{
+    const QSignalBlocker block(box);
+    box->setValue(value);
+}
+
+QString length(double v)
+{
+    return QStringLiteral("%1 mm").arg(v, 0, 'f', 2);
 }
 }  // namespace
 
 // =============================================================================================
-// SelectionTool
+// CommandTool
 // =============================================================================================
 
-std::vector<Id> SelectionTool::items() const
-{
-    const core::Sketch& s = doc().sketch();
-    std::vector<Id> out;
-    for (Id id : view().selection()) {
-        if (s.hasEntity(id) && !s.isReference(id)) {
-            out.push_back(id);
-        }
-    }
-    return out;
-}
+CommandTool::CommandTool(SketchView& view)
+    : Tool(view)
+{}
 
-void SelectionTool::activate()
+CommandTool::~CommandTool()
 {
-    m_picking = items().empty();
-    refresh();
-}
-
-void SelectionTool::restart()
-{
-    m_picking = true;
-    refresh();
-}
-
-QString SelectionTool::hint() const
-{
-    if (m_picking) {
-        return QObject::tr("%1: click the geometry to use (again to drop it), then press Enter").arg(title());
-    }
-    return stepHint();
-}
-
-void SelectionTool::press(const ToolEvent& e)
-{
-    if (!m_picking) {
-        stepPress(e);
-        return;
-    }
-    if (e.button != Qt::LeftButton) {
-        return;
-    }
-    const Id hit = view().pickAt(e.screen, false);
-    const core::Sketch& s = doc().sketch();
-    if (hit != kNoId && s.hasEntity(hit) && !s.isReference(hit)) {
-        auto selection = view().selection();
-        if (!selection.erase(hit)) {
-            selection.insert(hit);
-        }
-        view().setSelection(selection);
-    }
-    refresh();
-}
-
-void SelectionTool::move(const ToolEvent& e)
-{
-    if (m_picking) {
-        view().setHovered(view().pickAt(e.screen, false));
-        return;
-    }
-    stepMove(e);
-}
-
-bool SelectionTool::keyPress(int key, const QString& /*text*/)
-{
-    if (m_picking) {
-        if (isEnter(key) && !items().empty()) {
-            m_picking = false;
-            view().setHovered(kNoId);
-            refresh();
-            return true;
-        }
-        return false;
-    }
-    return stepKey(key);
-}
-
-bool SelectionTool::cancel()
-{
-    return !m_picking && stepCancel();
-}
-
-void SelectionTool::paintOverlay(QPainter& painter)
-{
-    if (!m_picking) {
-        paintStep(painter);
+    if (m_panel) {
+        m_panel->hide();
+        m_panel->deleteLater();  // it may be mid-signal (OK / Cancel)
     }
 }
 
-// =============================================================================================
-// Move / Rotate
-// =============================================================================================
-
-QString MoveTool::title() const
+void CommandTool::activate()
 {
-    return m_rotate ? QObject::tr("Rotate") : QObject::tr("Move");
-}
+    m_panel = new CommandPanel(title(), &view());
+    buildPanel();
+    m_panel->addButtons();
+    QObject::connect(m_panel, &CommandPanel::accepted, m_panel, [this] { accept(); });
+    QObject::connect(m_panel, &CommandPanel::rejected, m_panel, [this] {
+        abandon();
+        leave();
+    });
+    QObject::connect(m_panel, &CommandPanel::changed, m_panel, [this] {
+        changed();
+        refresh();
+    });
 
-QString MoveTool::stepHint() const
-{
-    const QString copy = QObject::tr(" (Copy option or Ctrl: copy instead)");
-    if (m_rotate) {
-        switch (m_clicks.size()) {
-            case 0: return QObject::tr("Rotate: click the centre to turn about");
-            case 1: return QObject::tr("Rotate: click a reference direction");
-            default: return QObject::tr("Rotate: click the new direction (Shift: 15° steps)") + copy;
-        }
-    }
-    return m_clicks.empty() ? QObject::tr("Move: click a base point")
-                            : QObject::tr("Move: click where the base point goes") + copy;
-}
-
-bool MoveTool::copying() const
-{
-    return view().modifyOptions().copy || (m_modifiers & Qt::ControlModifier);
-}
-
-MoveTool::Motion MoveTool::motionTo(Vec2 cursor, Qt::KeyboardModifiers modifiers) const
-{
-    Motion m;
-    if (!m_rotate) {
-        if (!m_clicks.empty()) {
-            m.dx = cursor.x - m_clicks[0].pos.x;
-            m.dy = cursor.y - m_clicks[0].pos.y;
-        }
-        return m;
-    }
-    if (m_clicks.size() < 2) {
-        return m;
-    }
-    const Vec2 c = m_clicks[0].pos, r = m_clicks[1].pos;
-    double angle = (std::atan2(cursor.y - c.y, cursor.x - c.x) - std::atan2(r.y - c.y, r.x - c.x)) * kRadToDeg;
-    while (angle > 180.0) {
-        angle -= 360.0;
-    }
-    while (angle <= -180.0) {
-        angle += 360.0;
-    }
-    if (modifiers & Qt::ShiftModifier) {
-        angle = std::round(angle / 15.0) * 15.0;
-    }
-    m.angle = angle;
-    m.about = c;
-    return m;
-}
-
-void MoveTool::stepPress(const ToolEvent& e)
-{
-    if (e.button != Qt::LeftButton) {
-        return;
-    }
-    m_modifiers = e.modifiers;
-    m_cursor = m_dragging ? e.world : view().snap(e.screen).pos;
-    const size_t needed = m_rotate ? 2 : 1;
-    if (m_clicks.size() < needed) {
-        m_clicks.push_back(view().snap(e.screen));
-        if (m_clicks.size() == needed && !copying()) {
-            // Move the real geometry from here on, so what's attached follows as it would.
-            std::vector<Id> points;
-            for (Id id : core::xform::expand(doc().sketch(), items())) {
-                if (doc().sketch().entity(id).kind() == core::EntityKind::Point) {
-                    points.push_back(id);
-                }
+    // What's already selected fills the first input that takes it (Fusion's pre-selection).
+    if (!m_picks.empty() && m_picks[0].enabled && m_picks[0].ids.empty()) {
+        std::vector<Id> pre;
+        for (Id id : view().selection()) {
+            if (m_picks[0].accepts(id)) {
+                pre.push_back(id);
             }
-            doc().beginDrag(points);
-            m_dragging = true;
         }
+        m_picks[0].ids = std::move(pre);
+    }
+    int first = -1;
+    for (size_t i = 0; i < m_picks.size(); ++i) {
+        if (m_picks[i].enabled && m_picks[i].ids.empty()) {
+            first = static_cast<int>(i);
+            break;
+        }
+    }
+    setCurrentPick(first);
+    picksChanged();
+    view().setFocus();
+}
+
+int CommandTool::addPick(const QString& label, const char* name, const QString& prompt,
+                         std::function<bool(Id)> accepts, bool multiple)
+{
+    const int index = static_cast<int>(m_picks.size());
+    Pick p;
+    p.button = m_panel->addSelection(label, name);
+    p.prompt = prompt;
+    p.accepts = std::move(accepts);
+    p.multiple = multiple;
+    QObject::connect(p.button, &QPushButton::clicked, m_panel, [this, index] {
+        setCurrentPick(index);
+        view().setFocus();
+    });
+    QObject::connect(p.button, &SelectionButton::cleared, m_panel, [this, index] {
+        setPicked(index, {});
+        setCurrentPick(index);
+    });
+    m_picks.push_back(std::move(p));
+    return index;
+}
+
+void CommandTool::setPicked(int input, std::vector<Id> ids)
+{
+    m_picks[static_cast<size_t>(input)].ids = std::move(ids);
+    picksChanged();
+}
+
+void CommandTool::setCurrentPick(int input)
+{
+    m_current = input;
+    for (size_t i = 0; i < m_picks.size(); ++i) {
+        m_picks[i].button->setCurrent(static_cast<int>(i) == input);
+    }
+    refresh();
+}
+
+void CommandTool::setPickEnabled(int input, bool enabled)
+{
+    m_picks[static_cast<size_t>(input)].enabled = enabled;
+    m_picks[static_cast<size_t>(input)].button->setEnabled(enabled);
+    if (!enabled && m_current == input) {
+        setCurrentPick(-1);
+    }
+}
+
+void CommandTool::picksChanged()
+{
+    std::set<Id> shown;
+    for (const Pick& p : m_picks) {
+        p.button->setCount(static_cast<int>(p.ids.size()));
+        shown.insert(p.ids.begin(), p.ids.end());
+    }
+    view().setSelection(std::move(shown));  // highlight what the command will use
+    changed();
+    refresh();
+}
+
+bool CommandTool::isGeometry(Id id) const
+{
+    const core::Sketch& s = doc().sketch();
+    return s.hasEntity(id) && !s.isReference(id);
+}
+
+bool CommandTool::isLine(Id id) const
+{
+    const core::Sketch& s = doc().sketch();
+    return s.hasEntity(id) && s.entity(id).kind() == core::EntityKind::Line;
+}
+
+bool CommandTool::isPoint(Id id) const
+{
+    const core::Sketch& s = doc().sketch();
+    return s.hasEntity(id) && s.entity(id).kind() == core::EntityKind::Point && !s.isHiddenReference(id);
+}
+
+bool CommandTool::isCurve(Id id) const
+{
+    const core::Sketch& s = doc().sketch();
+    return isGeometry(id) && s.entity(id).kind() != core::EntityKind::Point;
+}
+
+Vec2 CommandTool::centreOf(const std::vector<Id>& items) const
+{
+    const core::Sketch& s = doc().sketch();
+    double x0 = 1e300, y0 = 1e300, x1 = -1e300, y1 = -1e300;
+    for (Id id : core::xform::expand(s, items)) {
+        for (const Vec2& p : core::sample(s, id, 16)) {
+            x0 = std::min(x0, p.x);
+            y0 = std::min(y0, p.y);
+            x1 = std::max(x1, p.x);
+            y1 = std::max(y1, p.y);
+        }
+    }
+    return x0 > x1 ? Vec2{} : Vec2{(x0 + x1) / 2, (y0 + y1) / 2};
+}
+
+double CommandTool::sizeOf(const std::vector<Id>& items) const
+{
+    const core::Sketch& s = doc().sketch();
+    const Vec2 c = centreOf(items);
+    double r = 0.0;
+    for (Id id : core::xform::expand(s, items)) {
+        for (const Vec2& p : core::sample(s, id, 16)) {
+            r = std::max(r, norm(p - c));
+        }
+    }
+    return r;
+}
+
+QString CommandTool::hint() const
+{
+    if (m_current >= 0) {
+        return QStringLiteral("%1: %2, then OK (Enter)").arg(title(), m_picks[static_cast<size_t>(m_current)].prompt);
+    }
+    return QObject::tr("%1: adjust in the panel or drag the handles, then OK (Enter). Esc cancels").arg(title());
+}
+
+int CommandTool::handleAt(QPointF screen) const
+{
+    for (const Handle& h : handles()) {
+        if (hitHandle(view(), h, screen)) {
+            return h.id;
+        }
+    }
+    return -1;
+}
+
+void CommandTool::press(const ToolEvent& e)
+{
+    if (e.button != Qt::LeftButton) {
+        return;
+    }
+    m_mouse = e.world;
+    if (const int h = handleAt(e.screen); h >= 0) {
+        m_dragHandle = h;
+        m_pressedAt = e.world;
+        beginHandleDrag(h);
         refresh();
         return;
     }
-    finish(e.modifiers);
-}
-
-void MoveTool::finish(Qt::KeyboardModifiers modifiers)
-{
-    const Motion m = motionTo(m_cursor, modifiers);
-    const bool copy = copying();
-    if (m_dragging) {
-        m_dragging = m_pending = false;
-        if (copy) {
-            doc().cancelDrag();
+    if (m_current < 0) {
+        return;
+    }
+    Pick& pick = m_picks[static_cast<size_t>(m_current)];
+    const Id hit = view().pickAt(e.screen, false);
+    if (hit != kNoId && pick.accepts(hit)) {
+        if (pick.multiple) {
+            if (std::erase(pick.ids, hit) == 0) {
+                pick.ids.push_back(hit);
+            }
         }
         else {
-            doc().dragMove(m.dx, m.dy, m.angle, m.about);
-            doc().endDrag();
+            pick.ids = {hit};
+            // On to the next input still waiting for something.
+            int next = -1;
+            for (size_t i = 0; i < m_picks.size(); ++i) {
+                if (m_picks[i].enabled && m_picks[i].ids.empty()) {
+                    next = static_cast<int>(i);
+                    break;
+                }
+            }
+            setCurrentPick(next);
+        }
+        picksChanged();
+        return;
+    }
+    if (pickLocation(m_current, view().snap(e.screen))) {
+        picksChanged();
+    }
+}
+
+void CommandTool::move(const ToolEvent& e)
+{
+    m_mouse = e.world;
+    if (m_dragHandle >= 0) {
+        dragHandle(m_dragHandle, e.world, m_pressedAt, e.modifiers);
+        refresh();
+        return;
+    }
+    m_hotHandle = handleAt(e.screen);
+    Id hover = kNoId;
+    if (m_hotHandle < 0 && m_current >= 0) {
+        const Id hit = view().pickAt(e.screen, false);
+        if (hit != kNoId && m_picks[static_cast<size_t>(m_current)].accepts(hit)) {
+            hover = hit;
         }
     }
-    if (copy) {
-        const std::vector<Id> selected = items();
-        view().tryEdit(QObject::tr("Copy"), [&](Editor& ed) { ed.copy(selected, m.dx, m.dy, m.angle, m.about); });
-    }
-    m_clicks.clear();
+    view().setHovered(hover);
     refresh();
 }
 
-void MoveTool::stepMove(const ToolEvent& e)
+void CommandTool::release(const ToolEvent& e)
 {
-    m_modifiers = e.modifiers;
-    m_cursor = m_dragging ? e.world : view().snap(e.screen).pos;
-    if (m_dragging) {
-        m_pending = true;
-    }
-    refresh();
-}
-
-void MoveTool::beforePaint()
-{
-    if (m_pending && m_dragging) {
-        m_pending = false;
-        const Motion m = motionTo(m_cursor, m_modifiers);
-        doc().dragMove(m.dx, m.dy, m.angle, m.about);
+    if (e.button == Qt::LeftButton && m_dragHandle >= 0) {
+        m_dragHandle = -1;
+        refresh();
     }
 }
 
-bool MoveTool::stepCancel()
+bool CommandTool::keyPress(int key, const QString& /*text*/)
 {
-    if (m_clicks.empty()) {
+    if (key == Qt::Key_Return || key == Qt::Key_Enter) {
+        accept();
+        return true;
+    }
+    return false;
+}
+
+bool CommandTool::cancel()
+{
+    // Only backs out of a handle drag; otherwise Esc leaves (and the destructor tidies up).
+    if (m_dragHandle >= 0) {
+        m_dragHandle = -1;
+        refresh();
+        return true;
+    }
+    return false;
+}
+
+void CommandTool::paintOverlay(QPainter& painter)
+{
+    paintPreview(painter);
+    for (const Handle& h : handles()) {
+        drawHandle(view(), painter, h, h.id == m_hotHandle || h.id == m_dragHandle);
+    }
+    if (m_dragHandle >= 0) {
+        if (const QString label = dragLabel(m_dragHandle); !label.isEmpty()) {
+            view().drawLabel(painter, m_mouse, label);
+        }
+    }
+}
+
+bool CommandTool::accept()
+{
+    if (m_committed) {
+        return true;
+    }
+    if (!ready()) {
+        emit view().message(QObject::tr("%1: fill in the highlighted inputs first").arg(title()));
         return false;
     }
-    if (m_dragging) {
-        m_dragging = m_pending = false;
-        doc().cancelDrag();  // everything back where it was
+    if (!commit()) {
+        return false;
     }
-    m_clicks.clear();
-    refresh();
+    m_committed = true;
+    view().setSelection({});
+    leave();
     return true;
 }
 
-void MoveTool::paintStep(QPainter& painter)
+void CommandTool::leave()
 {
-    if (m_clicks.empty()) {
-        view().drawSnapMarker(painter, Snap{m_cursor});
+    if (m_leaving) {
         return;
     }
-    const Vec2 first = m_clicks[0].pos;
-    view().drawPreviewLine(painter, first, m_cursor);
-    const size_t needed = m_rotate ? 2 : 1;
-    if (m_clicks.size() < needed) {
+    m_leaving = true;
+    // Not now: we may be inside the panel's signal, and switching tools deletes this tool.
+    SketchView* v = &view();
+    const ToolKind kind = v->toolKind();
+    QTimer::singleShot(0, v, [v, kind] {
+        if (v->toolKind() == kind) {
+            v->setTool(ToolKind::Select);
+        }
+    });
+}
+
+// =============================================================================================
+// Move / Copy
+// =============================================================================================
+
+MoveTool::~MoveTool()
+{
+    if (!committed()) {
+        stopLiveMove();  // put everything back
+    }
+}
+
+void MoveTool::buildPanel()
+{
+    const SketchView::ModifyOptions& o = view().modifyOptions();
+    m_objects = addPick(QObject::tr("Objects"), "objects", QObject::tr("click the objects to move"),
+                        [this](Id id) { return isGeometry(id); }, true);
+    m_dx = panel()->addNumber(QObject::tr("X distance"), "dx", 0.0, -1e6, 1e6);
+    m_dy = panel()->addNumber(QObject::tr("Y distance"), "dy", 0.0, -1e6, 1e6);
+    m_angle = panel()->addNumber(QObject::tr("Angle"), "angle", 0.0, -360.0, 360.0, QStringLiteral(" °"));
+    m_copy = panel()->addCheck(QObject::tr("Create copy"), "copy", o.copy);
+}
+
+MoveTool::Motion MoveTool::motion() const
+{
+    return {m_dx->value(), m_dy->value(), m_angle->value()};
+}
+
+bool MoveTool::ready() const
+{
+    return !picked(m_objects).empty();
+}
+
+void MoveTool::stopLiveMove()
+{
+    if (!m_moving.empty()) {
+        doc().cancelDrag();
+        m_moving.clear();
+    }
+}
+
+void MoveTool::abandon()
+{
+    stopLiveMove();
+}
+
+void MoveTool::changed()
+{
+    if (!m_dx) {
+        return;  // still building the panel
+    }
+    view().modifyOptions().copy = m_copy->isChecked();
+    const std::vector<Id>& objects = picked(m_objects);
+    if (objects != m_moving) {
+        stopLiveMove();  // the geometry goes back before measuring it again
+        m_pivot = centreOf(objects);
+    }
+    const Motion m = motion();
+    const bool still = m.dx == 0.0 && m.dy == 0.0 && m.angle == 0.0;
+    if (m_copy->isChecked() || objects.empty()) {
+        stopLiveMove();
         return;
     }
-    const Motion m = motionTo(m_cursor, m_modifiers);
-    if (m_rotate) {
-        view().drawPreviewLine(painter, first, m_clicks[1].pos);
-        view().drawLabel(painter, m_cursor, QStringLiteral("%1°").arg(m.angle, 0, 'f', 1));
+    if (m_moving.empty()) {
+        if (still) {
+            return;
+        }
+        // Move the real geometry, as a drag: whatever is attached follows.
+        std::vector<Id> points;
+        for (Id id : core::xform::expand(doc().sketch(), objects)) {
+            if (doc().sketch().entity(id).kind() == core::EntityKind::Point) {
+                points.push_back(id);
+            }
+        }
+        doc().beginDrag(points);
+        m_moving = objects;
     }
-    if (!m_dragging) {  // copying: show where the copy will land
-        const std::vector<Id> selected = items();
-        drawGhost(view(), painter, [&](core::Sketch& s) {
-            core::xform::copy(s, selected, Editor::moveMap(m.dx, m.dy, m.angle, m.about));
-        });
+    doc().dragMove(m.dx, m.dy, m.angle, m_pivot);
+}
+
+bool MoveTool::commit()
+{
+    const Motion m = motion();
+    if (m_copy->isChecked()) {
+        stopLiveMove();
+        const std::vector<Id> objects = picked(m_objects);
+        const Vec2 about = m_pivot;
+        return view().tryEdit(QObject::tr("Copy"),
+                              [&](Editor& ed) { ed.copy(objects, m.dx, m.dy, m.angle, about); });
     }
+    if (!m_moving.empty()) {
+        doc().endDrag();  // one undo step, recorded as s.move(...)
+        m_moving.clear();
+    }
+    return true;
+}
+
+void MoveTool::paintPreview(QPainter& painter)
+{
+    const std::vector<Id>& objects = picked(m_objects);
+    if (!m_copy->isChecked() || objects.empty()) {
+        return;
+    }
+    const Motion m = motion();
+    drawGhost(view(), painter, [&](core::Sketch& s) {
+        core::xform::copy(s, objects, Editor::moveMap(m.dx, m.dy, m.angle, m_pivot));
+    });
+}
+
+std::vector<Handle> MoveTool::handles() const
+{
+    if (picked(m_objects).empty()) {
+        return {};
+    }
+    const Motion m = motion();
+    const Vec2 at = m_pivot + Vec2{m.dx, m.dy};
+    const double gap = kHandleGap / view().zoom();
+    const double turn = (45.0 + m.angle) * kDegToRad;
+    return {
+        {Handle::Kind::Arrow, 1, at + Vec2{gap, 0}, {1, 0}},
+        {Handle::Kind::Arrow, 2, at + Vec2{0, gap}, {0, 1}},
+        {Handle::Kind::Rotate, 3, at + (4.0 * gap) * Vec2{std::cos(turn), std::sin(turn)}, {}},
+        {Handle::Kind::Move, 4, at, {}},
+    };
+}
+
+void MoveTool::beginHandleDrag(int /*id*/)
+{
+    m_dragStart = motion();
+}
+
+void MoveTool::dragHandle(int id, Vec2 world, Vec2 pressedAt, Qt::KeyboardModifiers modifiers)
+{
+    const Vec2 d = world - pressedAt;
+    switch (id) {
+        case 1: setQuietly(m_dx, m_dragStart.dx + d.x); break;
+        case 2: setQuietly(m_dy, m_dragStart.dy + d.y); break;
+        case 4:
+            setQuietly(m_dx, m_dragStart.dx + d.x);
+            setQuietly(m_dy, m_dragStart.dy + d.y);
+            break;
+        case 3: {
+            const Vec2 c = m_pivot + Vec2{m_dragStart.dx, m_dragStart.dy};
+            double a = m_dragStart.angle
+                + (std::atan2(world.y - c.y, world.x - c.x) - std::atan2(pressedAt.y - c.y, pressedAt.x - c.x))
+                    * kRadToDeg;
+            a = wrapDegrees(a);
+            if (modifiers & Qt::ShiftModifier) {
+                a = std::round(a / 15.0) * 15.0;
+            }
+            setQuietly(m_angle, a);
+            break;
+        }
+        default: return;
+    }
+    changed();
+}
+
+QString MoveTool::dragLabel(int id) const
+{
+    const Motion m = motion();
+    if (id == 3) {
+        return QStringLiteral("%1°").arg(m.angle, 0, 'f', 1);
+    }
+    return QStringLiteral("X %1   Y %2").arg(length(m.dx), length(m.dy));
 }
 
 // =============================================================================================
 // Scale
 // =============================================================================================
 
-QString ScaleTool::stepHint() const
+void ScaleTool::buildPanel()
 {
-    return QObject::tr("Scale: click the point to scale about (factor %1, set in the toolbar)")
-        .arg(view().modifyOptions().scaleFactor);
+    m_objects = addPick(QObject::tr("Objects"), "objects", QObject::tr("click the objects to scale"),
+                        [this](Id id) { return isGeometry(id); }, true);
+    m_point = addPick(QObject::tr("Point"), "point", QObject::tr("click the point to scale about (or anywhere)"),
+                      [this](Id id) { return isPoint(id); }, false);
+    m_factor = panel()->addNumber(QObject::tr("Scale factor"), "factor", view().modifyOptions().scaleFactor, 0.001,
+                                  1000.0, QString());
 }
 
-void ScaleTool::stepMove(const ToolEvent& e)
+Vec2 ScaleTool::about() const
 {
-    m_cursor = view().snap(e.screen);
-    refresh();
+    if (!picked(m_point).empty()) {
+        const core::Point& p = doc().sketch().point(picked(m_point).front());
+        return {p.x, p.y};
+    }
+    return m_location;
 }
 
-void ScaleTool::stepPress(const ToolEvent& e)
+bool ScaleTool::ready() const
 {
-    if (e.button != Qt::LeftButton) {
+    return !picked(m_objects).empty() && (!picked(m_point).empty() || m_hasLocation);
+}
+
+bool ScaleTool::pickLocation(int input, const Snap& snap)
+{
+    if (input != m_point) {
+        return false;
+    }
+    m_location = snap.pos;
+    m_hasLocation = true;
+    setCurrentPick(-1);
+    return true;
+}
+
+void ScaleTool::changed()
+{
+    if (!m_factor) {
         return;
     }
-    const Vec2 about = view().snap(e.screen).pos;
-    const double factor = view().modifyOptions().scaleFactor;
-    const std::vector<Id> selected = items();
-    view().tryEdit(QObject::tr("Scale"), [&](Editor& ed) { ed.scale(selected, factor, about); });
-    refresh();
+    if (!picked(m_point).empty()) {
+        m_hasLocation = false;
+    }
+    if (m_hasLocation) {
+        pickButton(m_point)->setText(QObject::tr("▸ (%1, %2)").arg(m_location.x, 0, 'f', 1).arg(m_location.y, 0, 'f', 1));
+    }
+    view().modifyOptions().scaleFactor = m_factor->value();
 }
 
-void ScaleTool::paintStep(QPainter& painter)
+double ScaleTool::reach() const
 {
-    const std::vector<Id> selected = items();
-    const double factor = view().modifyOptions().scaleFactor;
+    return std::max(sizeOf(picked(m_objects)), 40.0 / view().zoom());
+}
+
+bool ScaleTool::commit()
+{
+    const std::vector<Id> objects = picked(m_objects);
+    const Vec2 centre = about();
+    const double factor = m_factor->value();
+    return view().tryEdit(QObject::tr("Scale"), [&](Editor& ed) { ed.scale(objects, factor, centre); });
+}
+
+void ScaleTool::paintPreview(QPainter& painter)
+{
+    if (!ready()) {
+        return;
+    }
+    const std::vector<Id>& objects = picked(m_objects);
+    const Vec2 centre = about();
     drawGhost(view(), painter, [&](core::Sketch& s) {
-        core::xform::copy(s, selected, core::Affine::scaling(m_cursor.pos, factor), false);
+        core::xform::copy(s, objects, core::Affine::scaling(centre, m_factor->value()), false);
     });
-    view().drawSnapMarker(painter, m_cursor);
+    view().drawSnapMarker(painter, Snap{centre});
+}
+
+std::vector<Handle> ScaleTool::handles() const
+{
+    if (!ready()) {
+        return {};
+    }
+    return {{Handle::Kind::Arrow, 1, about() + Vec2{reach() * m_factor->value(), 0}, {1, 0}}};
+}
+
+void ScaleTool::beginHandleDrag(int /*id*/)
+{
+    m_dragStart = m_factor->value();
+}
+
+void ScaleTool::dragHandle(int /*id*/, Vec2 world, Vec2 pressedAt, Qt::KeyboardModifiers /*modifiers*/)
+{
+    setQuietly(m_factor, std::max(0.001, m_dragStart + (world.x - pressedAt.x) / reach()));
+    changed();
+}
+
+QString ScaleTool::dragLabel(int /*id*/) const
+{
+    return QStringLiteral("× %1").arg(m_factor->value(), 0, 'f', 3);
 }
 
 // =============================================================================================
 // Mirror
 // =============================================================================================
 
-QString MirrorTool::stepHint() const
+void MirrorTool::buildPanel()
 {
-    return QObject::tr("Mirror: click the line to mirror across");
+    m_objects = addPick(QObject::tr("Objects"), "objects", QObject::tr("click the objects to mirror"),
+                        [this](Id id) { return isGeometry(id); }, true);
+    m_line = addPick(QObject::tr("Mirror line"), "line", QObject::tr("click the line (or axis) to mirror across"),
+                     [this](Id id) { return isLine(id); }, false);
 }
 
-Id MirrorTool::lineAt(QPointF screen) const
+bool MirrorTool::ready() const
 {
-    core::PickOptions options;
-    options.tolerance = kPickPixels / view().zoom();
-    options.points = false;
+    return !picked(m_objects).empty() && !picked(m_line).empty();
+}
+
+bool MirrorTool::commit()
+{
+    const std::vector<Id> objects = picked(m_objects);
+    const Id line = picked(m_line).front();
+    return view().tryEdit(QObject::tr("Mirror"), [&](Editor& ed) { ed.mirror(objects, line); });
+}
+
+void MirrorTool::paintPreview(QPainter& painter)
+{
+    if (!ready()) {
+        return;
+    }
+    const std::vector<Id>& objects = picked(m_objects);
+    const Id line = picked(m_line).front();
+    drawGhost(view(), painter, [&](core::Sketch& s) { core::xform::mirror(s, objects, line); });
+}
+
+// =============================================================================================
+// Rectangular pattern
+// =============================================================================================
+
+void RectangularPatternTool::buildPanel()
+{
     const core::Sketch& s = doc().sketch();
-    const Id hit = core::pick(s, view().toWorld(screen), options);
-    if (hit == kNoId || s.entity(hit).kind() != core::EntityKind::Line) {
-        return kNoId;
-    }
-    return hit;
-}
-
-void MirrorTool::stepMove(const ToolEvent& e)
-{
-    m_line = lineAt(e.screen);
-    view().setHovered(m_line);
-    refresh();
-}
-
-void MirrorTool::stepPress(const ToolEvent& e)
-{
-    if (e.button != Qt::LeftButton) {
-        return;
-    }
-    const Id line = lineAt(e.screen);
-    if (line == kNoId) {
-        emit view().message(QObject::tr("Click a line (or an axis) to mirror across"));
-        return;
-    }
-    const std::vector<Id> selected = items();
-    if (view().tryEdit(QObject::tr("Mirror"), [&](Editor& ed) { ed.mirror(selected, line); })) {
-        m_line = kNoId;
-        view().setSelection({});
-        restart();
-    }
-}
-
-void MirrorTool::paintStep(QPainter& painter)
-{
-    if (m_line == kNoId || !doc().sketch().hasEntity(m_line)) {
-        return;
-    }
-    const std::vector<Id> selected = items();
-    drawGhost(view(), painter, [&](core::Sketch& s) { core::xform::mirror(s, selected, m_line); });
-}
-
-// =============================================================================================
-// Patterns
-// =============================================================================================
-
-QString PatternTool::title() const
-{
-    return m_circular ? QObject::tr("Circular pattern") : QObject::tr("Rectangular pattern");
-}
-
-QString PatternTool::stepHint() const
-{
-    if (m_circular) {
-        return QObject::tr("Circular pattern: click the centre point (count and angle are in the toolbar)");
-    }
-    return QObject::tr("Rectangular pattern: set counts, spacing and direction in the toolbar, then click or "
-                       "press Enter");
-}
-
-Id PatternTool::centerAt(QPointF screen) const
-{
-    core::PickOptions options;
-    options.tolerance = kPickPixels / view().zoom();
-    options.curves = false;
-    return core::pick(doc().sketch(), view().toWorld(screen), options);
-}
-
-Id PatternTool::apply(Editor& ed, Id center) const
-{
     const SketchView::ModifyOptions& o = view().modifyOptions();
-    const std::vector<Id> selected = items();
-    if (m_circular) {
-        return ed.circularPattern(selected, center, {o.circularCount, o.circularAngle});
+    core::feature::LinearPatternParams p{o.patternCount, o.patternSpacing, o.patternAngle, o.patternCount2,
+                                         o.patternSpacing2};
+    std::vector<Id> sources;
+    if (m_editing != kNoId && s.hasConstraint(m_editing)) {
+        p = core::feature::linearParams(s.constraint(m_editing));
+        sources = core::feature::pattern(s.constraint(m_editing)).sources;
     }
-    return ed.rectangularPattern(selected, {o.patternCount, o.patternSpacing, o.patternAngle, o.patternCount2,
-                                            o.patternSpacing2});
+    else {
+        m_editing = kNoId;
+    }
+    m_angle = p.angle;
+
+    m_objects = addPick(QObject::tr("Objects"), "objects", QObject::tr("click the objects to pattern"),
+                        [this](Id id) { return isGeometry(id); }, true);
+    m_direction = addPick(QObject::tr("Direction/s"), "direction",
+                          QObject::tr("click a line for the first direction (or OK for the X/Y axes)"),
+                          [this](Id id) { return isLine(id); }, false);
+    m_distribution = panel()->addChoice(QObject::tr("Distribution"), "distribution",
+                                        {QObject::tr("Extent"), QObject::tr("Spacing")});
+    const QStringList ways{QObject::tr("One Direction"), QObject::tr("Symmetric")};
+    const int counts[2] = {p.count, p.count2};
+    const double spacings[2] = {p.spacing, std::abs(p.spacing2)};
+    const double signs[2] = {1.0, p.spacing2 < 0 ? -1.0 : 1.0};
+    const bool symmetric[2] = {p.symmetric, p.symmetric2};
+    for (int d = 0; d < 2; ++d) {
+        m_count[d] = panel()->addCount(QObject::tr("Quantity"), d == 0 ? "quantity" : "quantity2", counts[d], 1);
+        const double extent = spacings[d] * std::max(1, counts[d] - 1);
+        m_distance[d] = panel()->addNumber(QObject::tr("Distance"), d == 0 ? "distance" : "distance2",
+                                           signs[d] * extent, -1e6, 1e6);
+        m_symmetric[d] = panel()->addChoice(QObject::tr("Direction"), d == 0 ? "symmetric" : "symmetric2", ways,
+                                            symmetric[d] ? 1 : 0);
+    }
+    if (m_editing != kNoId) {
+        setPicked(m_objects, sources);
+        setPickEnabled(m_objects, false);
+    }
 }
 
-void PatternTool::finish(Id center)
+double RectangularPatternTool::baseAngle() const
 {
-    if (view().tryEdit(title(), [&](Editor& ed) { apply(ed, center); })) {
-        m_center = kNoId;
-        view().setSelection({});
-        restart();
+    if (!picked(m_direction).empty()) {
+        const core::Sketch& s = doc().sketch();
+        const core::Line& l = s.line(picked(m_direction).front());
+        const core::Point& a = s.point(l.p1);
+        const core::Point& b = s.point(l.p2);
+        return std::atan2(b.y - a.y, b.x - a.x) * kRadToDeg;
     }
+    return m_angle;
 }
 
-void PatternTool::stepMove(const ToolEvent& e)
+Vec2 RectangularPatternTool::axis(int d) const
 {
-    if (m_circular) {
-        m_center = centerAt(e.screen);
-        view().setHovered(m_center);
-    }
-    refresh();
+    const double a = (baseAngle() + (d == 1 ? 90.0 : 0.0)) * kDegToRad;
+    return {std::cos(a), std::sin(a)};
 }
 
-void PatternTool::stepPress(const ToolEvent& e)
+double RectangularPatternTool::extent(int d) const
 {
-    if (e.button != Qt::LeftButton) {
+    const double distance = m_distance[d]->value();
+    const int steps = std::max(1, m_count[d]->value() - 1);
+    return m_distribution->currentIndex() == 0 ? distance : distance * steps;
+}
+
+core::feature::LinearPatternParams RectangularPatternTool::params() const
+{
+    core::feature::LinearPatternParams p;
+    double spacing[2];
+    for (int d = 0; d < 2; ++d) {
+        const int steps = std::max(1, m_count[d]->value() - 1);
+        const double distance = std::abs(m_distance[d]->value());
+        spacing[d] = std::max(1e-3, m_distribution->currentIndex() == 0 ? distance / steps : distance);
+    }
+    const bool flip1 = m_distance[0]->value() < 0, flip2 = m_distance[1]->value() < 0;
+    p.count = m_count[0]->value();
+    p.count2 = m_count[1]->value();
+    p.spacing = spacing[0];
+    // A negative first distance turns the whole grid round; the second direction then follows.
+    p.angle = baseAngle() + (flip1 ? 180.0 : 0.0);
+    p.spacing2 = flip1 != flip2 ? -spacing[1] : spacing[1];
+    p.symmetric = m_symmetric[0]->currentIndex() == 1;
+    p.symmetric2 = m_symmetric[1]->currentIndex() == 1;
+    return p;
+}
+
+bool RectangularPatternTool::ready() const
+{
+    return !picked(m_objects).empty() && m_count[0]->value() * m_count[1]->value() > 1;
+}
+
+void RectangularPatternTool::changed()
+{
+    if (!m_count[1]) {
         return;
     }
-    if (!m_circular) {
-        finish(kNoId);
-        return;
+    for (int d = 0; d < 2; ++d) {
+        m_distance[d]->setEnabled(m_count[d]->value() > 1);
     }
-    const Id center = centerAt(e.screen);
-    if (center == kNoId) {
-        emit view().message(QObject::tr("Click a point (or the origin) to pattern around"));
-        return;
+    if (m_editing == kNoId) {
+        const auto p = params();
+        SketchView::ModifyOptions& o = view().modifyOptions();
+        o.patternCount = p.count;
+        o.patternSpacing = p.spacing;
+        o.patternCount2 = p.count2;
+        o.patternSpacing2 = std::abs(p.spacing2);
     }
-    finish(center);
 }
 
-bool PatternTool::stepKey(int key)
+bool RectangularPatternTool::commit()
 {
-    if (!m_circular && isEnter(key)) {
-        finish(kNoId);
-        return true;
-    }
-    return false;
+    const auto p = params();
+    const std::vector<Id> objects = picked(m_objects);
+    return view().tryEdit(QObject::tr("Pattern"), [&](Editor& ed) {
+        if (m_editing != kNoId) {
+            ed.setPattern(m_editing, p);
+        }
+        else {
+            ed.rectangularPattern(objects, p);
+        }
+    });
 }
 
-void PatternTool::paintStep(QPainter& painter)
+void RectangularPatternTool::paintPreview(QPainter& painter)
 {
-    if (m_circular && (m_center == kNoId || !doc().sketch().hasEntity(m_center))) {
+    if (!ready()) {
         return;
     }
-    drawPreviewEdit(view(), painter, [&](Editor& ed) { apply(ed, m_center); });
+    const auto p = params();
+    if (m_editing != kNoId) {
+        drawPatternEdit(view(), painter,
+                        [&](core::Sketch& s) { return core::feature::setLinearPattern(s, m_editing, p); });
+        return;
+    }
+    const std::vector<Id> objects = picked(m_objects);
+    drawPreviewEdit(view(), painter, [&](Editor& ed) { ed.rectangularPattern(objects, p); });
+}
+
+std::vector<Handle> RectangularPatternTool::handles() const
+{
+    if (picked(m_objects).empty()) {
+        return {};
+    }
+    const Vec2 origin = centreOf(picked(m_objects));
+    const double gap = kHandleGap / view().zoom();
+    std::vector<Handle> out;
+    for (int d = 0; d < 2; ++d) {
+        const double e = extent(d);
+        const double side = e < 0 ? -1.0 : 1.0;
+        const Vec2 u = axis(d);
+        out.push_back({Handle::Kind::Arrow, d + 1, origin + (e + side * gap) * u, side * u});
+    }
+    return out;
+}
+
+void RectangularPatternTool::beginHandleDrag(int id)
+{
+    m_dragStart = extent(id - 1);
+}
+
+void RectangularPatternTool::dragHandle(int id, Vec2 world, Vec2 pressedAt, Qt::KeyboardModifiers /*modifiers*/)
+{
+    const int d = id - 1;
+    const double e = m_dragStart + dot(world - pressedAt, axis(d));
+    const int steps = std::max(1, m_count[d]->value() - 1);
+    setQuietly(m_distance[d], m_distribution->currentIndex() == 0 ? e : e / steps);
+    changed();
+}
+
+QString RectangularPatternTool::dragLabel(int id) const
+{
+    const int d = id - 1;
+    return QStringLiteral("%1   × %2").arg(length(m_distance[d]->value())).arg(m_count[d]->value());
+}
+
+// =============================================================================================
+// Circular pattern
+// =============================================================================================
+
+void CircularPatternTool::buildPanel()
+{
+    const core::Sketch& s = doc().sketch();
+    const SketchView::ModifyOptions& o = view().modifyOptions();
+    core::feature::CircularPatternParams p{o.circularCount, o.circularAngle};
+    core::feature::Pattern existing;
+    if (m_editing != kNoId && s.hasConstraint(m_editing)) {
+        p = core::feature::circularParams(s.constraint(m_editing));
+        existing = core::feature::pattern(s.constraint(m_editing));
+    }
+    else {
+        m_editing = kNoId;
+    }
+    m_objects = addPick(QObject::tr("Objects"), "objects", QObject::tr("click the objects to pattern"),
+                        [this](Id id) { return isGeometry(id); }, true);
+    m_center = addPick(QObject::tr("Center point"), "center", QObject::tr("click the centre point"),
+                       [this](Id id) { return isPoint(id); }, false);
+    const bool full = p.angle >= 360.0 - 1e-9;
+    m_type = panel()->addChoice(QObject::tr("Type"), "type", {QObject::tr("Full"), QObject::tr("Angle")}, full ? 0 : 1);
+    m_count = panel()->addCount(QObject::tr("Quantity"), "quantity", p.count, 2);
+    m_angle = panel()->addNumber(QObject::tr("Total angle"), "angle", full ? 180.0 : p.angle, 0.001, 360.0,
+                                 QStringLiteral(" °"));
+    if (m_editing != kNoId) {
+        setPicked(m_objects, existing.sources);
+        setPicked(m_center, {existing.center});
+        setPickEnabled(m_objects, false);
+        setPickEnabled(m_center, false);
+    }
+}
+
+core::feature::CircularPatternParams CircularPatternTool::params() const
+{
+    return {m_count->value(), m_type->currentIndex() == 0 ? 360.0 : m_angle->value()};
+}
+
+bool CircularPatternTool::ready() const
+{
+    return !picked(m_objects).empty() && !picked(m_center).empty();
+}
+
+void CircularPatternTool::changed()
+{
+    if (!m_angle) {
+        return;
+    }
+    panel()->setRowVisible(m_angle, m_type->currentIndex() == 1);
+    if (m_editing == kNoId) {
+        view().modifyOptions().circularCount = m_count->value();
+        view().modifyOptions().circularAngle = params().angle;
+    }
+}
+
+bool CircularPatternTool::commit()
+{
+    const auto p = params();
+    const std::vector<Id> objects = picked(m_objects);
+    const Id center = picked(m_center).front();
+    return view().tryEdit(QObject::tr("Pattern"), [&](Editor& ed) {
+        if (m_editing != kNoId) {
+            ed.setPattern(m_editing, p);
+        }
+        else {
+            ed.circularPattern(objects, center, p);
+        }
+    });
+}
+
+void CircularPatternTool::paintPreview(QPainter& painter)
+{
+    if (!ready()) {
+        return;
+    }
+    const auto p = params();
+    if (m_editing != kNoId) {
+        drawPatternEdit(view(), painter,
+                        [&](core::Sketch& s) { return core::feature::setCircularPattern(s, m_editing, p); });
+        return;
+    }
+    const std::vector<Id> objects = picked(m_objects);
+    const Id center = picked(m_center).front();
+    drawPreviewEdit(view(), painter, [&](Editor& ed) { ed.circularPattern(objects, center, p); });
+}
+
+std::vector<Handle> CircularPatternTool::handles() const
+{
+    if (!ready()) {
+        return {};
+    }
+    const core::Point& cp = doc().sketch().point(picked(m_center).front());
+    const Vec2 c{cp.x, cp.y};
+    const Vec2 from = centreOf(picked(m_objects)) - c;
+    const double r = std::max(norm(from), 40.0 / view().zoom());
+    const auto p = params();
+    const double last = p.angle >= 360.0 - 1e-9 ? 360.0 * (p.count - 1) / p.count : p.angle;
+    const double a = std::atan2(from.y, from.x) + last * kDegToRad;
+    return {{Handle::Kind::Rotate, 1, c + r * Vec2{std::cos(a), std::sin(a)}, {}}};
+}
+
+void CircularPatternTool::dragHandle(int /*id*/, Vec2 world, Vec2 /*pressedAt*/, Qt::KeyboardModifiers modifiers)
+{
+    const core::Point& cp = doc().sketch().point(picked(m_center).front());
+    const Vec2 c{cp.x, cp.y};
+    const Vec2 from = centreOf(picked(m_objects)) - c;
+    double a = (std::atan2(world.y - c.y, world.x - c.x) - std::atan2(from.y, from.x)) * kRadToDeg;
+    while (a <= 0.0) {
+        a += 360.0;
+    }
+    while (a > 360.0) {
+        a -= 360.0;
+    }
+    if (modifiers & Qt::ShiftModifier) {
+        a = std::max(15.0, std::round(a / 15.0) * 15.0);
+    }
+    {
+        const QSignalBlocker block(m_type);
+        m_type->setCurrentIndex(1);
+    }
+    setQuietly(m_angle, a);
+    changed();
+}
+
+QString CircularPatternTool::dragLabel(int /*id*/) const
+{
+    return QStringLiteral("%1°   × %2").arg(m_angle->value(), 0, 'f', 1).arg(m_count->value());
 }
 
 // =============================================================================================
 // Offset
 // =============================================================================================
 
-QString OffsetTool::hint() const
+void OffsetTool::buildPanel()
 {
-    return QObject::tr("Offset: click a curve to offset its chain to the side the cursor is on, then type the "
-                       "distance");
+    m_curves = addPick(QObject::tr("Curves"), "curves", QObject::tr("click a curve to offset"),
+                       [this](Id id) { return isCurve(id); }, true);
+    m_distance = panel()->addNumber(QObject::tr("Offset position"), "distance", view().modifyOptions().offsetDistance,
+                                    -1e6, 1e6);
+    m_chain = panel()->addCheck(QObject::tr("Chain selection"), "chain", true);
 }
 
-std::vector<Id> OffsetTool::chainAt(QPointF screen) const
+void OffsetTool::changed()
 {
-    core::PickOptions options;
-    options.tolerance = kPickPixels / view().zoom();
-    options.points = false;
+    if (!m_chain) {
+        return;
+    }
+    std::vector<Id> curves = picked(m_curves);
+    if (m_lastPick.empty() && !curves.empty()) {
+        m_clickedAt = mouse();  // the side of the first curve picked is the positive side
+    }
+    if (m_chain->isChecked() && curves.size() > m_lastPick.size()) {
+        // A curve was added: bring its whole chain.
+        const Id added = curves.back();
+        try {
+            for (Id c : core::feature::chainAt(doc().sketch(), added)) {
+                if (std::ranges::find(curves, c) == curves.end()) {
+                    curves.push_back(c);
+                }
+            }
+        }
+        catch (const core::SketchError&) {
+        }
+        if (curves != picked(m_curves)) {
+            m_lastPick = curves;
+            setPicked(m_curves, curves);  // calls changed() again
+            return;
+        }
+    }
+    m_lastPick = curves;
+    if (m_distance->value() != 0.0) {
+        view().modifyOptions().offsetDistance = std::abs(m_distance->value());
+    }
+}
+
+bool OffsetTool::frame(Vec2& foot, Vec2& normal) const
+{
+    const std::vector<Id>& curves = picked(m_curves);
+    if (curves.empty()) {
+        return false;
+    }
     const core::Sketch& s = doc().sketch();
-    const Id hit = core::pick(s, view().toWorld(screen), options);
-    if (hit == kNoId || s.isReference(hit)) {
+    Id nearest = curves.front();
+    double best = 1e300;
+    for (Id c : curves) {
+        if (const double d = core::distanceTo(s, c, m_clickedAt); d < best) {
+            best = d;
+            nearest = c;
+        }
+    }
+    foot = core::closestPoint(s, nearest, m_clickedAt);
+    // The curve's normal there, turned towards where it was clicked.
+    const core::Entity& e = s.entity(nearest);
+    Vec2 n{0, 1};
+    if (const auto* l = std::get_if<core::Line>(&e.geom)) {
+        const core::Point& a = s.point(l->p1);
+        const core::Point& b = s.point(l->p2);
+        n = {-(b.y - a.y), b.x - a.x};
+    }
+    else {
+        const Id centre = e.kind() == core::EntityKind::Circle ? s.circle(nearest).center : s.arc(nearest).center;
+        const core::Point& c = s.point(centre);
+        n = {foot.x - c.x, foot.y - c.y};
+    }
+    const double len = norm(n);
+    if (len == 0.0) {
+        return false;
+    }
+    normal = (1.0 / len) * n;
+    if (dot(m_clickedAt - foot, normal) < 0) {
+        normal = -1.0 * normal;
+    }
+    return true;
+}
+
+Vec2 OffsetTool::toward() const
+{
+    Vec2 foot, normal;
+    frame(foot, normal);
+    const double side = m_distance->value() < 0 ? -1.0 : 1.0;
+    // Just off the curve on the chosen side (well inside any arc it might be).
+    return foot + (side * 1e-3 * std::max(1.0, std::abs(m_distance->value()))) * normal;
+}
+
+bool OffsetTool::ready() const
+{
+    return !picked(m_curves).empty() && m_distance->value() != 0.0;
+}
+
+bool OffsetTool::commit()
+{
+    const std::vector<Id> curves = picked(m_curves);
+    const double distance = std::abs(m_distance->value());
+    const Vec2 side = toward();
+    return view().tryEdit(QObject::tr("Offset"), [&](Editor& ed) { ed.offset(curves, distance, side); });
+}
+
+void OffsetTool::paintPreview(QPainter& painter)
+{
+    if (!ready()) {
+        return;
+    }
+    const std::vector<Id>& curves = picked(m_curves);
+    const double distance = std::abs(m_distance->value());
+    const Vec2 side = toward();
+    drawPreviewEdit(view(), painter, [&](Editor& ed) { ed.offset(curves, distance, side); });
+}
+
+std::vector<Handle> OffsetTool::handles() const
+{
+    Vec2 foot, normal;
+    if (!frame(foot, normal)) {
         return {};
     }
-    try {
-        return core::feature::chainAt(s, hit);
-    }
-    catch (const core::SketchError&) {
-        return {};
-    }
+    const double d = m_distance->value();
+    const double side = d < 0 ? -1.0 : 1.0;
+    return {{Handle::Kind::Arrow, 1, foot + d * normal, side * normal}};
 }
 
-void OffsetTool::move(const ToolEvent& e)
+void OffsetTool::beginHandleDrag(int /*id*/)
 {
-    m_mouse = e.world;
-    m_chain = chainAt(e.screen);
-    view().setHovered(m_chain.empty() ? kNoId : m_chain.front());
-    refresh();
+    m_dragStart = m_distance->value();
 }
 
-void OffsetTool::press(const ToolEvent& e)
+void OffsetTool::dragHandle(int /*id*/, Vec2 world, Vec2 pressedAt, Qt::KeyboardModifiers /*modifiers*/)
 {
-    if (e.button != Qt::LeftButton) {
+    Vec2 foot, normal;
+    if (!frame(foot, normal)) {
         return;
     }
-    const std::vector<Id> chain = chainAt(e.screen);
-    if (chain.empty()) {
-        return;
+    double d = m_dragStart + dot(world - pressedAt, normal);
+    if (std::abs(d) < 1e-6) {
+        d = m_dragStart < 0 ? -1e-6 : 1e-6;
     }
-    Id made = kNoId;
-    const double distance = view().modifyOptions().offsetDistance;
-    if (view().tryEdit(QObject::tr("Offset"), [&](Editor& ed) { made = ed.offset(chain, distance, e.world); })) {
-        view().editValue(made, e.screen);  // type the distance straight away
-    }
-    m_chain.clear();
-    refresh();
+    setQuietly(m_distance, d);
+    changed();
 }
 
-void OffsetTool::paintOverlay(QPainter& painter)
+QString OffsetTool::dragLabel(int /*id*/) const
 {
-    if (m_chain.empty()) {
-        return;
-    }
-    const double distance = view().modifyOptions().offsetDistance;
-    drawPreviewEdit(view(), painter, [&](Editor& ed) { ed.offset(m_chain, distance, m_mouse); });
+    return length(m_distance->value());
 }
 
 // =============================================================================================

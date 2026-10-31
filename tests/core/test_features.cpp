@@ -234,6 +234,41 @@ TEST_CASE("Rectangular pattern follows its source and spacing", "[pattern]")
     CHECK(!s.hasEntity(lastCircle));
 }
 
+TEST_CASE("Symmetric rectangular patterns go both ways", "[pattern]")
+{
+    Sketch s;
+    const Id c = s.addCircle(0, 0, 1);
+    feature::LinearPatternParams p;
+    p.count = 3;
+    p.spacing = 10;
+    p.symmetric = true;
+    p.count2 = 2;
+    p.spacing2 = 5;
+    p.symmetric2 = true;
+    const Id k = feature::linearPattern(s, {c}, p);
+    const feature::Pattern decoded = feature::pattern(s.constraint(k));
+    REQUIRE(decoded.copies.size() == 5 * 3 - 1);
+    double minX = 0, maxX = 0, minY = 0, maxY = 0;
+    for (const auto& instance : decoded.copies) {
+        const Vec2 q = at(s, s.circle(instance[0]).center);
+        minX = std::min(minX, q.x);
+        maxX = std::max(maxX, q.x);
+        minY = std::min(minY, q.y);
+        maxY = std::max(maxY, q.y);
+    }
+    CHECK(minX == Approx(-20.0));
+    CHECK(maxX == Approx(20.0));
+    CHECK(minY == Approx(-5.0));
+    CHECK(maxY == Approx(5.0));
+    CHECK(solveClean(s).dof == 3);
+    CHECK(feature::linearParams(s.constraint(k)).symmetric2);
+
+    p.symmetric2 = false;  // a different layout: the copies are remade
+    const Id k2 = feature::setLinearPattern(s, k, p);
+    CHECK(feature::pattern(s.constraint(k2)).copies.size() == 5 * 2 - 1);
+    CHECK(solveClean(s).dof == 3);
+}
+
 TEST_CASE("Circular pattern rotates copies about the centre", "[pattern]")
 {
     Sketch s;

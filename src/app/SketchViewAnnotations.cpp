@@ -6,14 +6,9 @@
 
 #include <core/Features.h>
 
-#include <QDialog>
-#include <QDialogButtonBox>
-#include <QDoubleSpinBox>
 #include <QFocusEvent>
-#include <QFormLayout>
 #include <QKeyEvent>
 #include <QLineEdit>
-#include <QSpinBox>
 #include <QLocale>
 #include <QPainter>
 #include <QPainterPath>
@@ -475,66 +470,9 @@ void SketchView::editFeature(Id id)
         return;
     }
 
-    // Patterns: their settings in a small dialog.
-    const bool circular = c.type == ConstraintType::CircularPattern;
-    QDialog dialog(this);
-    dialog.setObjectName(QStringLiteral("patternDialog"));
-    dialog.setWindowTitle(circular ? tr("Circular Pattern") : tr("Rectangular Pattern"));
-    auto* form = new QFormLayout(&dialog);
-    auto count = [&](const QString& label, int value, const char* name) {
-        auto* box = new QSpinBox(&dialog);
-        box->setObjectName(QLatin1String(name));
-        box->setRange(1, 1000);
-        box->setValue(value);
-        form->addRow(label, box);
-        return box;
-    };
-    auto size = [&](const QString& label, double value, double min, double max, const char* name) {
-        auto* box = new QDoubleSpinBox(&dialog);
-        box->setObjectName(QLatin1String(name));
-        box->setDecimals(3);
-        box->setRange(min, max);
-        box->setValue(value);
-        form->addRow(label, box);
-        return box;
-    };
-    QSpinBox *count1 = nullptr, *count2 = nullptr;
-    QDoubleSpinBox *spacing1 = nullptr, *spacing2 = nullptr, *angle = nullptr;
-    if (circular) {
-        const auto p = core::feature::circularParams(c);
-        count1 = count(tr("Count"), p.count, "count");
-        count1->setMinimum(2);
-        angle = size(tr("Total angle (°)"), p.angle, 0.001, 360.0, "angle");
-    }
-    else {
-        const auto p = core::feature::linearParams(c);
-        count1 = count(tr("Count"), p.count, "count");
-        spacing1 = size(tr("Spacing"), p.spacing, 0.001, 1e6, "spacing");
-        angle = size(tr("Direction (°)"), p.angle, -360.0, 360.0, "angle");
-        count2 = count(tr("Rows"), p.count2, "count2");
-        spacing2 = size(tr("Row spacing"), p.spacing2, 0.001, 1e6, "spacing2");
-    }
-    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-    form->addRow(buttons);
-    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-    if (dialog.exec() != QDialog::Accepted) {
-        return;
-    }
-    Id result = core::kNoId;
-    const bool ok = tryEdit(tr("Pattern"), [&](Editor& ed) {
-        if (circular) {
-            result = ed.setPattern(id, core::feature::CircularPatternParams{count1->value(), angle->value()});
-        }
-        else {
-            result = ed.setPattern(id, core::feature::LinearPatternParams{count1->value(), spacing1->value(),
-                                                                           angle->value(), count2->value(),
-                                                                           spacing2->value()});
-        }
-    });
-    if (ok && m_selection.contains(id)) {
-        setSelection({result});
-    }
+    // Patterns: their command, editing them.
+    m_editFeature = id;
+    setTool(c.type == ConstraintType::CircularPattern ? ToolKind::CircularPattern : ToolKind::RectangularPattern);
 }
 
 void SketchView::editValue(Id id, QPointF at)

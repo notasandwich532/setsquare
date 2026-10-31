@@ -347,8 +347,14 @@ QString linearArgs(const feature::LinearPatternParams& p)
     if (p.angle != 0.0) {
         args += QStringLiteral(", angle=") + Editor::number(p.angle);
     }
+    if (p.symmetric) {
+        args += QStringLiteral(", symmetric=True");
+    }
     if (p.count2 != 1) {
         args += QStringLiteral(", count2=%1, spacing2=%2").arg(p.count2).arg(Editor::number(p.spacing2));
+    }
+    if (p.symmetric2) {
+        args += QStringLiteral(", symmetric2=True");
     }
     return args;
 }

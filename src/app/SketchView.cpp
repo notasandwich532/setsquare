@@ -1,5 +1,6 @@
 #include "SketchView.h"
 
+#include "CommandPanel.h"
 #include "Document.h"
 #include "FrameClock.h"
 #include "Theme.h"
@@ -9,8 +10,11 @@
 #include "tools/ShapeTools.h"
 #include "tools/TransformTools.h"
 
+#include <QDoubleSpinBox>
 #include <QKeyEvent>
 #include <QMouseEvent>
+#include <QSignalBlocker>
+#include <QSpinBox>
 #include <QPainter>
 #include <QPainterPath>
 #include <QScreen>
@@ -105,7 +109,9 @@ void SketchView::setTool(ToolKind kind)
 {
     if (m_tool) {
         m_tool->cancel();
+        m_tool.reset();  // before the new one starts (a command tidies up as it goes)
     }
+    showOptionsPanel(kind);
     switch (kind) {
         case ToolKind::Select: m_tool = std::make_unique<SelectTool>(*this); break;
         case ToolKind::Line: m_tool = std::make_unique<LineTool>(*this); break;
@@ -149,12 +155,15 @@ void SketchView::setTool(ToolKind kind)
         case ToolKind::ChamferDistanceAngle:
             m_tool = std::make_unique<CornerTool>(*this, CornerTool::Kind::ChamferDistanceAngle);
             break;
-        case ToolKind::Move: m_tool = std::make_unique<MoveTool>(*this, false); break;
-        case ToolKind::Rotate: m_tool = std::make_unique<MoveTool>(*this, true); break;
+        case ToolKind::Move: m_tool = std::make_unique<MoveTool>(*this); break;
         case ToolKind::Scale: m_tool = std::make_unique<ScaleTool>(*this); break;
         case ToolKind::Mirror: m_tool = std::make_unique<MirrorTool>(*this); break;
-        case ToolKind::RectangularPattern: m_tool = std::make_unique<PatternTool>(*this, false); break;
-        case ToolKind::CircularPattern: m_tool = std::make_unique<PatternTool>(*this, true); break;
+        case ToolKind::RectangularPattern:
+            m_tool = std::make_unique<RectangularPatternTool>(*this, std::exchange(m_editFeature, core::kNoId));
+            break;
+        case ToolKind::CircularPattern:
+            m_tool = std::make_unique<CircularPatternTool>(*this, std::exchange(m_editFeature, core::kNoId));
+            break;
         case ToolKind::Offset: m_tool = std::make_unique<OffsetTool>(*this); break;
         case ToolKind::Paste: m_tool = std::make_unique<PasteTool>(*this, m_pasteFragment); break;
         case ToolKind::Dimension: m_tool = std::make_unique<DimensionTool>(*this); break;
@@ -166,6 +175,61 @@ void SketchView::setTool(ToolKind kind)
     emit toolChanged(kind);
     m_tool->activate();
     refreshTool();
+}
+
+void SketchView::showOptionsPanel(ToolKind kind)
+{
+    if (m_optionsPanel) {
+        m_optionsPanel->hide();
+        m_optionsPanel->deleteLater();
+        m_optionsPanel = nullptr;
+    }
+    QString title;
+    switch (kind) {
+        case ToolKind::Fillet: title = tr("Fillet"); break;
+        case ToolKind::ChamferEqual:
+        case ToolKind::ChamferTwoDistances:
+        case ToolKind::ChamferDistanceAngle: title = tr("Chamfer"); break;
+        case ToolKind::PolygonInscribed:
+        case ToolKind::PolygonCircumscribed:
+        case ToolKind::PolygonEdge: title = tr("Polygon"); break;
+        default: return;  // no settings, or a command with its own panel
+    }
+    auto* panel = new CommandPanel(title, this);
+    m_optionsPanel = panel;
+    auto number = [&](const QString& label, const char* name, double* field, double max, const QString& suffix) {
+        QDoubleSpinBox* box = panel->addNumber(label, name, *field, 0.001, max, suffix);
+        connect(box, &QDoubleSpinBox::valueChanged, this, [this, field](double v) {
+            *field = v;
+            refreshTool();
+        });
+    };
+    ModifyOptions& o = m_modifyOptions;
+    const QString mm = QStringLiteral(" mm"), degrees = QStringLiteral(" °");
+    switch (kind) {
+        case ToolKind::Fillet: number(tr("Radius"), "radius", &o.filletRadius, 1e6, mm); break;
+        case ToolKind::ChamferEqual: number(tr("Distance"), "distance", &o.chamferDistance, 1e6, mm); break;
+        case ToolKind::ChamferTwoDistances:
+            number(tr("Distance 1"), "distance", &o.chamferDistance, 1e6, mm);
+            number(tr("Distance 2"), "distance2", &o.chamferDistance2, 1e6, mm);
+            break;
+        case ToolKind::ChamferDistanceAngle:
+            number(tr("Distance"), "distance", &o.chamferDistance, 1e6, mm);
+            number(tr("Angle"), "angle", &o.chamferAngle, 179.0, degrees);
+            break;
+        default: {
+            QSpinBox* sides = panel->addCount(tr("Sides"), "sides", m_polygonSides, 3, 64);
+            connect(sides, &QSpinBox::valueChanged, this, &SketchView::setPolygonSides);
+            connect(this, &SketchView::polygonSidesChanged, sides, [sides](int n) {
+                const QSignalBlocker block(sides);  // typed on the canvas: just mirror it
+                sides->setValue(n);
+            });
+            break;
+        }
+    }
+    // Keys typed in the panel go to it; Enter / Esc hand the keyboard back to the canvas.
+    connect(panel, &CommandPanel::accepted, this, [this] { setFocus(); });
+    connect(panel, &CommandPanel::rejected, this, [this] { setFocus(); });
 }
 
 void SketchView::setPasteFragment(core::Sketch fragment)
@@ -640,11 +704,19 @@ void SketchView::setPolygonSides(int sides)
 
 void SketchView::drawPreviewSketch(QPainter& painter, const core::Sketch& sketch, core::Id after) const
 {
+    drawPreviewSketch(painter, sketch, [after](core::Id id) { return id > after; });
+}
+
+void SketchView::drawPreviewSketch(QPainter& painter, const core::Sketch& sketch,
+                                   const std::function<bool(core::Id)>& include) const
+{
     const QColor color = theme::canvas().underConstrained;
     QColor faint = theme::canvas().construction;
     painter.setBrush(Qt::NoBrush);
-    for (auto it = sketch.entities().upper_bound(after); it != sketch.entities().end(); ++it) {
-        const core::Entity& e = it->second;
+    for (const auto& [id, e] : sketch.entities()) {
+        if (!include(id)) {
+            continue;
+        }
         painter.setPen(e.construction ? QPen(faint, 1.0, Qt::DashLine) : QPen(color, kCurveWidth, Qt::DashLine));
         switch (e.kind()) {
             case core::EntityKind::Point: {

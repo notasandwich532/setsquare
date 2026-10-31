@@ -133,6 +133,8 @@ constraint `k`; set `k.value` (spacing, total angle, or distance) to move the co
 new = s.copy(items, dx=50, dy=0, angle=0, about=(0, 0))  # with the constraints among them
 images = s.mirror(items, line)          # symmetric constraints; points on the line are shared
 k = s.rectangular_pattern(items, count=4, spacing=10, angle=0, count2=2, spacing2=15)
+k = s.rectangular_pattern(items, count=3, spacing=10, symmetric=True)   # 3 each way (5 in all)
+k = s.rectangular_pattern(items, count=2, count2=3, spacing2=-8)        # rows below, not above
 k = s.circular_pattern(items, s.origin, count=6, angle=360)   # a full turn spaces them evenly
 k.value = 12                            # spacing (rectangular) or total angle (circular)
 k = s.set_pattern(k, count=5)           # a new count remakes the copies: use the returned pattern

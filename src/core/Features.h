@@ -23,7 +23,9 @@ struct LinearPatternParams
     double spacing = 10.0;
     double angle = 0.0;    // degrees: the first direction; the second is 90 degrees on from it
     int count2 = 1;
-    double spacing2 = 10.0;
+    double spacing2 = 10.0;  // negative: the rows go the other way
+    bool symmetric = false;   // `count` each way along the first direction (sharing the original)
+    bool symmetric2 = false;  // likewise along the second
 };
 
 struct CircularPatternParams

@@ -12,6 +12,8 @@ drawapp_warnings(drawdoc)
 
 # Everything else except main() lives in a library so GUI tests can drive the real widgets.
 add_library(drawapp_lib STATIC
+    CommandPanel.cpp
+    CommandPanel.h
     ConstraintPanel.cpp
     ConstraintPanel.h
     FrameClock.cpp
@@ -36,6 +38,8 @@ add_library(drawapp_lib STATIC
     tools/ShapeTools.cpp
     tools/ShapeTools.h
     tools/Tool.h
+    tools/Handles.cpp
+    tools/Handles.h
     tools/TransformTools.cpp
     tools/TransformTools.h
 )

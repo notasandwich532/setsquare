@@ -39,13 +39,31 @@ int countParam(double v)
     return static_cast<int>(std::lround(v));
 }
 
+// Instances along one direction: `count`, or with symmetric, `count` each way sharing the original.
+size_t along(int count, bool symmetric)
+{
+    return symmetric ? static_cast<size_t>(2 * count - 1) : static_cast<size_t>(count);
+}
+
+// Step number of the n-th instance along a direction: 0, 1, 2, ... then (symmetric) -1, -2, ...
+double stepOf(size_t n, int count)
+{
+    return n < static_cast<size_t>(count) ? double(n) : -double(n - static_cast<size_t>(count) + 1);
+}
+
 Affine linearAt(const LinearPatternParams& p, size_t k)
 {
-    const size_t i = k % static_cast<size_t>(p.count), j = k / static_cast<size_t>(p.count);
+    const size_t across = along(p.count, p.symmetric);
+    const double i = stepOf(k % across, p.count), j = stepOf(k / across, p.count2);
     const double a = p.angle * kDegToRad;
     const Vec2 u{std::cos(a), std::sin(a)}, v{-std::sin(a), std::cos(a)};
-    const Vec2 d = (double(i) * p.spacing) * u + (double(j) * p.spacing2) * v;
+    const Vec2 d = (i * p.spacing) * u + (j * p.spacing2) * v;
     return Affine::translation(d.x, d.y);
+}
+
+std::vector<double> linearParamVector(const LinearPatternParams& p)
+{
+    return {double(p.count), p.angle, double(p.count2), p.spacing2, p.symmetric ? 1.0 : 0.0, p.symmetric2 ? 1.0 : 0.0};
 }
 
 Affine circularAt(const CircularPatternParams& p, Vec2 center, size_t k)
@@ -230,7 +248,8 @@ Pattern pattern(const Constraint& c)
         groups = static_cast<size_t>(countParam(c.params.at(0)));
     }
     else if (c.type == ConstraintType::LinearPattern) {
-        groups = static_cast<size_t>(countParam(c.params.at(0)) * countParam(c.params.at(2)));
+        const LinearPatternParams lp = linearParams(c);
+        groups = along(lp.count, lp.symmetric) * along(lp.count2, lp.symmetric2);
     }
     else {
         throw SketchError("not a pattern");
@@ -246,7 +265,8 @@ Pattern pattern(const Constraint& c)
 
 LinearPatternParams linearParams(const Constraint& c)
 {
-    return {countParam(c.params.at(0)), c.value, c.params.at(1), countParam(c.params.at(2)), c.params.at(3)};
+    const bool sym = c.params.size() > 4 && c.params[4] != 0.0, sym2 = c.params.size() > 5 && c.params[5] != 0.0;
+    return {countParam(c.params.at(0)), c.value, c.params.at(1), countParam(c.params.at(2)), c.params.at(3), sym, sym2};
 }
 
 CircularPatternParams circularParams(const Constraint& c)
@@ -288,16 +308,15 @@ Id linearPattern(Sketch& s, const std::vector<Id>& selection, const LinearPatter
     if (sources.empty()) {
         throw SketchError("pattern: nothing selected to repeat");
     }
-    if (p.count < 1 || p.count2 < 1 || p.count * p.count2 < 2) {
+    if (p.count < 1 || p.count2 < 1 || along(p.count, p.symmetric) * along(p.count2, p.symmetric2) < 2) {
         throw SketchError("pattern: needs at least two instances");
     }
-    if (!(p.spacing > 0.0) || !(p.spacing2 > 0.0)) {
-        throw SketchError("pattern: spacing must be positive");
+    if (!(p.spacing > 0.0) || !(p.spacing2 != 0.0)) {
+        throw SketchError("pattern: spacing must be positive (the second one non-zero: negative goes the other way)");
     }
-    const size_t total = static_cast<size_t>(p.count * p.count2);
+    const size_t total = along(p.count, p.symmetric) * along(p.count2, p.symmetric2);
     std::vector<Id> refs = makeCopies(s, sources, total, [&](size_t k) { return linearAt(p, k); });
-    return s.addConstraint(ConstraintType::LinearPattern, std::move(refs), p.spacing,
-                           {double(p.count), p.angle, double(p.count2), p.spacing2});
+    return s.addConstraint(ConstraintType::LinearPattern, std::move(refs), p.spacing, linearParamVector(p));
 }
 
 Id circularPattern(Sketch& s, const std::vector<Id>& selection, Id center, const CircularPatternParams& p)
@@ -331,8 +350,9 @@ Id setLinearPattern(Sketch& s, Id id, const LinearPatternParams& p)
         throw SketchError("not a rectangular pattern");
     }
     const LinearPatternParams old = linearParams(c);
-    if (old.count == p.count && old.count2 == p.count2) {
-        s.setConstraintParams(id, {double(p.count), p.angle, double(p.count2), p.spacing2});
+    if (old.count == p.count && old.count2 == p.count2 && old.symmetric == p.symmetric
+        && old.symmetric2 == p.symmetric2) {
+        s.setConstraintParams(id, linearParamVector(p));
         s.setConstraintValue(id, p.spacing);
         placeCopies(s, id);
         return id;
