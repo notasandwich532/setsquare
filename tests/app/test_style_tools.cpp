@@ -128,6 +128,30 @@ TEST_CASE("Presentation view hides the sketching aids and turns off for drawing 
     CHECK_FALSE(f.view.presentation());
 }
 
+TEST_CASE("Construction geometry is hidden in presentation view", "[style][presentation]")
+{
+    Fixture f;
+    Id helper = kNoId;
+    f.doc.modify("construction", [&](Sketch& s) {
+        helper = s.addLine(0, 50, 60, 50);
+        s.entity(helper).construction = true;
+    });
+    CHECK(f.view.pickAt(f.at(30, 50)) == helper);
+    f.view.setPresentation(true);
+    CHECK(f.view.pickAt(f.at(30, 50)) == kNoId);  // not drawn, so not picked
+    CHECK(f.view.pickAt(f.at(0, 25)) == kNoId);   // nor the Y axis
+    CHECK(f.view.pickAt(f.at(25, 10)) == f.rect.sides[0]);
+
+    // A box over everything takes only the drawing.
+    f.view.setTool(ToolKind::Select);
+    QTest::mousePress(&f.view, Qt::LeftButton, {}, f.at(-5, 60));
+    QTest::mouseMove(&f.view, f.at(30, 30));
+    QTest::mouseMove(&f.view, f.at(70, 0));
+    QTest::mouseRelease(&f.view, Qt::LeftButton, {}, f.at(70, 0));
+    CHECK(f.view.selection().size() == 4);
+    CHECK_FALSE(f.view.selection().contains(helper));
+}
+
 TEST_CASE("Replaying recorded strokes reproduces them", "[style][recorder]")
 {
     Fixture f;

@@ -178,7 +178,13 @@ void SelectTool::release(const ToolEvent& e)
             const core::Vec2 a = view().toWorld(m_pressScreen);
             const core::Vec2 b = view().toWorld(m_boxEnd);
             auto selection = view().selection();
-            for (core::Id id : core::boxSelect(doc().sketch(), a, b, crossing)) {
+            const core::Sketch& s = doc().sketch();
+            for (core::Id id : core::boxSelect(s, a, b, crossing)) {
+                // In presentation view only what's shown: no points or construction.
+                if (view().presentation()
+                    && (s.entity(id).construction || s.entity(id).kind() == core::EntityKind::Point)) {
+                    continue;
+                }
                 selection.insert(id);
             }
             view().setSelection(selection);

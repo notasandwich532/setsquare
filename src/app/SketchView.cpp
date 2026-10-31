@@ -311,7 +311,15 @@ core::Id SketchView::pickAt(QPointF screen, bool annotations) const
     }
     core::PickOptions options;
     options.tolerance = kPickPixels / m_zoom;
-    options.points = !m_presentation;  // points aren't shown there
+    if (m_presentation) {
+        // Only what's shown can be picked: no points, no construction (axes included).
+        options.points = false;
+        for (const auto& [id, e] : m_doc.sketch().entities()) {
+            if (e.construction) {
+                options.exclude.insert(id);
+            }
+        }
+    }
     return core::pick(m_doc.sketch(), toWorld(screen), options);
 }
 
@@ -582,6 +590,9 @@ void SketchView::drawGrid(QPainter& painter) const
     drawLines(spacing, colors.gridMinor);
     drawLines(majorSpacing, colors.gridMajor);
 
+    if (m_presentation) {
+        return;  // the axes are construction: not part of the drawing
+    }
     const QPointF origin = toScreen({0, 0});
     painter.setPen(QPen(colors.axisX, 1.0));
     painter.drawLine(QPointF(0, origin.y()), QPointF(width(), origin.y()));
@@ -639,7 +650,7 @@ void SketchView::drawSketch(QPainter& painter) const
 
     // The axes are drawn with the grid; here they only light up when hovered or selected.
     for (core::Id axis : {sketch.xAxis(), sketch.yAxis()}) {
-        if (axis == core::kNoId || !(m_selection.contains(axis) || axis == m_hovered)) {
+        if (axis == core::kNoId || m_presentation || !(m_selection.contains(axis) || axis == m_hovered)) {
             continue;
         }
         painter.setPen(QPen(m_selection.contains(axis) ? colors.selection : colors.hover, kHighlightWidth));
@@ -697,6 +708,9 @@ void SketchView::drawSketch(QPainter& painter) const
     for (const auto& [id, e] : sketch.entities()) {
         if (sketch.isAxis(id) || e.kind() == core::EntityKind::Point) {
             continue;
+        }
+        if (m_presentation && e.construction) {
+            continue;  // reference geometry isn't part of the drawing
         }
         if (m_presentation && decorated.contains(id)) {
             if (!m_selection.contains(id) && id != m_hovered) {
