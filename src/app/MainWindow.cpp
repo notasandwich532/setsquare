@@ -1,11 +1,13 @@
 #include "MainWindow.h"
 
+#include "ConstraintPanel.h"
 #include "Document.h"
 #include "SketchView.h"
 #include "Theme.h"
 
 #include <QAction>
 #include <QActionGroup>
+#include <QDockWidget>
 #include <QKeySequence>
 #include <QLabel>
 #include <QMenuBar>
@@ -94,26 +96,65 @@ void MainWindow::createActions()
         QString text;
         QKeySequence key;
     };
-    const ToolDef tools[] = {
-        {ToolKind::Select, tr("Select"), QKeySequence(Qt::Key_S)},
-        {ToolKind::Line, tr("Line"), QKeySequence(Qt::Key_L)},
-        {ToolKind::Rectangle, tr("Rectangle"), QKeySequence(Qt::Key_R)},
-        {ToolKind::Circle, tr("Circle"), QKeySequence(Qt::Key_C)},
-        {ToolKind::ArcCenter, tr("Arc"), QKeySequence(Qt::Key_A)},
-        {ToolKind::Arc3Point, tr("3-Point Arc"), QKeySequence(Qt::SHIFT | Qt::Key_A)},
+    auto addTools = [&](QToolBar* bar, std::initializer_list<ToolDef> defs) {
+        for (const ToolDef& t : defs) {
+            auto* action = new QAction(t.text, this);
+            action->setCheckable(true);
+            if (!t.key.isEmpty()) {
+                action->setShortcut(t.key);
+                action->setToolTip(QStringLiteral("%1 (%2)").arg(t.text, t.key.toString(QKeySequence::NativeText)));
+            }
+            group->addAction(action);
+            sketchMenu->addAction(action);
+            bar->addAction(action);
+            const ToolKind kind = t.kind;
+            connect(action, &QAction::triggered, this, [this, kind] { m_view->setTool(kind); });
+            m_toolActions[kind] = action;
+        }
     };
-    for (const ToolDef& t : tools) {
-        auto* action = new QAction(t.text, this);
-        action->setCheckable(true);
-        action->setShortcut(t.key);
-        action->setToolTip(QStringLiteral("%1 (%2)").arg(t.text, t.key.toString(QKeySequence::NativeText)));
-        group->addAction(action);
-        sketchMenu->addAction(action);
-        toolbar->addAction(action);
-        const ToolKind kind = t.kind;
-        connect(action, &QAction::triggered, this, [this, kind] { m_view->setTool(kind); });
-        m_toolActions[kind] = action;
-    }
+
+    addTools(toolbar, {
+                          {ToolKind::Select, tr("Select"), QKeySequence(Qt::Key_S)},
+                          {ToolKind::Line, tr("Line"), QKeySequence(Qt::Key_L)},
+                          {ToolKind::Rectangle, tr("Rectangle"), QKeySequence(Qt::Key_R)},
+                          {ToolKind::Circle, tr("Circle"), QKeySequence(Qt::Key_C)},
+                          {ToolKind::ArcCenter, tr("Arc"), QKeySequence(Qt::Key_A)},
+                          {ToolKind::Arc3Point, tr("3-Point Arc"), QKeySequence(Qt::SHIFT | Qt::Key_A)},
+                      });
+
+    sketchMenu->addSeparator();
+    addToolBarBreak();
+    auto* constraintBar = addToolBar(tr("Constraints"));
+    constraintBar->setObjectName("ConstraintToolbar");
+    constraintBar->setMovable(false);
+    constraintBar->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    addTools(constraintBar, {
+                                {ToolKind::Dimension, tr("Dimension"), QKeySequence(Qt::Key_D)},
+                                {ToolKind::Coincident, tr("Coincident"), QKeySequence(Qt::Key_O)},
+                                {ToolKind::HorizontalVertical, tr("Horiz/Vert"), QKeySequence(Qt::Key_H)},
+                                {ToolKind::Parallel, tr("Parallel"), {}},
+                                {ToolKind::Perpendicular, tr("Perpendicular"), {}},
+                                {ToolKind::Tangent, tr("Tangent"), QKeySequence(Qt::Key_T)},
+                                {ToolKind::Equal, tr("Equal"), QKeySequence(Qt::Key_E)},
+                                {ToolKind::Midpoint, tr("Midpoint"), {}},
+                                {ToolKind::Concentric, tr("Concentric"), {}},
+                                {ToolKind::Symmetric, tr("Symmetric"), {}},
+                                {ToolKind::Fix, tr("Fix/Unfix"), QKeySequence(Qt::Key_F)},
+                            });
+
+    sketchMenu->addSeparator();
+    auto* construction = sketchMenu->addAction(tr("Toggle &Construction"));
+    construction->setShortcut(Qt::Key_X);
+    connect(construction, &QAction::triggered, this, [this] {
+        const auto selection = m_view->selection();
+        m_view->tryModify(tr("Construction"), [&](core::Sketch& s) {
+            for (core::Id id : selection) {
+                if (s.hasEntity(id) && s.entity(id).kind() != core::EntityKind::Point) {
+                    s.entity(id).construction = !s.entity(id).construction;
+                }
+            }
+        });
+    });
     m_toolActions[ToolKind::Select]->setChecked(true);
     connect(m_view, &SketchView::toolChanged, this, [this](ToolKind kind) {
         if (auto it = m_toolActions.find(kind); it != m_toolActions.end()) {
@@ -121,8 +162,16 @@ void MainWindow::createActions()
         }
     });
 
+    // --- Docks ---
+    auto* constraintsDock = new QDockWidget(tr("Constraints"), this);
+    constraintsDock->setObjectName("ConstraintsDock");
+    constraintsDock->setWidget(new ConstraintPanel(*m_doc, *m_view, constraintsDock));
+    addDockWidget(Qt::RightDockWidgetArea, constraintsDock);
+    resizeDocks({constraintsDock}, {300}, Qt::Horizontal);
+
     // --- View ---
     auto* viewMenu = menuBar()->addMenu(tr("&View"));
+    viewMenu->addAction(constraintsDock->toggleViewAction());
     auto* home = viewMenu->addAction(tr("&Home View"));
     home->setShortcut(Qt::Key_Home);
     connect(home, &QAction::triggered, m_view, &SketchView::resetView);

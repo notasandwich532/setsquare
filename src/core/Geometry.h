@@ -34,6 +34,9 @@ bool circumcircle(Vec2 a, Vec2 b, Vec2 c, Vec2& center, double& radius);
 // Shortest distance from p to the entity (to the curve itself for circles and arcs).
 double distanceTo(const Sketch& sketch, Id entity, Vec2 p);
 
+// The point on the entity nearest to p.
+Vec2 closestPoint(const Sketch& sketch, Id entity, Vec2 p);
+
 struct PickOptions
 {
     double tolerance = 1.0;  // world units

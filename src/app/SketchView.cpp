@@ -3,6 +3,7 @@
 #include "Document.h"
 #include "FrameClock.h"
 #include "Theme.h"
+#include "tools/ConstraintTools.h"
 #include "tools/SelectTool.h"
 
 #include <QKeyEvent>
@@ -108,11 +109,14 @@ void SketchView::setTool(ToolKind kind)
         case ToolKind::Circle: m_tool = std::make_unique<CircleTool>(*this); break;
         case ToolKind::ArcCenter: m_tool = std::make_unique<CenterArcTool>(*this); break;
         case ToolKind::Arc3Point: m_tool = std::make_unique<ThreePointArcTool>(*this); break;
+        case ToolKind::Dimension: m_tool = std::make_unique<DimensionTool>(*this); break;
+        default: m_tool = std::make_unique<ConstraintTool>(*this, kind); break;
     }
     m_toolKind = kind;
     setCursor(kind == ToolKind::Select ? Qt::ArrowCursor : Qt::CrossCursor);
     setHovered(core::kNoId);
     emit toolChanged(kind);
+    m_tool->activate();
     refreshTool();
 }
 
@@ -131,8 +135,17 @@ void SketchView::refreshTool()
 // Picking and selection
 // ---------------------------------------------------------------------------------------------
 
-core::Id SketchView::pickAt(QPointF screen) const
+core::Id SketchView::pickAt(QPointF screen, bool annotations) const
 {
+    if (annotations) {
+        // Topmost (last drawn) first.
+        const auto items = layoutAnnotations();
+        for (auto it = items.rbegin(); it != items.rend(); ++it) {
+            if (it->rect.adjusted(-2, -2, 2, 2).contains(screen)) {
+                return it->id;
+            }
+        }
+    }
     core::PickOptions options;
     options.tolerance = kPickPixels / m_zoom;
     return core::pick(m_doc.sketch(), toWorld(screen), options);
@@ -140,15 +153,41 @@ core::Id SketchView::pickAt(QPointF screen) const
 
 Snap SketchView::snap(QPointF screen) const
 {
+    const core::Sketch& sketch = m_doc.sketch();
+    const core::Vec2 world = toWorld(screen);
+
     core::PickOptions options;
     options.tolerance = kSnapPixels / m_zoom;
     options.curves = false;
-    const core::Id id = core::pick(m_doc.sketch(), toWorld(screen), options);
-    if (id != core::kNoId) {
-        const core::Point& p = m_doc.sketch().point(id);
-        return {{p.x, p.y}, id};
+    if (const core::Id id = core::pick(sketch, world, options); id != core::kNoId) {
+        const core::Point& p = sketch.point(id);
+        return Snap{{p.x, p.y}, id};
     }
-    return {toWorld(screen), core::kNoId};
+
+    // Line midpoints.
+    for (const auto& [id, e] : sketch.entities()) {
+        if (const auto* l = std::get_if<core::Line>(&e.geom)) {
+            const core::Point& a = sketch.point(l->p1);
+            const core::Point& b = sketch.point(l->p2);
+            const core::Vec2 m{(a.x + b.x) / 2, (a.y + b.y) / 2};
+            if (std::hypot(m.x - world.x, m.y - world.y) * m_zoom <= kSnapPixels) {
+                Snap s{m};
+                s.midpointOf = id;
+                return s;
+            }
+        }
+    }
+
+    // Onto a curve.
+    options.tolerance = kPickPixels / m_zoom;
+    options.points = false;
+    options.curves = true;
+    if (const core::Id id = core::pick(sketch, world, options); id != core::kNoId) {
+        Snap s{core::closestPoint(sketch, id, world)};
+        s.onCurve = id;
+        return s;
+    }
+    return Snap{world};
 }
 
 void SketchView::setSelection(std::set<core::Id> ids)
@@ -215,7 +254,7 @@ void SketchView::onDocumentChanged()
             kept.insert(id);
         }
     }
-    if (m_hovered != core::kNoId && !s.hasEntity(m_hovered)) {
+    if (m_hovered != core::kNoId && !s.hasEntity(m_hovered) && !s.hasConstraint(m_hovered)) {
         m_hovered = core::kNoId;
     }
     setSelection(std::move(kept));
@@ -418,6 +457,8 @@ void SketchView::drawSketch(QPainter& painter) const
         }
     }
 
+    drawAnnotations(painter);
+
     for (const auto& [id, e] : sketch.entities()) {
         if (e.kind() != core::EntityKind::Point) {
             continue;
@@ -462,12 +503,20 @@ void SketchView::drawPreviewArc(QPainter& painter, const core::ArcShape& arc) co
 
 void SketchView::drawSnapMarker(QPainter& painter, const Snap& snap) const
 {
-    if (snap.point == core::kNoId) {
-        return;
-    }
+    const QPointF p = toScreen(snap.pos);
     painter.setPen(QPen(theme::canvas().selection, 1.5));
     painter.setBrush(Qt::NoBrush);
-    painter.drawEllipse(toScreen(snap.pos), 7.0, 7.0);
+    if (snap.point != core::kNoId) {
+        painter.drawEllipse(p, 7.0, 7.0);  // existing point
+    }
+    else if (snap.midpointOf != core::kNoId) {
+        const QPolygonF triangle{p + QPointF(0, -7), p + QPointF(6, 5), p + QPointF(-6, 5), p + QPointF(0, -7)};
+        painter.drawPolyline(triangle);  // midpoint
+    }
+    else if (snap.onCurve != core::kNoId) {
+        painter.drawLine(p + QPointF(-5, -5), p + QPointF(5, 5));  // on the curve
+        painter.drawLine(p + QPointF(-5, 5), p + QPointF(5, -5));
+    }
 }
 
 void SketchView::drawLabel(QPainter& painter, core::Vec2 at, const QString& text) const

@@ -24,13 +24,11 @@ double distance(Vec2 a, Vec2 b)
     return std::hypot(b.x - a.x, b.y - a.y);
 }
 
-// Existing point to reuse, or a new one at the snapped position.
+constexpr double kAxisSnapDegrees = 3.0;  // lines this close to horizontal/vertical snap to it
+
 Id resolvePoint(Sketch& s, const Snap& snap)
 {
-    if (snap.point != kNoId && s.hasEntity(snap.point) && s.entity(snap.point).kind() == core::EntityKind::Point) {
-        return snap.point;
-    }
-    return s.addPoint(snap.pos.x, snap.pos.y);
+    return resolveSnap(s, snap);
 }
 
 QString formatLength(double v)
@@ -38,6 +36,21 @@ QString formatLength(double v)
     return QString::number(v, 'f', 2);
 }
 }  // namespace
+
+Id resolveSnap(Sketch& s, const Snap& snap)
+{
+    if (snap.point != kNoId && s.hasEntity(snap.point) && s.entity(snap.point).kind() == core::EntityKind::Point) {
+        return snap.point;
+    }
+    const Id p = s.addPoint(snap.pos.x, snap.pos.y);
+    if (snap.midpointOf != kNoId && s.hasEntity(snap.midpointOf)) {
+        s.addConstraint(core::ConstraintType::Midpoint, {p, snap.midpointOf});
+    }
+    else if (snap.onCurve != kNoId && s.hasEntity(snap.onCurve)) {
+        s.addConstraint(core::ConstraintType::Coincident, {p, snap.onCurve});
+    }
+    return p;
+}
 
 // =============================================================================================
 // Line
@@ -59,7 +72,8 @@ void LineTool::press(const ToolEvent& e)
     if (e.button != Qt::LeftButton) {
         return;
     }
-    const Snap snap = view().snap(e.screen);
+    updateCursor(e.screen);
+    const Snap snap = m_cursor;
     if (!m_active) {
         m_active = true;
         m_start = snap;
@@ -72,10 +86,17 @@ void LineTool::press(const ToolEvent& e)
     }
 
     Id a = kNoId, b = kNoId;
+    const Axis axis = m_axis;
     const bool ok = view().tryModify(QObject::tr("Line"), [&](Sketch& s) {
         a = resolvePoint(s, m_start);
         b = resolvePoint(s, snap);
-        s.addLine(a, b);
+        const Id line = s.addLine(a, b);
+        if (axis == Axis::Horizontal) {
+            s.addConstraint(core::ConstraintType::Horizontal, {line});
+        }
+        else if (axis == Axis::Vertical) {
+            s.addConstraint(core::ConstraintType::Vertical, {line});
+        }
     });
     if (!ok) {
         m_active = false;
@@ -92,12 +113,45 @@ void LineTool::press(const ToolEvent& e)
     else {
         m_start = Snap{snap.pos, b};
     }
+    m_axis = Axis::None;
     refresh();
+}
+
+void LineTool::updateCursor(QPointF screen)
+{
+    m_cursor = view().snap(screen);
+    m_axis = Axis::None;
+    // Nearly horizontal/vertical segments get the constraint. Free ends also snap onto the
+    // axis; an existing point stays where it is (the solver aligns it). Midpoint / on-curve
+    // snaps already carry a constraint, so they're left alone.
+    const bool free = m_cursor.isFree();
+    const bool onStart = m_cursor.point != kNoId && m_cursor.point == m_start.point;
+    if (!m_active || !(free || m_cursor.point != kNoId) || onStart) {
+        return;
+    }
+    const double dx = m_cursor.pos.x - m_start.pos.x;
+    const double dy = m_cursor.pos.y - m_start.pos.y;
+    if (std::hypot(dx, dy) * view().zoom() < kMinSizePx) {
+        return;
+    }
+    const double angle = std::abs(std::atan2(dy, dx)) * 180.0 / kPi;  // 0..180
+    if (angle < kAxisSnapDegrees || angle > 180.0 - kAxisSnapDegrees) {
+        if (free) {
+            m_cursor.pos.y = m_start.pos.y;
+        }
+        m_axis = Axis::Horizontal;
+    }
+    else if (std::abs(angle - 90.0) < kAxisSnapDegrees) {
+        if (free) {
+            m_cursor.pos.x = m_start.pos.x;
+        }
+        m_axis = Axis::Vertical;
+    }
 }
 
 void LineTool::move(const ToolEvent& e)
 {
-    m_cursor = view().snap(e.screen);
+    updateCursor(e.screen);
     refresh();
 }
 
@@ -121,7 +175,14 @@ void LineTool::paintOverlay(QPainter& painter)
 {
     if (m_active) {
         view().drawPreviewLine(painter, m_start.pos, m_cursor.pos);
-        view().drawLabel(painter, m_cursor.pos, formatLength(distance(m_start.pos, m_cursor.pos)));
+        QString label = formatLength(distance(m_start.pos, m_cursor.pos));
+        if (m_axis == Axis::Horizontal) {
+            label += QStringLiteral("  H");
+        }
+        else if (m_axis == Axis::Vertical) {
+            label += QStringLiteral("  V");
+        }
+        view().drawLabel(painter, m_cursor.pos, label);
     }
     view().drawSnapMarker(painter, m_cursor);
 }
@@ -230,7 +291,12 @@ void CircleTool::press(const ToolEvent& e)
     if (r * view().zoom() < kMinSizePx) {
         return;
     }
-    view().tryModify(QObject::tr("Circle"), [&](Sketch& s) { s.addCircle(resolvePoint(s, m_center), r); });
+    view().tryModify(QObject::tr("Circle"), [&](Sketch& s) {
+        const Id circle = s.addCircle(resolvePoint(s, m_center), r);
+        if (snap.point != kNoId && s.hasEntity(snap.point)) {
+            s.addConstraint(core::ConstraintType::Coincident, {snap.point, circle});  // rim through it
+        }
+    });
     m_active = false;
     refresh();
 }

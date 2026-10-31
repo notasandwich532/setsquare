@@ -27,6 +27,19 @@ public:
     // the sketch untouched and propagate to the caller.
     void modify(const QString& label, const std::function<void(core::Sketch&)>& edit);
 
+    // Adds a constraint unless it would over-constrain the sketch (conflicting or redundant
+    // with what's there), as Fusion does. Returns the new id, or kNoId with *error set.
+    core::Id addConstraint(core::ConstraintType type, std::vector<core::Id> refs, double value = 0.0,
+                           QString* error = nullptr, double labelX = 0.0, double labelY = 0.0);
+
+    // Changes a dimension, rejecting values the solver can't satisfy.
+    bool setDimensionValue(core::Id dimension, double value, QString* error = nullptr);
+
+    // Moving a dimension label (no solve); one undo step per drag.
+    void beginLabelDrag();
+    void moveLabel(core::Id dimension, double dx, double dy);
+    void endLabelDrag();
+
     // Interactive drag; the whole drag is one undo step.
     void beginDrag(const std::vector<core::Id>& points);
     void beginDragEdge(core::Id roundEntity, double x, double y);
@@ -50,6 +63,8 @@ signals:
 
 private:
     void pushUndo(core::Sketch snapshot);
+    // Commits a solved working copy if it isn't more over-constrained than the current sketch.
+    bool commitChecked(core::Sketch working, QString* error);
     void resolve();
 
     core::Sketch m_sketch;
@@ -61,4 +76,5 @@ private:
     std::unique_ptr<core::Solver> m_dragSolver;
     core::Sketch m_beforeDrag;
     bool m_dragMoved = false;
+    bool m_labelDragging = false;
 };

@@ -18,6 +18,18 @@ enum class ToolKind
     Circle,
     ArcCenter,
     Arc3Point,
+
+    Dimension,
+    Coincident,
+    HorizontalVertical,
+    Parallel,
+    Perpendicular,
+    Tangent,
+    Equal,
+    Midpoint,
+    Concentric,
+    Symmetric,
+    Fix,
 };
 
 struct ToolEvent
@@ -40,6 +52,9 @@ public:
     virtual ~Tool() = default;
 
     virtual QString hint() const = 0;
+
+    // Called once the tool is current (e.g. to act on the existing selection).
+    virtual void activate() {}
 
     virtual void press(const ToolEvent&) {}
     virtual void move(const ToolEvent&) {}

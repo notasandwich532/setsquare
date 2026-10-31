@@ -108,6 +108,11 @@ struct Constraint
     ConstraintType type = ConstraintType::Coincident;
     std::vector<Id> refs;
     double value = 0.0;  // dimensions only; lengths are positive, angles in degrees
+
+    // Dimensions only: where the label sits, as an offset from the dimension's anchor (see
+    // layoutDimension). Zero means "choose a default".
+    double labelX = 0.0;
+    double labelY = 0.0;
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -130,6 +135,11 @@ public:
     // Validates the references for the type; throws SketchError when they don't fit.
     Id addConstraint(ConstraintType type, std::vector<Id> refs, double value = 0.0);
     void setConstraintValue(Id constraint, double value);
+    void setConstraintLabel(Id constraint, double dx, double dy);
+
+    // Whether addConstraint would accept these references (value checks use a valid
+    // placeholder unless one is given). On failure, *why receives the reason.
+    bool canAddConstraint(ConstraintType type, std::vector<Id> refs, std::string* why = nullptr) const;
 
     // Removes an entity or constraint. Removing geometry also removes everything that depends
     // on it (curves using a deleted point, constraints referencing deleted ids) and the
@@ -169,6 +179,7 @@ private:
     EntityKind kindOf(Id id) const;
     bool isCurve(Id id) const;
     bool isRound(Id id) const;  // circle or arc
+    void normalize(ConstraintType type, std::vector<Id>& refs) const;
     void validate(ConstraintType type, const std::vector<Id>& refs, double value) const;
     bool referencesPoint(const Entity& e, Id point) const;
 

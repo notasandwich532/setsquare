@@ -4,6 +4,8 @@
 #include "../SketchView.h"
 #include "../Theme.h"
 
+#include <core/Dimensions.h>
+
 #include <QPainter>
 
 #include <cmath>
@@ -66,6 +68,20 @@ void SelectTool::startDrag()
 {
     const core::Sketch& sketch = doc().sketch();
     const auto& selection = view().selection();
+
+    if (sketch.hasConstraint(m_pressed)) {
+        const core::Constraint& c = sketch.constraint(m_pressed);
+        if (core::isDimension(c.type)) {
+            m_labelStart = core::layoutDimension(sketch, c).label;
+            doc().beginLabelDrag();
+            m_state = State::DraggingLabel;
+        }
+        else {
+            m_state = State::Idle;  // constraint symbols don't move
+        }
+        return;
+    }
+
     const core::EntityKind kind = sketch.entity(m_pressed).kind();
     const bool round = kind == core::EntityKind::Circle || kind == core::EntityKind::Arc;
 
@@ -101,6 +117,10 @@ void SelectTool::move(const ToolEvent& e)
                 return;
             }
             startDrag();
+            if (m_state != State::Dragging) {
+                move(e);  // label drag (or nothing)
+                return;
+            }
             [[fallthrough]];
         }
         case State::Dragging:
@@ -109,10 +129,31 @@ void SelectTool::move(const ToolEvent& e)
             refresh();  // requests a frame; the solve happens in beforePaint()
             return;
 
+        case State::DraggingLabel: {
+            const core::Sketch& sketch = doc().sketch();
+            if (!sketch.hasConstraint(m_pressed)) {
+                return;
+            }
+            const core::Vec2 label{m_labelStart.x + e.world.x - m_pressWorld.x,
+                                   m_labelStart.y + e.world.y - m_pressWorld.y};
+            const core::Vec2 offset = core::labelOffsetFor(sketch, sketch.constraint(m_pressed), label);
+            doc().moveLabel(m_pressed, offset.x, offset.y);
+            return;
+        }
+
         case State::BoxSelecting:
             m_boxEnd = e.screen;
             refresh();
             return;
+    }
+}
+
+void SelectTool::doubleClick(const ToolEvent& e)
+{
+    const core::Id hit = view().pickAt(e.screen);
+    const core::Sketch& sketch = doc().sketch();
+    if (sketch.hasConstraint(hit) && core::isDimension(sketch.constraint(hit).type)) {
+        view().editDimension(hit);
     }
 }
 
@@ -126,6 +167,9 @@ void SelectTool::release(const ToolEvent& e)
         m_dragPending = true;
         applyPendingDrag();  // land exactly where the mouse was released
         doc().endDrag();
+    }
+    else if (m_state == State::DraggingLabel) {
+        doc().endLabelDrag();
     }
     else if (m_state == State::BoxSelecting) {
         const QPointF delta = m_boxEnd - m_pressScreen;
@@ -155,6 +199,12 @@ bool SelectTool::cancel()
         return true;
     }
     if (m_state == State::BoxSelecting) {
+        m_state = State::Idle;
+        refresh();
+        return true;
+    }
+    if (m_state == State::DraggingLabel) {
+        doc().endLabelDrag();
         m_state = State::Idle;
         refresh();
         return true;

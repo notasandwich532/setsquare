@@ -135,6 +135,42 @@ double distanceTo(const Sketch& sketch, Id id, Vec2 p)
     return std::numeric_limits<double>::infinity();
 }
 
+Vec2 closestPoint(const Sketch& sketch, Id id, Vec2 p)
+{
+    const Entity& e = sketch.entity(id);
+    switch (e.kind()) {
+        case EntityKind::Point: return pos(sketch, id);
+        case EntityKind::Line: {
+            const Line& l = std::get<Line>(e.geom);
+            const Vec2 a = pos(sketch, l.p1), b = pos(sketch, l.p2);
+            const double dx = b.x - a.x, dy = b.y - a.y;
+            const double l2 = dx * dx + dy * dy;
+            const double t = l2 == 0.0 ? 0.0 : std::clamp(((p.x - a.x) * dx + (p.y - a.y) * dy) / l2, 0.0, 1.0);
+            return {a.x + t * dx, a.y + t * dy};
+        }
+        case EntityKind::Circle: {
+            const Circle& c = std::get<Circle>(e.geom);
+            const Vec2 centre = pos(sketch, c.center);
+            const double d = len(centre, p);
+            if (d == 0.0) {
+                return {centre.x + c.radius, centre.y};
+            }
+            return {centre.x + (p.x - centre.x) * c.radius / d, centre.y + (p.y - centre.y) * c.radius / d};
+        }
+        case EntityKind::Arc: {
+            const ArcShape a = arcShape(sketch, id);
+            const double angle = std::atan2(p.y - a.center.y, p.x - a.center.x);
+            if (angleFrom(a.startAngle, angle) <= a.sweep) {
+                return {a.center.x + a.radius * std::cos(angle), a.center.y + a.radius * std::sin(angle)};
+            }
+            const Arc& arc = std::get<Arc>(e.geom);
+            const Vec2 s = pos(sketch, arc.start), en = pos(sketch, arc.end);
+            return len(s, p) <= len(en, p) ? s : en;
+        }
+    }
+    return p;
+}
+
 Id pick(const Sketch& sketch, Vec2 p, const PickOptions& options)
 {
     Id bestPoint = kNoId, bestCurve = kNoId;

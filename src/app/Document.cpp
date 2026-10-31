@@ -24,6 +24,93 @@ void Document::modify(const QString& /*label*/, const std::function<void(core::S
     emit changed();
 }
 
+core::Id Document::addConstraint(core::ConstraintType type, std::vector<core::Id> refs, double value,
+                                 QString* error, double labelX, double labelY)
+{
+    core::Sketch working = m_sketch;
+    core::Id id = core::kNoId;
+    try {
+        id = working.addConstraint(type, std::move(refs), value);
+        if (labelX != 0.0 || labelY != 0.0) {
+            working.setConstraintLabel(id, labelX, labelY);
+        }
+    }
+    catch (const core::SketchError& e) {
+        if (error) {
+            *error = QString::fromStdString(e.what());
+        }
+        return core::kNoId;
+    }
+    return commitChecked(std::move(working), error) ? id : core::kNoId;
+}
+
+bool Document::setDimensionValue(core::Id dimension, double value, QString* error)
+{
+    core::Sketch working = m_sketch;
+    try {
+        working.setConstraintValue(dimension, value);
+    }
+    catch (const core::SketchError& e) {
+        if (error) {
+            *error = QString::fromStdString(e.what());
+        }
+        return false;
+    }
+    return commitChecked(std::move(working), error);
+}
+
+bool Document::commitChecked(core::Sketch working, QString* error)
+{
+    core::SolveResult result = core::solve(working);  // writes back on success
+    QString problem;
+    if (result.conflicting.size() > m_result.conflicting.size()) {
+        problem = tr("That would conflict with existing constraints");
+    }
+    else if (result.redundant.size() > m_result.redundant.size()) {
+        problem = tr("That would over-constrain the sketch");
+    }
+    else if (!result.ok) {
+        problem = tr("The sketch can't be solved like that");
+    }
+    if (!problem.isEmpty()) {
+        if (error) {
+            *error = problem;
+        }
+        return false;
+    }
+    pushUndo(std::move(m_sketch));
+    m_sketch = std::move(working);
+    m_result = std::move(result);
+    emit changed();
+    return true;
+}
+
+void Document::beginLabelDrag()
+{
+    m_beforeDrag = m_sketch;
+    m_labelDragging = true;
+    m_dragMoved = false;
+}
+
+void Document::moveLabel(core::Id dimension, double dx, double dy)
+{
+    if (!m_sketch.hasConstraint(dimension)) {
+        return;
+    }
+    m_sketch.setConstraintLabel(dimension, dx, dy);
+    m_dragMoved = true;
+    emit changed();
+}
+
+void Document::endLabelDrag()
+{
+    if (m_labelDragging && m_dragMoved) {
+        pushUndo(std::move(m_beforeDrag));
+    }
+    m_beforeDrag = {};
+    m_labelDragging = false;
+}
+
 void Document::beginDrag(const std::vector<core::Id>& points)
 {
     m_beforeDrag = m_sketch;

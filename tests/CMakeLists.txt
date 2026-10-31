@@ -7,6 +7,7 @@ set(QT_BIN_DIR "${QT6_INSTALL_PREFIX}/${QT6_INSTALL_BINS}")
 
 # --- Core: model, solver, geometry (no Qt) ---
 add_executable(core_tests
+    core/test_dimensions.cpp
     core/test_geometry.cpp
     core/test_planegcs.cpp
     core/test_sketch.cpp
@@ -20,6 +21,7 @@ catch_discover_tests(core_tests)
 # --- App: drives the real view and tools with simulated input, headless ---
 add_executable(app_tests
     app/main.cpp
+    app/test_constraint_tools.cpp
     app/test_tools.cpp
 )
 target_link_libraries(app_tests PRIVATE drawapp_lib Qt6::Test Catch2::Catch2)

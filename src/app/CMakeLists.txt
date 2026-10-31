@@ -1,5 +1,7 @@
 # Everything except main() lives in a library so GUI tests can drive the real widgets.
 add_library(drawapp_lib STATIC
+    ConstraintPanel.cpp
+    ConstraintPanel.h
     Document.cpp
     Document.h
     FrameClock.cpp
@@ -8,8 +10,11 @@ add_library(drawapp_lib STATIC
     MainWindow.h
     SketchView.cpp
     SketchView.h
+    SketchViewAnnotations.cpp
     Theme.cpp
     Theme.h
+    tools/ConstraintTools.cpp
+    tools/ConstraintTools.h
     tools/DrawTools.cpp
     tools/DrawTools.h
     tools/SelectTool.cpp

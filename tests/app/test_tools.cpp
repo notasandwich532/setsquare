@@ -7,11 +7,10 @@
 #include <core/Geometry.h>
 
 #include <catch2/catch_approx.hpp>
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/interfaces/catch_interfaces_capture.hpp>
+#include "Snapshot.h"
 
-#include <QDir>
-#include <QRegularExpression>
+#include <catch2/catch_test_macros.hpp>
+
 #include <QTest>
 
 #include <cmath>
@@ -35,16 +34,7 @@ struct Fixture
         view.resetView();  // origin at the centre, 4 px per mm
     }
 
-    // With DRAWAPP_SNAPSHOT_DIR set, each test leaves a picture of the canvas behind for eyeballing.
-    ~Fixture()
-    {
-        const QString dir = qEnvironmentVariable("DRAWAPP_SNAPSHOT_DIR");
-        if (!dir.isEmpty()) {
-            QString name = QString::fromStdString(Catch::getResultCapture().getCurrentTestName());
-            name.replace(QRegularExpression("[^A-Za-z0-9]+"), "_");
-            view.grab().save(QDir(dir).filePath(name + ".png"));
-        }
-    }
+    ~Fixture() { saveSnapshot(view); }
 
     QPoint at(double x, double y) const { return view.toScreen({x, y}).toPoint(); }
     void click(double x, double y, Qt::MouseButton b = Qt::LeftButton) { QTest::mouseClick(&view, b, {}, at(x, y)); }

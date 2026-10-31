@@ -133,6 +133,41 @@ Id Sketch::addArc(double cx, double cy, double radius, double startDeg, double e
 
 Id Sketch::addConstraint(ConstraintType type, std::vector<Id> refs, double value)
 {
+    normalize(type, refs);
+    validate(type, refs, value);
+
+    const Id id = nextId();
+    m_constraints.emplace(id, Constraint{id, type, std::move(refs), value});
+    return id;
+}
+
+bool Sketch::canAddConstraint(ConstraintType type, std::vector<Id> refs, std::string* why) const
+{
+    try {
+        normalize(type, refs);
+        validate(type, refs, type == ConstraintType::Angle ? 45.0 : 1.0);
+        return true;
+    }
+    catch (const SketchError& e) {
+        if (why) {
+            *why = e.what();
+        }
+        return false;
+    }
+}
+
+void Sketch::setConstraintLabel(Id id, double dx, double dy)
+{
+    auto it = m_constraints.find(id);
+    if (it == m_constraints.end()) {
+        throw SketchError("unknown constraint " + std::to_string(id));
+    }
+    it->second.labelX = dx;
+    it->second.labelY = dy;
+}
+
+void Sketch::normalize(ConstraintType type, std::vector<Id>& refs) const
+{
     for (Id r : refs) {
         if (!hasEntity(r)) {
             throw SketchError("constraint references unknown entity " + std::to_string(r));
@@ -152,14 +187,12 @@ Id Sketch::addConstraint(ConstraintType type, std::vector<Id> refs, double value
         case ConstraintType::Midpoint:
         case ConstraintType::Distance: putFirst(isPoint); break;
         case ConstraintType::Tangent: putFirst(isLine); break;
+        case ConstraintType::Symmetric:
+            // (point, point, line) in any click order.
+            std::ranges::stable_partition(refs, isPoint);
+            break;
         default: break;
     }
-
-    validate(type, refs, value);
-
-    const Id id = nextId();
-    m_constraints.emplace(id, Constraint{id, type, std::move(refs), value});
-    return id;
 }
 
 void Sketch::setConstraintValue(Id id, double value)

@@ -3,6 +3,7 @@
 #include "tools/DrawTools.h"
 #include "tools/Tool.h"
 
+#include <core/Dimensions.h>
 #include <core/Geometry.h>
 
 #include <QElapsedTimer>
@@ -13,6 +14,7 @@
 #include <functional>
 #include <memory>
 #include <set>
+#include <vector>
 
 class Document;
 class QPainter;
@@ -43,8 +45,18 @@ public:
     void refreshTool();  // repaint and re-publish the tool's hint
 
     // --- picking ---
-    core::Id pickAt(QPointF screen) const;  // points first, then curves
-    Snap snap(QPointF screen) const;        // existing point near the cursor, else the cursor
+    // Constraint symbols and dimension labels first (when annotations is true), then points,
+    // then curves.
+    core::Id pickAt(QPointF screen, bool annotations = true) const;
+    // Where a drawing tool should put a point: an existing point, a line midpoint, a spot on a
+    // curve, or free space (in that order of preference).
+    Snap snap(QPointF screen) const;
+
+    // --- dimensions ---
+    void editDimension(core::Id dimension);  // inline value editor at the label
+    QString formatDimension(const core::Constraint& c) const;
+    void drawDimension(QPainter& painter, const core::DimensionLayout& layout, const QString& text,
+                       const QColor& color, QRectF* textRect = nullptr) const;
 
     // --- selection ---
     const std::set<core::Id>& selection() const { return m_selection; }
@@ -88,6 +100,7 @@ protected:
 private:
     void drawGrid(QPainter& painter) const;
     void drawSketch(QPainter& painter) const;
+    void drawAnnotations(QPainter& painter) const;  // constraint symbols + dimensions
     void drawArcPath(QPainter& painter, const core::ArcShape& arc) const;
     ToolEvent makeEvent(const QMouseEvent* event) const;
     void onDocumentChanged();
@@ -105,6 +118,21 @@ private:
 
     std::set<core::Id> m_selection;
     core::Id m_hovered = core::kNoId;
+
+    // Constraint symbols and dimension labels, laid out in screen space. Computed on demand for
+    // both painting and picking, so picking never sees a stale layout.
+    struct Annotation
+    {
+        core::Id id = core::kNoId;
+        bool isDimension = false;
+        QRectF rect;  // symbol box or dimension text box
+        QString text;
+        core::DimensionLayout dimension;
+    };
+    std::vector<Annotation> layoutAnnotations() const;
+    QColor annotationColor(core::Id constraint, const QColor& normal) const;
+
+    class QLineEdit* m_editor = nullptr;
 
     // Events per second over a sliding one-second window.
     struct RateCounter

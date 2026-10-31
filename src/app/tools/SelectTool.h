@@ -13,6 +13,7 @@ public:
     void press(const ToolEvent& e) override;
     void move(const ToolEvent& e) override;
     void release(const ToolEvent& e) override;
+    void doubleClick(const ToolEvent& e) override;
     bool cancel() override;
     void beforePaint() override;
     void paintOverlay(QPainter& painter) override;
@@ -25,6 +26,7 @@ private:
         Idle,
         PressedOnEntity,
         Dragging,
+        DraggingLabel,  // moving a dimension's label
         BoxSelecting,
     };
 
@@ -40,4 +42,5 @@ private:
     // Latest drag offset not yet solved; solved once per frame in beforePaint().
     bool m_dragPending = false;
     core::Vec2 m_dragOffset;
+    core::Vec2 m_labelStart;  // label position when a label drag began
 };
