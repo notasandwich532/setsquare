@@ -53,6 +53,7 @@ public:
     {
         core::ConstraintType type;
         std::vector<core::Id> refs;
+        std::uint8_t flip = 0;  // angles: which of the four (from where the label goes)
     };
     // The dimension the picks would make with the label at `mouse`; nullopt if they don't make
     // one (yet). `incomplete` is set when more picks could still make one.

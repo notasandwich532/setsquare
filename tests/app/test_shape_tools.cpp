@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cmath>
 #include <numbers>
+#include <tuple>
 
 using namespace core;
 using Catch::Approx;
@@ -145,6 +146,28 @@ TEST_CASE("Dimension the angle to the X axis", "[shapes][dimension][axes]")
     CHECK(c.type == ConstraintType::Angle);
     CHECK(std::ranges::find(c.refs, f.sketch().xAxis()) != c.refs.end());
     CHECK(c.value == Approx(std::atan2(10.0, 20.0) * 180 / std::numbers::pi));
+}
+
+TEST_CASE("Placing an angle dimension inside or outside a corner picks that angle", "[dimension][angle]")
+{
+    // A corner at (20, 20): one side going right, one going up-right at 60 degrees.
+    for (auto [placeX, placeY, expected] : {std::tuple{32.0, 24.0, 60.0}, std::tuple{12.0, 28.0, 120.0}}) {
+        Fixture f;
+        Id a = kNoId, b = kNoId;
+        f.doc.modify("corner", [&](Sketch& s) {
+            const Id corner = s.addPoint(20, 20);
+            a = s.addLine(corner, s.addPoint(40, 20));
+            b = s.addLine(corner, s.addPoint(20 + 20 * 0.5, 20 + 20 * std::sqrt(3.0) / 2));
+        });
+        f.view.setTool(ToolKind::Dimension);
+        f.click(30, 20);  // side a
+        f.click(25, 20 + 5 * std::sqrt(3.0));  // side b
+        f.move(placeX, placeY);
+        f.click(placeX, placeY);
+        const auto& cs = f.sketch().constraints();
+        REQUIRE(cs.size() == 1);
+        CHECK(cs.begin()->second.value == Approx(expected).margin(1e-6));
+    }
 }
 
 TEST_CASE("Slot tools: straight and arc", "[shapes]")

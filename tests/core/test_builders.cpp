@@ -218,6 +218,25 @@ TEST_CASE("Polygons stay regular however they're dragged", "[builders][drag]")
     }
 }
 
+TEST_CASE("A constraint redundant only by symmetry is still reported redundant", "[builders][solver]")
+{
+    // Regression (user report): pentagon with a horizontal side, then "horizontal" on the
+    // diagonal parallel to it. That diagonal is horizontal anyway, so the constraint adds
+    // nothing; it used to be counted as independent (solver noise vs. a too-strict rank
+    // threshold), leaving the pentagon "fully constrained" with its size still free.
+    Sketch s;
+    const Id origin = s.ensureOrigin();
+    const build::Polygon p = build::polygon(s, origin, {0.5, -40}, 5, build::PolygonKind::Circumscribed);
+    s.addConstraint(CT::Horizontal, {p.sides[0]});
+    REQUIRE(solve(s).dof == 1);  // just the size
+
+    const Id diagonal = s.addLine(p.vertices[4], p.vertices[2]);  // parallel to side 0
+    s.addConstraint(CT::Horizontal, {diagonal});
+    const SolveResult r = solve(s);
+    CHECK(r.dof == 1);
+    CHECK_FALSE(r.redundant.empty());
+}
+
 TEST_CASE("Straight slots: DOF 5, sides tangent to equal caps", "[builders]")
 {
     auto check = [](Sketch& s, const build::Slot& slot, double width) {

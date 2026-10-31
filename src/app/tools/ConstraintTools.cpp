@@ -293,7 +293,7 @@ std::optional<DimensionTool::Candidate> DimensionTool::candidateFor(const Sketch
             const Vec2 d2{pos(s, l2.p2).x - pos(s, l2.p1).x, pos(s, l2.p2).y - pos(s, l2.p1).y};
             const double cross = d1.x * d2.y - d1.y * d2.x;
             if (std::abs(cross) > 1e-9 * std::hypot(d1.x, d1.y) * std::hypot(d2.x, d2.y)) {
-                return Candidate{ConstraintType::Angle, {a, b}};
+                return Candidate{ConstraintType::Angle, {a, b}, core::angleFlipAt(s, a, b, mouse)};
             }
             return Candidate{ConstraintType::Distance, {l2.p1, a}};  // parallel: gap between them
         }
@@ -341,10 +341,13 @@ void DimensionTool::press(const ToolEvent& e)
         reset();
         return;
     }
-    core::Constraint probe{kNoId, candidate->type, candidate->refs, core::measure(s, candidate->type, candidate->refs)};
+    core::Constraint probe{kNoId, candidate->type, candidate->refs,
+                           core::measure(s, candidate->type, candidate->refs, candidate->flip)};
+    probe.flip = candidate->flip;
     const Vec2 offset = core::labelOffsetFor(s, probe, m_mouse);
     QString error;
-    const Id id = doc().addConstraint(candidate->type, candidate->refs, probe.value, &error, offset.x, offset.y);
+    const Id id =
+        doc().addConstraint(candidate->type, candidate->refs, probe.value, &error, offset.x, offset.y, candidate->flip);
     reset();
     if (id == kNoId) {
         emit view().message(error);
@@ -378,7 +381,9 @@ void DimensionTool::paintOverlay(QPainter& painter)
     if (!candidate) {
         return;
     }
-    core::Constraint probe{kNoId, candidate->type, candidate->refs, core::measure(s, candidate->type, candidate->refs)};
+    core::Constraint probe{kNoId, candidate->type, candidate->refs,
+                           core::measure(s, candidate->type, candidate->refs, candidate->flip)};
+    probe.flip = candidate->flip;
     const Vec2 offset = core::labelOffsetFor(s, probe, m_mouse);
     probe.labelX = offset.x;
     probe.labelY = offset.y;

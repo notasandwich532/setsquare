@@ -59,7 +59,7 @@ void Document::edit(const QString& /*label*/, const std::function<void(Editor&)>
 }
 
 core::Id Document::addConstraint(core::ConstraintType type, std::vector<core::Id> refs, double value,
-                                 QString* error, double labelX, double labelY)
+                                 QString* error, double labelX, double labelY, std::uint8_t flip)
 {
     core::Sketch working = m_sketch;
     core::Id id = core::kNoId;
@@ -67,6 +67,9 @@ core::Id Document::addConstraint(core::ConstraintType type, std::vector<core::Id
         id = working.addConstraint(type, std::move(refs), value);
         if (labelX != 0.0 || labelY != 0.0) {
             working.setConstraintLabel(id, labelX, labelY);
+        }
+        if (flip != 0) {
+            working.setConstraintFlip(id, flip);
         }
     }
     catch (const core::SketchError& e) {

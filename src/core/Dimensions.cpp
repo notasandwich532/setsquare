@@ -95,9 +95,51 @@ double lineAngle(const Sketch& s, Id line)
     lineEnds(s, line, a, b);
     return std::atan2(b.y - a.y, b.x - a.x);
 }
+
+// Directions of the two rays an angle dimension measures between.
+void rayAngles(const Sketch& s, const std::vector<Id>& refs, std::uint8_t flip, double& r1, double& r2)
+{
+    r1 = lineAngle(s, refs[0]) + ((flip & 1) ? kPi : 0.0);
+    r2 = lineAngle(s, refs[1]) + ((flip & 2) ? kPi : 0.0);
+}
+
+bool intersect(const Sketch& s, Id l1, Id l2, Vec2& x)
+{
+    Vec2 a1, b1, a2, b2;
+    lineEnds(s, l1, a1, b1);
+    lineEnds(s, l2, a2, b2);
+    const Vec2 d1 = sub(b1, a1), d2 = sub(b2, a2);
+    const double cross = d1.x * d2.y - d1.y * d2.x;
+    if (std::abs(cross) < 1e-12 * norm(d1) * norm(d2)) {
+        return false;
+    }
+    const double t = ((a2.x - a1.x) * d2.y - (a2.y - a1.y) * d2.x) / cross;
+    x = add(a1, mul(d1, t));
+    return true;
+}
 }  // namespace
 
-double measure(const Sketch& s, ConstraintType type, const std::vector<Id>& refs)
+std::uint8_t angleFlipAt(const Sketch& s, Id line1, Id line2, Vec2 at)
+{
+    Vec2 x;
+    if (!intersect(s, line1, line2, x)) {
+        return 0;
+    }
+    const double m = std::atan2(at.y - x.y, at.x - x.x);
+    // The sector between the two rays (the smaller way round) that contains the mouse.
+    for (std::uint8_t flip = 0; flip < 4; ++flip) {
+        double r1, r2;
+        rayAngles(s, {line1, line2}, flip, r1, r2);
+        const double sweep = wrapPi(r2 - r1);
+        const double toMouse = wrapPi(m - r1);
+        if ((sweep >= 0 && toMouse >= 0 && toMouse <= sweep) || (sweep < 0 && toMouse <= 0 && toMouse >= sweep)) {
+            return flip;
+        }
+    }
+    return 0;
+}
+
+double measure(const Sketch& s, ConstraintType type, const std::vector<Id>& refs, std::uint8_t flip)
 {
     switch (type) {
         case ConstraintType::Distance: {
@@ -119,8 +161,11 @@ double measure(const Sketch& s, ConstraintType type, const std::vector<Id>& refs
         }
         case ConstraintType::Radius: return roundRadius(s, refs[0]);
         case ConstraintType::Diameter: return 2.0 * roundRadius(s, refs[0]);
-        case ConstraintType::Angle:
-            return std::abs(wrapPi(lineAngle(s, refs[1]) - lineAngle(s, refs[0]))) * 180.0 / kPi;
+        case ConstraintType::Angle: {
+            double r1, r2;
+            rayAngles(s, refs, flip, r1, r2);
+            return std::abs(wrapPi(r2 - r1)) * 180.0 / kPi;
+        }
         default: return 0.0;
     }
 }
@@ -201,8 +246,11 @@ DimensionLayout layoutDimension(const Sketch& s, const Constraint& c)
             const double t = ((a2.x - a1.x) * d2.y - (a2.y - a1.y) * d2.x) / cross;
             L.center = add(a1, mul(d1, t));
             L.anchor = L.center;
-            L.startAngle = std::atan2(d1.y, d1.x);
-            L.sweep = wrapPi(std::atan2(d2.y, d2.x) - L.startAngle);
+            // The arc runs between the two rays this dimension measures (see Constraint::flip).
+            double r1, r2;
+            rayAngles(s, c.refs, c.flip, r1, r2);
+            L.startAngle = r1;
+            L.sweep = wrapPi(r2 - r1);
             if (defaultLabel) {
                 const double r = std::max(std::min(norm(d1), norm(d2)) * 0.4, 5.0);
                 const double bisector = L.startAngle + L.sweep / 2;

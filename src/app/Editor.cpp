@@ -60,6 +60,11 @@ QString Editor::constraintCall(const core::Sketch& s, Id id)
         if (c.labelX != 0.0 || c.labelY != 0.0) {
             args << QStringLiteral("label=(%1, %2)").arg(number(c.labelX), number(c.labelY));
         }
+        if (c.flip != 0) {
+            args << QStringLiteral("reverse=(%1, %2)")
+                        .arg((c.flip & 1) ? QStringLiteral("True") : QStringLiteral("False"),
+                             (c.flip & 2) ? QStringLiteral("True") : QStringLiteral("False"));
+        }
     }
     return QStringLiteral("%1 = s.%2(%3)").arg(name(s, id), function(c.type), args.join(QStringLiteral(", ")));
 }

@@ -293,6 +293,15 @@ void Sketch::setConstraintLabel(Id id, double dx, double dy)
     it->second.labelY = dy;
 }
 
+void Sketch::setConstraintFlip(Id id, std::uint8_t flip)
+{
+    auto it = m_constraints.find(id);
+    if (it == m_constraints.end()) {
+        throw SketchError("unknown constraint " + std::to_string(id));
+    }
+    it->second.flip = flip & 3;
+}
+
 void Sketch::normalize(ConstraintType type, std::vector<Id>& refs) const
 {
     for (Id r : refs) {

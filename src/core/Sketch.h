@@ -115,6 +115,11 @@ struct Constraint
     // layoutDimension). Zero means "choose a default".
     double labelX = 0.0;
     double labelY = 0.0;
+
+    // Angle only: which of the four angles between the lines is meant. The angle is measured
+    // between rays along each line; bit 0 / bit 1 reverse the first / second line's ray
+    // (normally p1 -> p2). The UI picks these from where the label is placed.
+    std::uint8_t flip = 0;
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -138,6 +143,7 @@ public:
     Id addConstraint(ConstraintType type, std::vector<Id> refs, double value = 0.0);
     void setConstraintValue(Id constraint, double value);
     void setConstraintLabel(Id constraint, double dx, double dy);
+    void setConstraintFlip(Id constraint, std::uint8_t flip);  // see Constraint::flip
 
     // Whether addConstraint would accept these references (value checks use a valid
     // placeholder unless one is given). On failure, *why receives the reason.

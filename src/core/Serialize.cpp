@@ -80,6 +80,9 @@ json constraintToJson(const Constraint& c)
         if (c.labelX != 0.0 || c.labelY != 0.0) {
             j["label"] = {c.labelX, c.labelY};
         }
+        if (c.flip != 0) {
+            j["reverse"] = {(c.flip & 1) != 0, (c.flip & 2) != 0};
+        }
     }
     return j;
 }
@@ -98,6 +101,10 @@ Constraint constraintFromJson(const json& j)
         const auto& label = j.at("label");
         c.labelX = label.at(0).get<double>();
         c.labelY = label.at(1).get<double>();
+    }
+    if (j.contains("reverse")) {
+        const auto& r = j.at("reverse");
+        c.flip = static_cast<std::uint8_t>((r.at(0).get<bool>() ? 1 : 0) | (r.at(1).get<bool>() ? 2 : 0));
     }
     return c;
 }

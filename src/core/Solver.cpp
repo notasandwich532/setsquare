@@ -116,6 +116,13 @@ struct Solver::Impl
 
 void Solver::Impl::build(const Sketch& sketch)
 {
+    // Rank detection must be no stricter than the solver's own precision (it converges to about
+    // 1e-10). With PlaneGCS's default of 1e-13, a constraint that is redundant in exact
+    // arithmetic (e.g. "horizontal" on a regular pentagon's diagonal once a side is horizontal)
+    // looks independent because of leftover solver noise, and the sketch is wrongly reported as
+    // fully constrained.
+    sys.qrpivotThreshold = 1e-9;
+
     // Points that may not move: fixed points, and the defining points of fixed curves.
     std::set<Id> fixedPoints;
     for (const auto& [id, e] : sketch.entities()) {
@@ -359,12 +366,16 @@ void Solver::Impl::addConstraint(const Sketch& sketch, const Constraint& c)
             break;
 
         case ConstraintType::Angle: {
-            // Directed angle from line 1 to line 2; keep the current rotation sense.
+            // The angle between the rays the dimension measures (each line's p1->p2 direction,
+            // possibly reversed: Constraint::flip), keeping its current rotation sense.
+            // PlaneGCS constrains the angle between the lines' own directions, so convert.
             GCS::Line& l1 = ln(r[0]);
             GCS::Line& l2 = ln(r[1]);
-            const double current = wrapPi(lineAngle(l2) - lineAngle(l1));
+            const double rayOffset = ((c.flip & 2) ? kPi : 0.0) - ((c.flip & 1) ? kPi : 0.0);
+            const double current = wrapPi(lineAngle(l2) - lineAngle(l1) + rayOffset);
             const double rad = c.value * kPi / 180.0;
-            sys.addConstraintL2LAngle(l1, l2, alloc(current >= 0.0 ? rad : -rad), tag);
+            const double betweenRays = current >= 0.0 ? rad : -rad;
+            sys.addConstraintL2LAngle(l1, l2, alloc(wrapPi(betweenRays - rayOffset)), tag);
             break;
         }
     }

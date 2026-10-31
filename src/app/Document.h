@@ -60,7 +60,8 @@ public:
     // Adds a constraint unless it would over-constrain the sketch (conflicting or redundant
     // with what's there), as Fusion does. Returns the new id, or kNoId with *error set.
     core::Id addConstraint(core::ConstraintType type, std::vector<core::Id> refs, double value = 0.0,
-                           QString* error = nullptr, double labelX = 0.0, double labelY = 0.0);
+                           QString* error = nullptr, double labelX = 0.0, double labelY = 0.0,
+                           std::uint8_t flip = 0);
 
     // Changes a dimension, rejecting values the solver can't satisfy.
     bool setDimensionValue(core::Id dimension, double value, QString* error = nullptr);

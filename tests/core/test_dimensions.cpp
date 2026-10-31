@@ -5,6 +5,11 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <core/Solver.h>
+
+#include <numbers>
+#include <tuple>
+
 using namespace core;
 using CT = ConstraintType;
 using Catch::Approx;
@@ -73,6 +78,33 @@ TEST_CASE("Linear layout measures between the right points", "[dimensions]")
     CHECK(L.a.y == Approx(10.0));
     CHECK(L.b.x == Approx(5.0));  // foot of the perpendicular
     CHECK(L.b.y == Approx(0.0).margin(1e-12));
+}
+
+TEST_CASE("Angle dimensions choose one of the four angles between two lines", "[dimensions][angle]")
+{
+    Sketch s;
+    const Id a = s.addLine(0, 0, 10, 0);      // along +x
+    const Id b = s.addLine(0, 0, 10, 10);     // at 45 degrees
+    // The sector containing a point picks which angle is meant.
+    const std::uint8_t inside = angleFlipAt(s, a, b, {10, 3});    // between the two lines' rays
+    const std::uint8_t outside = angleFlipAt(s, a, b, {-10, 3});  // the obtuse one next to it
+    CHECK(measure(s, CT::Angle, {a, b}, inside) == Approx(45.0));
+    CHECK(measure(s, CT::Angle, {a, b}, outside) == Approx(135.0));
+    CHECK(inside != outside);
+
+    // Driving each one: 60 inside opens the lines up; 60 outside closes them to 120 inside.
+    for (auto [flip, value, expectInside] : {std::tuple{inside, 60.0, 60.0}, std::tuple{outside, 60.0, 120.0}}) {
+        Sketch t = s;
+        t.entity(a).fixed = true;
+        t.entity(t.line(b).p1).fixed = true;
+        const Id d = t.addConstraint(CT::Angle, {a, b}, value);
+        t.setConstraintFlip(d, flip);
+        REQUIRE(solve(t).ok);
+        CHECK(measure(t, CT::Angle, {a, b}, inside) == Approx(expectInside).margin(1e-6));
+        // The arc is drawn in the chosen sector.
+        const DimensionLayout L = layoutDimension(t, t.constraint(d));
+        CHECK(std::abs(L.sweep) * 180 / std::numbers::pi == Approx(value).margin(1e-6));
+    }
 }
 
 TEST_CASE("Angle layout of parallel lines is invalid", "[dimensions]")

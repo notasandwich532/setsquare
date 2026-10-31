@@ -81,4 +81,23 @@ s.angle(s.x_axis, hexagon[0], value=90)
 s.distance(hexagon[0].p1, s.y_axis, value=25)
 assert isclose(abs(hexagon[0].p1.x - hexagon[0].p2.x), 0, abs_tol=1e-6)  # side 0 now vertical
 
+# Interior vs exterior angle at a corner: the label side, or reverse=, picks which.
+fresh()
+c = s.point(0, 0)
+right = s.line(c, (20, 0))
+up = s.line(c, (10, 17.320508))
+c.fixed = True
+right.fixed = True
+inner = s.angle(right, up, value=50, label=(8, 4))  # label inside the corner
+assert isclose(up.p2.y / up.length, __import__("math").sin(__import__("math").radians(50)), abs_tol=1e-6)
+doc.new()
+c = s.point(0, 0)
+right = s.line(c, (20, 0))
+up = s.line(c, (10, 17.320508))
+c.fixed = True
+right.fixed = True
+outer = s.angle(right, up, value=50, reverse=(True, False))  # the angle on the far side of `up`
+import math
+assert isclose(math.degrees(math.atan2(up.p2.y, up.p2.x)), 130, abs_tol=1e-6)
+
 print("shapes ok")

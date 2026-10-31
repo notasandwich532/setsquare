@@ -229,7 +229,8 @@ core::Vec2 vecArg(py::handle h)
 }
 
 // Adds a (checked) constraint or dimension; refuses over-constraining like the UI does.
-py::object addConstraint(ConstraintType type, std::vector<Id> refs, py::object value, py::object label)
+py::object addConstraint(ConstraintType type, std::vector<Id> refs, py::object value, py::object label,
+                         std::uint8_t flip = 0)
 {
     double v = 0.0;
     if (core::isDimension(type)) {
@@ -244,7 +245,7 @@ py::object addConstraint(ConstraintType type, std::vector<Id> refs, py::object v
             if (!sketch().canAddConstraint(type, measured, &why)) {
                 throw py::value_error(why);
             }
-            v = core::measure(sketch(), type, measured);
+            v = core::measure(sketch(), type, measured, flip);
         }
         else {
             v = value.cast<double>();
@@ -256,7 +257,7 @@ py::object addConstraint(ConstraintType type, std::vector<Id> refs, py::object v
     }
     Call call;
     QString error;
-    const Id id = call.target().addConstraint(type, std::move(refs), v, &error, lx, ly);
+    const Id id = call.target().addConstraint(type, std::move(refs), v, &error, lx, ly, flip);
     if (id == kNoId) {
         throw py::value_error(error.toStdString());
     }
@@ -688,8 +689,27 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
              py::arg("label") = py::none())
         .def("diameter", dimensionFn(ConstraintType::Diameter), py::arg("value") = py::none(),
              py::arg("label") = py::none())
-        .def("angle", dimensionFn(ConstraintType::Angle), py::arg("value") = py::none(),
-             py::arg("label") = py::none(), "(line, line), degrees from the first to the second")
+        .def("angle", [](const SketchH&, py::handle l1, py::handle l2, py::object value, py::object label,
+                          py::object reverse) {
+            const Id a = idOf(l1), b = idOf(l2);
+            std::uint8_t flip = 0;
+            if (!reverse.is_none()) {
+                const auto r = reverse.cast<std::pair<bool, bool>>();
+                flip = static_cast<std::uint8_t>((r.first ? 1 : 0) | (r.second ? 2 : 0));
+            }
+            else if (!label.is_none() && sketch().hasEntity(a) && sketch().hasEntity(b)) {
+                // No explicit choice: measure the angle on the side the label is placed.
+                const auto [lx, ly] = pairOf(label, "label");
+                core::Constraint probe{kNoId, ConstraintType::Angle, {a, b}, 0.0};
+                probe.labelX = 1.0;
+                const core::Vec2 anchor = core::layoutDimension(sketch(), probe).anchor;
+                flip = core::angleFlipAt(sketch(), a, b, {anchor.x + lx, anchor.y + ly});
+            }
+            return addConstraint(ConstraintType::Angle, {a, b}, std::move(value), std::move(label), flip);
+        }, py::arg("line1"), py::arg("line2"), py::arg("value") = py::none(), py::arg("label") = py::none(),
+           py::arg("reverse") = py::none(),
+           "Angle in degrees between rays along two lines. reverse=(r1, r2) flips either line's ray (p1->p2) "
+           "to choose which of the four angles is meant; otherwise it's the one the label sits in.")
 
         // moving things
         .def("drag", [](const SketchH&, py::handle points, double dx, double dy) {
