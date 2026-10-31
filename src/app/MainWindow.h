@@ -58,4 +58,5 @@ private:
     class QMenu* m_recentMenu = nullptr;
     class ScriptConsole* m_console = nullptr;
     class QDockWidget* m_consoleDock = nullptr;
+    class ToolSearch* m_search = nullptr;
 };

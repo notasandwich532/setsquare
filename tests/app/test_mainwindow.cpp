@@ -2,10 +2,12 @@
 
 #include "MainWindow.h"
 #include "SketchView.h"
+#include "ToolSearch.h"
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <QApplication>
+#include <QLineEdit>
 #include <QMenu>
 #include <QTest>
 
@@ -42,4 +44,34 @@ TEST_CASE("Right-click shows the recently used tools", "[mainwindow][tools]")
     menu->actions().at(1)->trigger();  // pick Fillet
     menu->close();
     CHECK(view->toolKind() == ToolKind::Fillet);
+}
+
+TEST_CASE("S opens a search box that finds and runs tools", "[mainwindow][tools]")
+{
+    MainWindow window;
+    window.show();
+    auto* view = window.findChild<SketchView*>();
+    REQUIRE(view != nullptr);
+    window.activateWindow();
+    REQUIRE(QTest::qWaitForWindowActive(&window));  // shortcuts only reach the active window
+    view->setFocus();
+    QTest::keyClick(view, Qt::Key_S);
+    auto* search = window.findChild<ToolSearch*>("toolSearch");
+    REQUIRE(search != nullptr);
+    CHECK(search->isVisible());
+
+    // Ranking: names starting with the query first.
+    const auto trims = search->matches(QStringLiteral("trim"));
+    REQUIRE(trims.size() >= 2);
+    CHECK(trims[0]->name == "Trim");
+    const auto pattern = search->matches(QStringLiteral("circ pat"));
+    REQUIRE(!pattern.empty());
+    CHECK(pattern[0]->name == "Circular Pattern");
+
+    auto* input = search->findChild<QLineEdit*>("toolSearchInput");
+    REQUIRE(input != nullptr);
+    QTest::keyClicks(input, "rect pat");
+    QTest::keyClick(input, Qt::Key_Return);
+    CHECK(!search->isVisible());
+    CHECK(view->toolKind() == ToolKind::RectangularPattern);
 }

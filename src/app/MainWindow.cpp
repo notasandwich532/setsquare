@@ -6,11 +6,13 @@
 #include "ScriptConsole.h"
 #include "SketchView.h"
 #include "Theme.h"
+#include "ToolSearch.h"
 
 #include <core/Serialize.h>
 #include <core/Transform.h>
 
 #include <QClipboard>
+#include <QCursor>
 #include <QDesktopServices>
 #include <QGuiApplication>
 #include <QMenu>
@@ -456,7 +458,7 @@ void MainWindow::createActions()
     };
 
     addTools(toolbar, {
-                          {ToolKind::Select, tr("Select"), QKeySequence(Qt::Key_S)},
+                          {ToolKind::Select, tr("Select"), {}},  // Esc; S is the search box
                           {ToolKind::Line, tr("Line"), QKeySequence(Qt::Key_L)},
                       });
     addDropdown(toolbar, tr("Rectangle"),
@@ -677,6 +679,35 @@ void MainWindow::createActions()
     stats->setCheckable(true);
     stats->setShortcut(Qt::Key_F12);
     connect(stats, &QAction::toggled, m_view, &SketchView::setShowStats);
+
+    // S: find any tool or command by name, at the cursor (as in Fusion).
+    m_search = new ToolSearch(this);
+    auto* search = new QAction(tr("&Search Tools..."), this);
+    search->setShortcut(Qt::Key_S);
+    sketchMenu->insertAction(sketchMenu->actions().value(0), search);
+    sketchMenu->insertSeparator(sketchMenu->actions().value(1));
+    connect(search, &QAction::triggered, this, [this, search] {
+        std::vector<ToolSearch::Entry> entries;
+        std::function<void(QMenu*, const QString&)> collect = [&](QMenu* menu, const QString& path) {
+            for (QAction* a : menu->actions()) {
+                const QString name = QString(a->text()).remove(QLatin1Char('&')).remove(QStringLiteral("..."));
+                if (a->menu()) {
+                    collect(a->menu(), path + QStringLiteral(" ▸ ") + name);
+                }
+                else if (!a->isSeparator() && a != search && !name.isEmpty()) {
+                    entries.push_back({a, name, path});
+                }
+            }
+        };
+        for (QAction* top : menuBar()->actions()) {
+            if (top->menu()) {
+                collect(top->menu(), QString(top->text()).remove(QLatin1Char('&')));
+            }
+        }
+        m_search->setEntries(std::move(entries));
+        const QPoint cursor = QCursor::pos();
+        m_search->popup(rect().contains(mapFromGlobal(cursor)) ? cursor : m_view->mapToGlobal(m_view->rect().center()));
+    });
 }
 
 void MainWindow::updateSolveStatus()

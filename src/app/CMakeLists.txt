@@ -25,6 +25,8 @@ add_library(drawapp_lib STATIC
     SketchView.cpp
     SketchView.h
     SketchViewAnnotations.cpp
+    ToolSearch.cpp
+    ToolSearch.h
     Theme.cpp
     Theme.h
     tools/ConstraintTools.cpp
