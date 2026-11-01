@@ -182,3 +182,27 @@ TEST_CASE("Replaying recorded strokes reproduces them", "[style][recorder]")
     REQUIRE(r.ok);
     CHECK(replay.sketch().strokes() == f.sketch().strokes());
 }
+
+TEST_CASE("The stroke brush paints a box of curves; Ctrl takes them off; Reset clears the selection",
+          "[style][brush]")
+{
+    Fixture f;
+    f.bar.pickColor(Fixture::hex("#ff7f27"));
+    f.view.setTool(ToolKind::StrokeBrush);
+    auto box = [&](QPoint from, QPoint to, Qt::KeyboardModifiers mods) {
+        QTest::mousePress(&f.view, Qt::LeftButton, mods, from);
+        QTest::mouseMove(&f.view, (from + to) / 2);
+        QTest::mouseMove(&f.view, to);
+        QTest::mouseRelease(&f.view, Qt::LeftButton, mods, to);
+    };
+    box(f.at(0, 40), f.at(50, 0), {});  // window over the whole rectangle
+    CHECK(f.sketch().strokes().size() == 4);
+    box(f.at(28, 35), f.at(22, 25), Qt::ControlModifier);  // crossing: just the top side
+    CHECK(f.sketch().strokes().size() == 3);
+    CHECK(f.sketch().stroke(f.rect.sides[2]) == nullptr);
+
+    f.view.setTool(ToolKind::Select);
+    f.view.setSelection({f.rect.sides[0], f.rect.sides[1]});
+    f.bar.resetSelection();
+    CHECK(f.sketch().strokes().size() == 1);
+}

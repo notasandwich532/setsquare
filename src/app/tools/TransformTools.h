@@ -272,7 +272,9 @@ private:
 };
 
 // Offset: click a curve (its whole chain, unless "Chain selection" is off), then set the
-// distance in the panel or with the arrow; a negative distance goes to the other side.
+// distance in the panel or with the arrow; a negative distance goes to the other side. "Both
+// sides" offsets to each side at once, and "Cap ends" closes an open chain's ends with half
+// circles (a slot round the chain).
 class OffsetTool : public CommandTool
 {
 public:
@@ -295,8 +297,13 @@ private:
     bool frame(core::Vec2& foot, core::Vec2& normal) const;
     core::Vec2 toward() const;
 
+    bool bothSides() const;
+    bool caps() const;
+
     int m_curves = 0;
     QDoubleSpinBox* m_distance = nullptr;
+    QComboBox* m_sides = nullptr;  // one side / both sides
+    QCheckBox* m_caps = nullptr;
     QCheckBox* m_chain = nullptr;
     core::Vec2 m_clickedAt;  // where the first curve was picked: its side is positive
     double m_dragStart = 0.0;

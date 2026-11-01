@@ -3,6 +3,9 @@
 #include <core/Serialize.h>
 
 #include <QDir>
+
+#include <algorithm>
+#include <cmath>
 #include <QFile>
 #include <QSaveFile>
 
@@ -63,6 +66,7 @@ core::Id Document::addConstraint(core::ConstraintType type, std::vector<core::Id
 {
     core::Sketch working = m_sketch;
     core::Id id = core::kNoId;
+    const std::vector<core::Id> asked = refs;
     try {
         id = working.addConstraint(type, std::move(refs), value);
         if (labelX != 0.0 || labelY != 0.0) {
@@ -79,7 +83,51 @@ core::Id Document::addConstraint(core::ConstraintType type, std::vector<core::Id
         return core::kNoId;
     }
     if (!commitChecked(std::move(working), error)) {
+        if (type == core::ConstraintType::Midpoint) {
+            return midpointOnLine(asked, error);
+        }
         return core::kNoId;
+    }
+    record(Editor::constraintCall(m_sketch, id));
+    return id;
+}
+
+core::Id Document::midpointOnLine(const std::vector<core::Id>& refs, QString* error)
+{
+    // Other constraints may already put the point halfway along the line (a symmetric shape,
+    // say), so a midpoint would say that twice. Then keeping the point on the line is enough;
+    // check it does end up at the middle.
+    core::Sketch probe = m_sketch;
+    core::Id id = core::kNoId;
+    try {
+        std::vector<core::Id> ordered = refs;
+        if (probe.entity(ordered[0]).kind() != core::EntityKind::Point) {
+            std::swap(ordered[0], ordered[1]);
+        }
+        id = probe.addConstraint(core::ConstraintType::Coincident, ordered);
+    }
+    catch (const core::SketchError&) {
+        return core::kNoId;
+    }
+    core::Sketch solved = probe;
+    if (!core::solve(solved).ok) {
+        return core::kNoId;
+    }
+    const core::Constraint& c = solved.constraint(id);
+    const core::Line& l = solved.line(c.refs[1]);
+    const core::Point& p = solved.point(c.refs[0]);
+    const core::Point& a = solved.point(l.p1);
+    const core::Point& b = solved.point(l.p2);
+    const double len = std::hypot(b.x - a.x, b.y - a.y);
+    if (std::hypot(p.x - (a.x + b.x) / 2, p.y - (a.y + b.y) / 2) > 1e-6 * std::max(1.0, len)) {
+        return core::kNoId;  // not at the middle: the original refusal stands
+    }
+    QString unused;
+    if (!commitChecked(std::move(probe), &unused)) {
+        return core::kNoId;
+    }
+    if (error) {
+        error->clear();
     }
     record(Editor::constraintCall(m_sketch, id));
     return id;

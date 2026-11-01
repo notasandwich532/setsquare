@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 
 using namespace core;
 using Catch::Approx;
@@ -429,6 +430,69 @@ TEST_CASE("Offset chains with arcs", "[offset]")
             CHECK(lineDistance(s, refs.sources[i], at(s, o.p2)) == Approx(2.5));
         }
     }
+}
+
+TEST_CASE("Offset to both sides, capping an open chain's ends", "[offset]")
+{
+    Sketch s;
+    std::vector<Id> chain;
+    SECTION("polyline")
+    {
+        const Id a = s.addLine(0, 0, 20, 0);
+        const Id b = s.addLine(s.line(a).p2, s.addPoint(30, 15));
+        chain = {a, b};
+    }
+    SECTION("line and tangent arc")
+    {
+        const Id a = s.addLine(-20, 0, 0, 0);
+        const Id arc = s.addArc(s.addPoint(0, 10), s.line(a).p2, s.addPoint(10, 10));
+        s.addConstraint(ConstraintType::Tangent, {a, arc});
+        chain = {a, arc};
+    }
+    const int dof = solveClean(s).dof;
+    const size_t before = s.entities().size();
+    const Id k = feature::offset(s, chain, 2.0, {}, true, true);
+    CHECK(solveClean(s).dof == dof);
+    const feature::OffsetRefs refs = feature::offsetRefs(s.constraint(k));
+    CHECK(refs.offsets.size() == 2);
+    CHECK(refs.offsets2.size() == 2);
+    // Two caps: arcs round the chain's ends, radius the distance.
+    size_t caps = 0;
+    for (const auto& [id, e] : s.entities()) {
+        if (id > s.highestId() - (s.entities().size() - before) && e.kind() == EntityKind::Arc
+            && std::ranges::find(refs.offsets, id) == refs.offsets.end()
+            && std::ranges::find(refs.offsets2, id) == refs.offsets2.end() && std::ranges::find(chain, id) == chain.end()) {
+            CHECK(arcShape(s, id).radius == Approx(2.0));
+            CHECK(arcShape(s, id).sweep == Approx(std::numbers::pi));
+            ++caps;
+        }
+    }
+    CHECK(caps == 2);
+
+    setValue(s, k, 3.0);  // one distance drives both sides and the caps
+    for (const auto* side : {&refs.offsets, &refs.offsets2}) {
+        const Id first = (*side)[0];
+        const Line o = s.line(first);
+        CHECK(lineDistance(s, chain[0], at(s, o.p1)) == Approx(3.0));
+    }
+    CHECK(solveClean(s).dof == dof);
+}
+
+TEST_CASE("Both sides of closed chains and circles", "[offset]")
+{
+    Sketch s;
+    const auto r = rect(s, 0, 0, 20, 10);
+    const Id c = s.addCircle(50, 50, 10);
+    const int dof = solveClean(s).dof;
+    const Id k1 = feature::offset(s, ids(r), 2, {}, true, true);  // closed: nothing to cap
+    const Id k2 = feature::offset(s, {c}, 3, {}, true);
+    CHECK(solveClean(s).dof == dof);
+    CHECK(feature::offsetRefs(s.constraint(k1)).offsets2.size() == 4);
+    const auto circles = feature::offsetRefs(s.constraint(k2));
+    CHECK(s.circle(circles.offsets[0]).radius == Approx(13.0));
+    CHECK(s.circle(circles.offsets2[0]).radius == Approx(7.0));
+    const Sketch loaded = fromJson(toJson(s));
+    CHECK(feature::offsetRefs(loaded.constraint(k1)).offsets2.size() == 4);
 }
 
 TEST_CASE("Offset a circle", "[offset]")

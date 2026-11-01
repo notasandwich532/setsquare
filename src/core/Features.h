@@ -74,7 +74,9 @@ std::vector<Id> sourcePoints(const Sketch& sketch, const Constraint& c);
 struct OffsetRefs
 {
     std::vector<Id> sources;
-    std::vector<Id> offsets;  // offsets[i] is sources[i]'s offset
+    std::vector<Id> offsets;   // offsets[i] is sources[i]'s offset
+    std::vector<Id> offsets2;  // both-sides offsets: the other side's (else empty)
+    std::vector<Id> caps;      // capped both-sides offsets: the arcs round the chain's ends
 };
 OffsetRefs offsetRefs(const Constraint& c);
 
@@ -84,7 +86,11 @@ std::vector<Id> chainAt(const Sketch& sketch, Id curve);
 
 // Offsets a chain of lines and arcs (or one circle) by `distance` towards the side `toward` is
 // on. Neighbouring offset curves meet where they cross (sharp corners) or continue smoothly
-// (tangent joins). Returns the offset constraint's id.
-Id offset(Sketch& sketch, const std::vector<Id>& curves, double distance, Vec2 toward);
+// (tangent joins). With `bothSides`, it offsets to both sides at once (one distance drives
+// both; `toward` doesn't matter), and with `caps` too, an open chain's ends are closed with
+// half circles round its end points, tangent to both sides: a slot-like outline. Returns the
+// offset constraint's id.
+Id offset(Sketch& sketch, const std::vector<Id>& curves, double distance, Vec2 toward, bool bothSides = false,
+          bool caps = false);
 
 }  // namespace core::feature

@@ -30,6 +30,10 @@ private:
     };
     Outcome tryApply(const std::vector<core::Id>& refs);
     size_t maxPicks() const;
+    // A selection of several things constrained together: each line (horizontal/vertical), or
+    // the first paired with each of the others (equal, parallel, coincident, ...).
+    std::vector<std::vector<core::Id>> groupsFor(const std::vector<core::Id>& items) const;
+    bool applyToMany(const std::vector<core::Id>& items);  // false if it doesn't apply
 
     ToolKind m_kind;
     std::vector<core::Id> m_picks;

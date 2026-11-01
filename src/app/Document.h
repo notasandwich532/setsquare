@@ -59,6 +59,8 @@ public:
 
     // Adds a constraint unless it would over-constrain the sketch (conflicting or redundant
     // with what's there), as Fusion does. Returns the new id, or kNoId with *error set.
+    // A midpoint whose "halfway" part is already implied becomes point-on-line instead (check
+    // the returned constraint's type).
     core::Id addConstraint(core::ConstraintType type, std::vector<core::Id> refs, double value = 0.0,
                            QString* error = nullptr, double labelX = 0.0, double labelY = 0.0,
                            std::uint8_t flip = 0);
@@ -116,6 +118,7 @@ private:
     // Commits a solved working copy if it isn't more over-constrained than the current sketch.
     // `hold`: points to keep in place where the sketch leaves a choice.
     bool commitChecked(core::Sketch working, QString* error, const std::vector<core::Id>& hold = {});
+    core::Id midpointOnLine(const std::vector<core::Id>& refs, QString* error);
     void resolve();
 
     core::Sketch m_sketch;

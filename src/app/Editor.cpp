@@ -402,11 +402,17 @@ Id Editor::setPattern(Id pattern, const feature::CircularPatternParams& p)
     return id;
 }
 
-Id Editor::offset(const std::vector<Id>& curves, double distance, core::Vec2 toward)
+Id Editor::offset(const std::vector<Id>& curves, double distance, core::Vec2 toward, bool bothSides, bool caps)
 {
     const QString what = list(m_sketch, curves);
-    const Id id = feature::offset(m_sketch, curves, distance, toward);
-    log(QStringLiteral("%1 = s.offset(%2, %3, toward=%4)").arg(name(m_sketch, id), what, number(distance), pair(toward)));
+    const Id id = feature::offset(m_sketch, curves, distance, toward, bothSides, caps);
+    if (bothSides) {
+        log(QStringLiteral("%1 = s.offset(%2, %3, both_sides=True%4)")
+                .arg(name(m_sketch, id), what, number(distance), caps ? QStringLiteral(", caps=True") : QString()));
+    }
+    else {
+        log(QStringLiteral("%1 = s.offset(%2, %3, toward=%4)").arg(name(m_sketch, id), what, number(distance), pair(toward)));
+    }
     return id;
 }
 

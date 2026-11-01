@@ -239,6 +239,13 @@ ColorBar::ColorBar(SketchView& view, QWidget* parent)
     });
     row->addWidget(m_dash);
 
+    auto* reset = new QToolButton(this);
+    reset->setObjectName(QStringLiteral("resetStroke"));
+    reset->setText(tr("Reset stroke"));
+    reset->setToolTip(tr("Take the strokes off the selected curves (they draw as plain geometry again)"));
+    connect(reset, &QToolButton::clicked, this, &ColorBar::resetSelection);
+    row->addWidget(reset);
+
     connect(&m_view, &SketchView::paintChanged, this, &ColorBar::syncFromView);
     connect(&m_view, &SketchView::selectionChanged, this, &ColorBar::syncFromSelection);
     syncFromView();
@@ -325,6 +332,22 @@ void ColorBar::addCustom(const core::Color& color)
     for (size_t i = 0; i < m_customColors.size(); ++i) {
         m_custom[i]->setColor(m_customColors[i]);
     }
+}
+
+void ColorBar::resetSelection()
+{
+    const core::Sketch& s = m_view.document().sketch();
+    std::vector<core::Id> curves;
+    for (core::Id id : m_view.selection()) {
+        if (s.hasEntity(id) && s.stroke(id)) {
+            curves.push_back(id);
+        }
+    }
+    if (curves.empty()) {
+        emit m_view.message(tr("Select the curves to reset first (or Ctrl+click them with the stroke brush)"));
+        return;
+    }
+    m_view.tryEdit(tr("Remove stroke"), [&](Editor& ed) { ed.clearStroke(curves); });
 }
 
 void ColorBar::applyToSelection(int parts)

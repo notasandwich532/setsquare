@@ -149,33 +149,134 @@ ConstraintTool::Outcome ConstraintTool::tryApply(const std::vector<Id>& refs)
         return Outcome::Incomplete;
     }
     QString error;
-    if (doc().addConstraint(type, refs, 0.0, &error) == kNoId) {
+    const Id made = doc().addConstraint(type, refs, 0.0, &error);
+    if (made == kNoId) {
         emit view().message(error);
         return Outcome::Rejected;
     }
+    if (doc().sketch().constraint(made).type != type) {
+        emit view().message(QObject::tr("The point was already halfway along: it's now kept on the line"));
+    }
     return Outcome::Applied;
+}
+
+std::vector<std::vector<Id>> ConstraintTool::groupsFor(const std::vector<Id>& items) const
+{
+    const Sketch& s = doc().sketch();
+    std::vector<Id> points, curves;
+    for (Id id : items) {
+        (kindOf(s, id) == EntityKind::Point ? points : curves).push_back(id);
+    }
+    std::vector<std::vector<Id>> out;
+    auto withFirst = [&](const std::vector<Id>& list) {  // the first paired with each of the rest
+        for (size_t i = 1; i < list.size(); ++i) {
+            out.push_back({list[0], list[i]});
+        }
+    };
+    switch (m_kind) {
+        case ToolKind::HorizontalVertical:
+            for (Id c : curves) {
+                if (kindOf(s, c) == EntityKind::Line) {
+                    out.push_back({c});
+                }
+            }
+            break;
+        case ToolKind::Coincident:
+            if (curves.size() == 1) {
+                for (Id p : points) {
+                    out.push_back({p, curves[0]});  // points onto the curve
+                }
+            }
+            else if (curves.empty()) {
+                withFirst(points);  // points together
+            }
+            break;
+        case ToolKind::Parallel:
+        case ToolKind::Equal:
+        case ToolKind::Collinear:
+        case ToolKind::Concentric:
+        case ToolKind::Tangent:
+            if (points.empty()) {
+                withFirst(curves);
+            }
+            break;
+        default: break;
+    }
+    return out;
+}
+
+bool ConstraintTool::applyToMany(const std::vector<Id>& items)
+{
+    const std::vector<std::vector<Id>> groups = groupsFor(items);
+    if (groups.size() < 2) {
+        return false;
+    }
+    // One undo step; pairs that would over-constrain are skipped.
+    size_t applied = 0;
+    doc().beginTransaction();
+    for (const std::vector<Id>& refs : groups) {
+        ConstraintType type = typeFor(m_kind);
+        if (m_kind == ToolKind::HorizontalVertical) {
+            const core::Line& l = doc().sketch().line(refs[0]);
+            type = horizontalOrVertical(pos(doc().sketch(), l.p1), pos(doc().sketch(), l.p2));
+        }
+        if (doc().sketch().canAddConstraint(type, refs) && doc().addConstraint(type, refs) != kNoId) {
+            ++applied;
+        }
+    }
+    doc().endTransaction();
+    if (applied < groups.size()) {
+        emit view().message(QObject::tr("Constrained %1 of %2: the rest would over-constrain the sketch")
+                                .arg(applied)
+                                .arg(groups.size()));
+    }
+    return true;
 }
 
 void ConstraintTool::activate()
 {
     // Selection first, then the tool: apply straight away if the selection fits.
+    const Sketch& s = doc().sketch();
     std::vector<Id> selected;
+    std::set<Id> ownPoints;  // ends and centres of selected curves (a box selection brings them)
     for (Id id : view().selection()) {
-        if (doc().sketch().hasEntity(id)) {
+        if (s.hasEntity(id)) {
             selected.push_back(id);
+            if (kindOf(s, id) != EntityKind::Point) {
+                for (Id p : s.definingPoints(id)) {
+                    ownPoints.insert(p);
+                }
+            }
         }
     }
     if (selected.empty()) {
         return;
     }
-    if (tryApply(selected) != Outcome::Incomplete) {
+    std::vector<Id> curvesAndLonePoints;
+    for (Id id : selected) {
+        if (!ownPoints.contains(id)) {
+            curvesAndLonePoints.push_back(id);
+        }
+    }
+    auto done = [&] {
         view().setSelection({});
-        // Done: hand back to the select tool once this tool switch has finished.
+        // Hand back to the select tool once this tool switch has finished.
         QMetaObject::invokeMethod(&view(), [v = &view()] { v->setTool(ToolKind::Select); }, Qt::QueuedConnection);
+    };
+    for (const std::vector<Id>* items : {&selected, &curvesAndLonePoints}) {
+        if (tryApply(*items) != Outcome::Incomplete) {
+            done();
+            return;
+        }
+    }
+    // Several things at once: each line horizontal, all of them equal, ...
+    if (applyToMany(curvesAndLonePoints) || applyToMany(selected)) {
+        done();
         return;
     }
-    if (selected.size() < maxPicks()) {
-        m_picks = selected;  // partial: keep going from here
+    if (curvesAndLonePoints.size() < maxPicks()) {
+        m_picks = curvesAndLonePoints;  // partial: keep going from here
+        view().setSelection({m_picks.begin(), m_picks.end()});
     }
     else {
         view().setSelection({});

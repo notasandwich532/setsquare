@@ -140,6 +140,7 @@ k.value = 12                            # spacing (rectangular) or total angle (
 k = s.set_pattern(k, count=5)           # a new count remakes the copies: use the returned pattern
 k.sources, k.copies                     # originals, and per copy the matching items
 o = s.offset(curve, 2, toward=(x, y))   # one curve offsets its whole chain; or pass a list
+o = s.offset(curve, 2, both_sides=True, caps=True)  # both sides, ends closed with half circles
 o.value = 3                             # the distance; the originals stay put
 s.chain(curve)                          # the curves joined end to end with it
 data = s.extract(items)                 # JSON, as the clipboard holds it

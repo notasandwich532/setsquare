@@ -1,0 +1,267 @@
+{
+  "axes": [
+    3,
+    5
+  ],
+  "constraints": [
+    {
+      "id": 16,
+      "refs": [
+        15
+      ],
+      "type": "horizontal"
+    },
+    {
+      "id": 17,
+      "refs": [
+        10,
+        8
+      ],
+      "type": "equal"
+    },
+    {
+      "id": 18,
+      "refs": [
+        12,
+        10
+      ],
+      "type": "equal"
+    },
+    {
+      "id": 19,
+      "refs": [
+        14,
+        12
+      ],
+      "type": "equal"
+    },
+    {
+      "id": 30,
+      "refs": [
+        29
+      ],
+      "type": "horizontal"
+    },
+    {
+      "id": 32,
+      "refs": [
+        31,
+        14
+      ],
+      "type": "coincident"
+    },
+    {
+      "id": 34,
+      "refs": [
+        33,
+        12
+      ],
+      "type": "coincident"
+    },
+    {
+      "id": 37,
+      "refs": [
+        36,
+        10
+      ],
+      "type": "coincident"
+    },
+    {
+      "id": 39,
+      "refs": [
+        38,
+        8
+      ],
+      "type": "coincident"
+    },
+    {
+      "id": 41,
+      "refs": [
+        35,
+        40
+      ],
+      "type": "collinear"
+    },
+    {
+      "id": 42,
+      "refs": [
+        40
+      ],
+      "type": "horizontal"
+    }
+  ],
+  "entities": [
+    {
+      "fixed": true,
+      "id": 1,
+      "type": "point",
+      "x": 0.0,
+      "y": 0.0
+    },
+    {
+      "fixed": true,
+      "id": 2,
+      "type": "point",
+      "x": 1.0,
+      "y": 0.0
+    },
+    {
+      "construction": true,
+      "fixed": true,
+      "id": 3,
+      "p1": 1,
+      "p2": 2,
+      "type": "line"
+    },
+    {
+      "fixed": true,
+      "id": 4,
+      "type": "point",
+      "x": 0.0,
+      "y": 1.0
+    },
+    {
+      "construction": true,
+      "fixed": true,
+      "id": 5,
+      "p1": 1,
+      "p2": 4,
+      "type": "line"
+    },
+    {
+      "id": 6,
+      "type": "point",
+      "x": -202.26320902656286,
+      "y": 23.027279181727096
+    },
+    {
+      "id": 7,
+      "type": "point",
+      "x": -182.86917973308755,
+      "y": -78.08971996145065
+    },
+    {
+      "id": 8,
+      "p1": 6,
+      "p2": 7,
+      "type": "line"
+    },
+    {
+      "id": 9,
+      "type": "point",
+      "x": -136.73333876099056,
+      "y": 13.955160753095125
+    },
+    {
+      "id": 10,
+      "p1": 7,
+      "p2": 9,
+      "type": "line"
+    },
+    {
+      "id": 11,
+      "type": "point",
+      "x": -90.59749778889358,
+      "y": -78.08971996145065
+    },
+    {
+      "id": 12,
+      "p1": 9,
+      "p2": 11,
+      "type": "line"
+    },
+    {
+      "id": 13,
+      "type": "point",
+      "x": -71.20346849541829,
+      "y": 23.027279181727096
+    },
+    {
+      "id": 14,
+      "p1": 11,
+      "p2": 13,
+      "type": "line"
+    },
+    {
+      "construction": true,
+      "id": 15,
+      "p1": 11,
+      "p2": 7,
+      "type": "line"
+    },
+    {
+      "construction": true,
+      "id": 29,
+      "p1": 6,
+      "p2": 13,
+      "type": "line"
+    },
+    {
+      "id": 31,
+      "type": "point",
+      "x": -78.47252976645345,
+      "y": -14.872305849953378
+    },
+    {
+      "id": 33,
+      "type": "point",
+      "x": -122.2840896066429,
+      "y": -14.872305849953378
+    },
+    {
+      "construction": true,
+      "id": 35,
+      "p1": 31,
+      "p2": 33,
+      "type": "line"
+    },
+    {
+      "id": 36,
+      "type": "point",
+      "x": -151.18258791533825,
+      "y": -14.872305849953383
+    },
+    {
+      "id": 38,
+      "type": "point",
+      "x": -194.9941477555277,
+      "y": -14.872305849953383
+    },
+    {
+      "construction": true,
+      "id": 40,
+      "p1": 36,
+      "p2": 38,
+      "type": "line"
+    }
+  ],
+  "format": "drawing_app.sketch",
+  "origin": 1,
+  "strokes": [
+    {
+      "color": "#22b14c",
+      "curve": 8,
+      "dash": "solid",
+      "width": 2.0
+    },
+    {
+      "color": "#22b14c",
+      "curve": 10,
+      "dash": "solid",
+      "width": 2.0
+    },
+    {
+      "color": "#22b14c",
+      "curve": 12,
+      "dash": "solid",
+      "width": 2.0
+    },
+    {
+      "color": "#22b14c",
+      "curve": 14,
+      "dash": "solid",
+      "width": 2.0
+    }
+  ],
+  "version": 1
+}

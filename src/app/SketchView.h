@@ -115,6 +115,8 @@ public:
         int circularCount = 6;
         double circularAngle = 360.0;
         double offsetDistance = 5.0;
+        bool offsetBothSides = false;
+        bool offsetCaps = true;
     };
     ModifyOptions& modifyOptions() { return m_modifyOptions; }
     const ModifyOptions& modifyOptions() const { return m_modifyOptions; }

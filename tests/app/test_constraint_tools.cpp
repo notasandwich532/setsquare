@@ -6,6 +6,7 @@
 #include "Snapshot.h"
 
 #include <core/Dimensions.h>
+#include <core/Geometry.h>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -374,4 +375,61 @@ TEST_CASE("Snapping to a midpoint or onto a curve adds the constraint", "[infere
     const auto onCurve = f.constraintsOfType(CT::Coincident);
     REQUIRE(onCurve.size() == 1);
     CHECK(f.sketch().constraint(onCurve[0]).refs[1] == circle);
+}
+
+TEST_CASE("Constraints apply to a box selection of several curves", "[constraints][selection]")
+{
+    Fixture f;
+    std::vector<Id> lines;
+    for (int i = 0; i < 4; ++i) {
+        lines.push_back(f.line(10.0 * i, 0, 10.0 * i + 5 + i, 3));  // all a bit different
+    }
+    // A window selection takes the lines and their endpoints.
+    f.view.setTool(ToolKind::Select);
+    QTest::mousePress(&f.view, Qt::LeftButton, {}, f.at(-5, 10));
+    QTest::mouseMove(&f.view, f.at(20, 0));
+    QTest::mouseMove(&f.view, f.at(60, -10));
+    QTest::mouseRelease(&f.view, Qt::LeftButton, {}, f.at(60, -10));
+    REQUIRE(f.view.selection().size() == 12);
+
+    f.view.setTool(ToolKind::Equal);
+    QCoreApplication::processEvents();  // (it hands back to Select afterwards)
+    CHECK(f.constraintsOfType(CT::Equal).size() == 3);
+    auto length = [&](Id l) {
+        const Line& g = f.sketch().line(l);
+        const Point& a = f.sketch().point(g.p1);
+        const Point& b = f.sketch().point(g.p2);
+        return std::hypot(b.x - a.x, b.y - a.y);
+    };
+    for (Id l : lines) {
+        CHECK(length(l) == Approx(length(lines[0])));
+    }
+    CHECK(f.view.toolKind() == ToolKind::Select);
+    f.doc.undo();  // one step for all of them
+    CHECK(f.constraintsOfType(CT::Equal).empty());
+
+    // Horizontal/vertical: each selected line.
+    f.view.setSelection({lines[0], lines[1], lines[2]});
+    f.view.setTool(ToolKind::HorizontalVertical);
+    QCoreApplication::processEvents();
+    CHECK(f.constraintsOfType(CT::Horizontal).size() == 3);
+}
+
+TEST_CASE("Points onto a curve, from a selection", "[constraints][selection]")
+{
+    Fixture f;
+    const Id l = f.line(0, 0, 40, 0);
+    Id p = kNoId, q = kNoId;
+    f.doc.modify("points", [&](Sketch& s) {
+        p = s.addPoint(10, 3);
+        q = s.addPoint(30, -2);
+    });
+    f.view.setSelection({l, p, q});
+    f.view.setTool(ToolKind::Coincident);
+    QCoreApplication::processEvents();
+    CHECK(f.constraintsOfType(CT::Coincident).size() == 2);
+    for (Id point : {p, q}) {  // on the line (which may have moved to meet them)
+        const Point& at = f.sketch().point(point);
+        CHECK(distanceTo(f.sketch(), l, {at.x, at.y}) == Approx(0.0).margin(1e-6));
+    }
 }

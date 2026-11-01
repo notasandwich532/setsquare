@@ -554,7 +554,11 @@ void MainWindow::createActions()
     QMenu* appearanceMenu = menuBar()->addMenu(tr("&Appearance"));
     appearanceMenu->addAction(presentation);
     addTools(appearanceBar, {{ToolKind::StrokeBrush, tr("Stroke Brush"), QKeySequence(Qt::Key_B)}});
-    appearanceBar->addWidget(new ColorBar(*m_view, appearanceBar));
+    auto* colorBar = new ColorBar(*m_view, appearanceBar);
+    appearanceBar->addWidget(colorBar);
+    auto* resetStroke = appearanceMenu->addAction(tr("&Reset Stroke"));
+    resetStroke->setToolTip(tr("Take the strokes off the selected curves"));
+    connect(resetStroke, &QAction::triggered, colorBar, &ColorBar::resetSelection);
 
     sketchMenu->addSeparator();
     addToolBarBreak();
@@ -592,6 +596,9 @@ void MainWindow::createActions()
         });
     });
     m_toolActions[ToolKind::Select]->setChecked(true);
+    // The active tool (and other modes that are on, like presentation view) shows green.
+    setStyleSheet(QStringLiteral("QToolBar QToolButton:checked { background-color: #2e7d32; color: #ffffff;"
+                                 " border: 1px solid #4caf50; border-radius: 3px; }"));
     connect(m_view, &SketchView::toolChanged, this, [this](ToolKind kind) {
         if (auto it = m_toolActions.find(kind); it != m_toolActions.end()) {
             it->second->setChecked(true);

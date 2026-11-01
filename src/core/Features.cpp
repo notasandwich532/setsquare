@@ -7,6 +7,7 @@
 #include <numbers>
 #include <optional>
 #include <set>
+#include <tuple>
 
 namespace core::feature
 {
@@ -431,8 +432,15 @@ OffsetRefs offsetRefs(const Constraint& c)
     if (c.type != ConstraintType::Offset) {
         throw SketchError("not an offset");
     }
-    const size_t n = c.refs.size() / 2;
-    return {{c.refs.begin(), c.refs.begin() + n}, {c.refs.begin() + n, c.refs.end()}};
+    const bool both = !c.params.empty() && c.params[0] == 2.0;
+    const size_t caps = c.params.size() > 1 ? static_cast<size_t>(c.params[1]) : 0;
+    const size_t n = (c.refs.size() - caps) / (both ? 3 : 2);
+    OffsetRefs out{{c.refs.begin(), c.refs.begin() + n}, {c.refs.begin() + n, c.refs.begin() + 2 * n}, {}, {}};
+    if (both) {
+        out.offsets2.assign(c.refs.begin() + 2 * n, c.refs.begin() + 3 * n);
+    }
+    out.caps.assign(c.refs.end() - static_cast<std::ptrdiff_t>(caps), c.refs.end());
+    return out;
 }
 
 std::vector<Id> chainAt(const Sketch& s, Id curve)
@@ -481,46 +489,19 @@ std::vector<Id> chainAt(const Sketch& s, Id curve)
     return ordered;
 }
 
-Id offset(Sketch& s, const std::vector<Id>& curves, double d, Vec2 toward)
+namespace
 {
-    if (!(d > 0.0)) {
-        throw SketchError("offset: the distance must be positive");
-    }
-    if (curves.empty()) {
-        throw SketchError("offset: nothing to offset");
-    }
+// One side of a chain's offset: `sign` +1 is left of the direction of travel, -1 right.
+// Returns the new curves (in chain order) and, per vertex of the chain, the new point there.
+struct Side
+{
+    std::vector<Id> curves;
+    std::map<Id, Id> points;
+};
 
-    if (curves.size() == 1 && s.entity(curves[0]).kind() == EntityKind::Circle) {
-        const Circle circle = s.circle(curves[0]);
-        const bool inside = norm(toward - at(s, circle.center)) < circle.radius;
-        const double r = inside ? circle.radius - d : circle.radius + d;
-        if (!(r > 0.0)) {
-            throw SketchError("offset: the distance is larger than the circle");
-        }
-        const Id made = s.addCircle(circle.center, r);
-        s.entity(made).construction = s.entity(curves[0]).construction;
-        s.copyStroke(curves[0], made);
-        return s.addConstraint(ConstraintType::Offset, {curves[0], made}, d);
-    }
-
-    bool closed = false;
-    const std::vector<Step> steps = orderChain(s, curves, closed);
-
-    // Which side: left (+1) or right (-1) of the direction of travel, at the nearest curve.
-    double sign = 1.0;
-    {
-        double best = 1e300;
-        for (const Step& step : steps) {
-            const double dist = distanceTo(s, step.curve, toward);
-            if (dist < best) {
-                best = dist;
-                const Vec2 x = closestPoint(s, step.curve, toward);
-                sign = cross(tangentAt(s, step, x), toward - x) >= 0.0 ? 1.0 : -1.0;
-            }
-        }
-    }
-
-    // Each curve's offset, as a primitive, and its offset ends.
+Side offsetSide(Sketch& s, const std::vector<Step>& steps, bool closed, double sign, double d)
+{
+    // Each curve's offset, as a primitive.
     std::vector<Prim> prims;
     for (const Step& step : steps) {
         const Entity& e = s.entity(step.curve);
@@ -580,29 +561,114 @@ Id offset(Sketch& s, const std::vector<Id>& curves, double d, Vec2 toward)
         where[steps[0].entry] = offsetOf(0, steps[0].entry);
     }
 
-    std::map<Id, Id> made;  // source vertex -> new point
+    Side side;
     for (const auto& [p, q] : where) {
-        made[p] = s.addPoint(q.x, q.y);
-        s.entity(made[p]).construction = s.entity(p).construction;
+        side.points[p] = s.addPoint(q.x, q.y);
+        s.entity(side.points[p]).construction = s.entity(p).construction;
     }
-    std::vector<Id> refs, offsets;
     for (const Step& step : steps) {
         const Entity e = s.entity(step.curve);
         Id curve = kNoId;
         if (const auto* l = std::get_if<Line>(&e.geom)) {
-            curve = s.addLine(made.at(l->p1), made.at(l->p2));
+            curve = s.addLine(side.points.at(l->p1), side.points.at(l->p2));
         }
         else {
             const Arc& a = std::get<Arc>(e.geom);
-            curve = s.addArc(a.center, made.at(a.start), made.at(a.end));
+            curve = s.addArc(a.center, side.points.at(a.start), side.points.at(a.end));
         }
         s.entity(curve).construction = e.construction;
         s.copyStroke(step.curve, curve);
-        refs.push_back(step.curve);
-        offsets.push_back(curve);
+        side.curves.push_back(curve);
     }
-    refs.insert(refs.end(), offsets.begin(), offsets.end());
-    return s.addConstraint(ConstraintType::Offset, std::move(refs), d);
+    return side;
+}
+}  // namespace
+
+Id offset(Sketch& s, const std::vector<Id>& curves, double d, Vec2 toward, bool bothSides, bool caps)
+{
+    if (!(d > 0.0)) {
+        throw SketchError("offset: the distance must be positive");
+    }
+    if (curves.empty()) {
+        throw SketchError("offset: nothing to offset");
+    }
+    const std::vector<double> params = bothSides ? std::vector<double>{2.0} : std::vector<double>{};
+
+    if (curves.size() == 1 && s.entity(curves[0]).kind() == EntityKind::Circle) {
+        const Circle circle = s.circle(curves[0]);
+        const bool inside = norm(toward - at(s, circle.center)) < circle.radius;
+        std::vector<double> radii{inside ? circle.radius - d : circle.radius + d};
+        if (bothSides) {
+            radii = {circle.radius + d, circle.radius - d};
+        }
+        std::vector<Id> refs{curves[0]};
+        for (double r : radii) {
+            if (!(r > 0.0)) {
+                throw SketchError("offset: the distance is larger than the circle");
+            }
+            const Id made = s.addCircle(circle.center, r);
+            s.entity(made).construction = s.entity(curves[0]).construction;
+            s.copyStroke(curves[0], made);
+            refs.push_back(made);
+        }
+        return s.addConstraint(ConstraintType::Offset, std::move(refs), d, params);
+    }
+
+    bool closed = false;
+    const std::vector<Step> steps = orderChain(s, curves, closed);
+
+    // Which side: left (+1) or right (-1) of the direction of travel, at the nearest curve.
+    double sign = 1.0;
+    if (!bothSides) {
+        double best = 1e300;
+        for (const Step& step : steps) {
+            const double dist = distanceTo(s, step.curve, toward);
+            if (dist < best) {
+                best = dist;
+                const Vec2 x = closestPoint(s, step.curve, toward);
+                sign = cross(tangentAt(s, step, x), toward - x) >= 0.0 ? 1.0 : -1.0;
+            }
+        }
+    }
+
+    std::vector<Side> sides{offsetSide(s, steps, closed, sign, d)};
+    if (bothSides) {
+        sides.push_back(offsetSide(s, steps, closed, -sign, d));
+    }
+
+    // Caps: half circles round the ends of an open chain, joining the two sides.
+    std::vector<Id> capArcs;
+    if (bothSides && caps && !closed) {
+        const Step& first = steps.front();
+        const Step& last = steps.back();
+        for (const auto& [end, step, outward] :
+             {std::tuple{first.entry, first, -1.0}, std::tuple{last.exit, last, 1.0}}) {
+            const Vec2 p = at(s, end);
+            const Vec2 out = outward * tangentAt(s, step, p);  // away from the chain
+            const Id qa = sides[0].points.at(end), qb = sides[1].points.at(end);
+            // Counter-clockwise from qa, the half circle passes p + rot90(qa - p): that must be
+            // the outward side, else go from qb.
+            const bool fromA = dot(left(at(s, qa) - p), out) >= 0.0;
+            const Id cap = fromA ? s.addArc(end, qa, qb) : s.addArc(end, qb, qa);
+            s.entity(cap).construction = s.entity(step.curve).construction;
+            s.copyStroke(step.curve, cap);
+            capArcs.push_back(cap);
+        }
+    }
+
+    std::vector<Id> refs;
+    for (const Step& step : steps) {
+        refs.push_back(step.curve);
+    }
+    for (const Side& side : sides) {
+        refs.insert(refs.end(), side.curves.begin(), side.curves.end());
+    }
+    refs.insert(refs.end(), capArcs.begin(), capArcs.end());
+    std::vector<double> settings = params;
+    if (!capArcs.empty()) {
+        settings.push_back(double(capArcs.size()));
+    }
+    return s.addConstraint(ConstraintType::Offset, std::move(refs), d, settings);
 }
 
 }  // namespace core::feature

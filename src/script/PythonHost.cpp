@@ -535,7 +535,11 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
             const core::Constraint& k = constraintOf(c.id);
             py::list out;
             if (k.type == ConstraintType::Offset) {
-                out.append(wrapAll(core::feature::offsetRefs(k).offsets));
+                const auto refs = core::feature::offsetRefs(k);
+                out.append(wrapAll(refs.offsets));
+                if (!refs.offsets2.empty()) {
+                    out.append(wrapAll(refs.offsets2));
+                }
             }
             else if (core::isFeature(k.type)) {
                 for (const auto& instance : core::feature::pattern(k).copies) {
@@ -546,7 +550,7 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
                 throw py::value_error("not a pattern or offset");
             }
             return out;
-        }, "Per copy (one for an offset), the items matching `sources`.")
+        }, "Per copy (one per side for an offset), the items matching `sources`.")
         .def_property(
             "value", [](const ConstraintH& c) -> py::object {
                 const core::Constraint& k = constraintOf(c.id);
@@ -1035,16 +1039,22 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
            py::arg("angle") = py::none(), py::arg("count2") = py::none(), py::arg("spacing2") = py::none(),
            py::arg("symmetric") = py::none(), py::arg("symmetric2") = py::none(),
            "Change a pattern's settings. A new count remakes the copies; returns the pattern (a new one then).")
-        .def("offset", [](const SketchH&, py::handle curves, double distance, py::handle toward) {
+        .def("offset", [](const SketchH&, py::handle curves, double distance, py::object toward, bool bothSides,
+                          bool caps) {
             std::vector<Id> ids = itemsOf(curves);
             if (ids.size() == 1 && !py::isinstance<py::sequence>(curves)) {
                 ids = core::feature::chainAt(sketch(), ids.front());  // one curve: its whole chain
             }
-            const core::Vec2 side = vecArg(toward);
-            return wrap(editReturningId("Offset", [&](Editor& ed) { return ed.offset(ids, distance, side); }));
-        }, py::arg("curves"), py::arg("distance"), py::arg("toward"),
+            if (toward.is_none() && !bothSides) {
+                throw py::value_error("say which side with toward=(x, y), or use both_sides=True");
+            }
+            const core::Vec2 side = toward.is_none() ? core::Vec2{} : vecArg(toward);
+            return wrap(editReturningId("Offset", [&](Editor& ed) { return ed.offset(ids, distance, side, bothSides, caps); }));
+        }, py::arg("curves"), py::arg("distance"), py::arg("toward") = py::none(), py::arg("both_sides") = false,
+           py::arg("caps") = false,
            "Linked offset of a chain of lines/arcs (a list, or one curve for its whole chain) or a circle, on the "
-           "side `toward` is on. Returns the offset; its value is the distance.")
+           "side `toward` is on, or with both_sides=True to both sides (caps=True closes an open chain's ends with "
+           "half circles). Returns the offset; its value is the distance.")
         .def("chain", [](const SketchH&, py::handle curve) { return wrapAll(core::feature::chainAt(sketch(), idOf(curve))); },
              py::arg("curve"), "The curves joined end to end with this one, in order.")
         .def("extract", [](const SketchH&, py::handle items) {

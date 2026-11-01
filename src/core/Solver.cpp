@@ -175,6 +175,7 @@ struct Solver::Impl
     GCS::VEC_pD unknowns;
     std::map<Id, std::vector<double*>> entityUnknowns;  // per entity, the unknowns that define it
     std::set<Id> fixedEntities;
+    std::set<Id> capArcs;  // see addOffset
 
     GCS::System sys;
     bool dragging = false;
@@ -232,6 +233,8 @@ struct Solver::Impl
     void addConstraint(const Sketch& sketch, const Constraint& c);
     void addPattern(const Sketch& sketch, const Constraint& c);
     void addOffset(const Sketch& sketch, const Constraint& c);
+    void addOffsetSide(const Sketch& sketch, const Constraint& c, const std::vector<Id>& sources,
+                       const std::vector<Id>& offsets);
 };
 
 void Solver::Impl::build(const Sketch& sketch)
@@ -258,6 +261,15 @@ void Solver::Impl::build(const Sketch& sketch)
         }
     }
     store.reserve(4 * pointCount + 3 * roundCount + 2 * sketch.constraints().size() + featureValues + 16);
+
+    // Arcs capping a both-sides offset: their ends are pinned by the two sides already.
+    for (const auto& [id, c] : sketch.constraints()) {
+        if (c.type == ConstraintType::Offset) {
+            for (Id cap : feature::offsetRefs(c).caps) {
+                capArcs.insert(cap);
+            }
+        }
+    }
 
     // Points that may not move: fixed points, and the defining points of fixed curves.
     std::set<Id> fixedPoints;
@@ -326,7 +338,9 @@ void Solver::Impl::build(const Sketch& sketch)
                 declare(ga.endAngle);
             }
             auto [it, _] = arcs.emplace(id, ga);
-            sys.addConstraintArcRules(it->second, kInternalTag);
+            if (!capArcs.contains(id)) {  // (caps get theirs from their offset: see addOffset)
+                sys.addConstraintArcRules(it->second, kInternalTag);
+            }
         }
     }
 
@@ -604,9 +618,34 @@ void Solver::Impl::addPattern(const Sketch& sketch, const Constraint& c)
 // equation.
 void Solver::Impl::addOffset(const Sketch& sketch, const Constraint& c)
 {
+    // Both-sides offsets are two independent sides sharing the distance.
+    const feature::OffsetRefs all = feature::offsetRefs(c);
+    addOffsetSide(sketch, c, all.sources, all.offsets);
+    if (!all.offsets2.empty()) {
+        addOffsetSide(sketch, c, all.sources, all.offsets2);
+    }
+    // A cap's ends are both fixed by the sides, so the usual arc rules (start and end on the
+    // circle: four equations) would say one thing twice. Its radius and start angle come from
+    // its start, and only the angle from its end.
+    const int tag = static_cast<int>(c.id);
+    for (Id cap : all.caps) {
+        GCS::Arc& a = arcs.at(cap);
+        sys.addConstraintP2PDistance(a.center, a.start, a.rad, tag);
+        sys.addConstraintP2PAngle(a.center, a.start, a.startAngle, 0.0, tag);
+        sys.addConstraintP2PAngle(a.center, a.end, a.endAngle, 0.0, tag);
+    }
+}
+
+void Solver::Impl::addOffsetSide(const Sketch& sketch, const Constraint& c, const std::vector<Id>& sources,
+                                 const std::vector<Id>& offsets)
+{
     const int tag = static_cast<int>(c.id);
     const double distance = c.value;
-    const feature::OffsetRefs refs = feature::offsetRefs(c);
+    const struct
+    {
+        const std::vector<Id>& sources;
+        const std::vector<Id>& offsets;
+    } refs{sources, offsets};
     const size_t n = refs.sources.size();
     auto kind = [&](size_t i) { return sketch.entity(refs.sources[i]).kind(); };
     auto ends = [&](Id curve) -> std::array<Id, 2> {

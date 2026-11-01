@@ -437,3 +437,31 @@ TEST_CASE("Replaying recorded commands reproduces the sketch", "[transform][reco
         }
     }
 }
+
+TEST_CASE("Offset: both sides, with the ends capped", "[transform][offset]")
+{
+    Fixture f;
+    Id line = kNoId;
+    f.doc.modify("line", [&](Sketch& s) { line = s.addLine(50, 50, 80, 50); });
+    f.view.setTool(ToolKind::Offset);
+    f.click(65, 50);
+    f.field<QComboBox>("sides")->setCurrentIndex(1);
+    REQUIRE(f.field<QCheckBox>("caps")->isVisible());
+    f.field<QCheckBox>("caps")->setChecked(true);
+    f.field<QDoubleSpinBox>("distance")->setValue(4);
+    f.ok();
+    const Id k = f.feature(ConstraintType::Offset);
+    REQUIRE(k != kNoId);
+    const auto refs = feature::offsetRefs(f.sketch().constraint(k));
+    CHECK(refs.offsets2.size() == 1);
+    CHECK(refs.caps.size() == 2);
+    CHECK(f.doc.solveResult().ok);
+    CHECK(f.doc.solveResult().redundant.empty());
+    std::vector<double> ys;
+    for (Id l : {refs.offsets[0], refs.offsets2[0]}) {
+        ys.push_back(f.pos(f.sketch().line(l).p1).y);
+    }
+    std::ranges::sort(ys);
+    CHECK(ys[0] == Approx(46.0).margin(1e-6));
+    CHECK(ys[1] == Approx(54.0).margin(1e-6));
+}

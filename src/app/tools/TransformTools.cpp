@@ -1048,9 +1048,22 @@ void OffsetTool::buildPanel()
 {
     m_curves = addPick(QObject::tr("Curves"), "curves", QObject::tr("click a curve to offset"),
                        [this](Id id) { return isCurve(id); }, true);
-    m_distance = panel()->addNumber(QObject::tr("Offset position"), "distance", view().modifyOptions().offsetDistance,
-                                    -1e6, 1e6);
+    const SketchView::ModifyOptions& o = view().modifyOptions();
+    m_distance = panel()->addNumber(QObject::tr("Offset position"), "distance", o.offsetDistance, -1e6, 1e6);
+    m_sides = panel()->addChoice(QObject::tr("Direction"), "sides", {QObject::tr("One Side"), QObject::tr("Both Sides")},
+                                 o.offsetBothSides ? 1 : 0);
+    m_caps = panel()->addCheck(QObject::tr("Cap ends"), "caps", o.offsetCaps);
     m_chain = panel()->addCheck(QObject::tr("Chain selection"), "chain", true);
+}
+
+bool OffsetTool::bothSides() const
+{
+    return m_sides->currentIndex() == 1;
+}
+
+bool OffsetTool::caps() const
+{
+    return bothSides() && m_caps->isChecked();
 }
 
 void OffsetTool::changed()
@@ -1058,6 +1071,9 @@ void OffsetTool::changed()
     if (!m_chain) {
         return;
     }
+    panel()->setRowVisible(m_caps, bothSides());
+    view().modifyOptions().offsetBothSides = bothSides();
+    view().modifyOptions().offsetCaps = m_caps->isChecked();
     std::vector<Id> curves = picked(m_curves);
     if (m_lastPick.empty() && !curves.empty()) {
         m_clickedAt = mouse();  // the side of the first curve picked is the positive side
@@ -1145,7 +1161,8 @@ bool OffsetTool::commit()
     const std::vector<Id> curves = picked(m_curves);
     const double distance = std::abs(m_distance->value());
     const Vec2 side = toward();
-    return view().tryEdit(QObject::tr("Offset"), [&](Editor& ed) { ed.offset(curves, distance, side); });
+    const bool both = bothSides(), capped = caps();
+    return view().tryEdit(QObject::tr("Offset"), [&](Editor& ed) { ed.offset(curves, distance, side, both, capped); });
 }
 
 void OffsetTool::paintPreview(QPainter& painter)
@@ -1156,7 +1173,8 @@ void OffsetTool::paintPreview(QPainter& painter)
     const std::vector<Id>& curves = picked(m_curves);
     const double distance = std::abs(m_distance->value());
     const Vec2 side = toward();
-    drawPreviewEdit(view(), painter, [&](Editor& ed) { ed.offset(curves, distance, side); });
+    const bool both = bothSides(), capped = caps();
+    drawPreviewEdit(view(), painter, [&](Editor& ed) { ed.offset(curves, distance, side, both, capped); });
 }
 
 std::vector<Handle> OffsetTool::handles() const

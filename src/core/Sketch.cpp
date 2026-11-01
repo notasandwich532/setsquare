@@ -513,7 +513,33 @@ void Sketch::validateFeature(ConstraintType type, const std::vector<Id>& refs, d
 
     switch (type) {
         case ConstraintType::Offset: {
-            const size_t n = matchingGroups(0, 2, "sources then their offsets");
+            // params {2[, caps]}: offset to both sides (sources, one side's offsets, the other's),
+            // then that many arcs capping the ends.
+            if (params.size() > 2 || (!params.empty() && params[0] != 1.0 && params[0] != 2.0)) {
+                fail("expects params {} or {sides[, caps]}");
+            }
+            const size_t caps = params.size() > 1 ? static_cast<size_t>(params[1]) : 0;
+            if (caps > 2 || caps > refs.size() || (caps > 0 && params[0] != 2.0)) {
+                fail("caps only close a both-sides offset");
+            }
+            for (size_t i = refs.size() - caps; i < refs.size(); ++i) {
+                if (kindOf(refs[i]) != EntityKind::Arc) {
+                    fail("caps must be arcs");
+                }
+            }
+            const std::vector<Id> curves(refs.begin(), refs.end() - static_cast<std::ptrdiff_t>(caps));
+            const size_t groups = params.empty() ? 2 : static_cast<size_t>(params[0]) + 1;
+            if (curves.empty() || curves.size() % groups != 0) {
+                fail("expects sources then their offsets");
+            }
+            const size_t n = curves.size() / groups;
+            for (size_t g = 1; g < groups; ++g) {
+                for (size_t i = 0; i < n; ++i) {
+                    if (kindOf(curves[g * n + i]) != kindOf(curves[i])) {
+                        fail("expects offsets of the same kinds as their sources");
+                    }
+                }
+            }
             for (size_t i = 0; i < n; ++i) {
                 if (!isCurve(refs[i])) {
                     fail("only curves can be offset");

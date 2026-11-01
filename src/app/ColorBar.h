@@ -13,7 +13,7 @@ class Swatch;
 // The colour and line-style strip, after MS Paint: the current Colour 1 (strokes) over Colour 2
 // (fills), a palette (left-click sets Colour 1, right-click Colour 2), a row of custom colours,
 // "Edit colours", and the line width and style. Changes apply to the selected curves straight
-// away; selecting a decorated curve shows its style here.
+// away; selecting a decorated curve shows its style here. "Reset" takes strokes off.
 class ColorBar : public QWidget
 {
     Q_OBJECT
@@ -33,6 +33,7 @@ public:
     void setWidth(double width);   // 0 = hairline
     void setDash(core::Dash dash);
     void editColor(bool second);   // opens the colour editor
+    void resetSelection();         // takes the strokes off the selected curves
 
 private:
     void syncFromView();             // show the view's paint

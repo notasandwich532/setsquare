@@ -71,7 +71,9 @@ public:
     // Returns the pattern's id, which changes when the count does (the copies are remade).
     core::Id setPattern(core::Id pattern, const core::feature::LinearPatternParams& p);
     core::Id setPattern(core::Id pattern, const core::feature::CircularPatternParams& p);
-    core::Id offset(const std::vector<core::Id>& curves, double distance, core::Vec2 toward);
+    // `toward` picks the side; with bothSides it's ignored (and caps closes an open chain's ends).
+    core::Id offset(const std::vector<core::Id>& curves, double distance, core::Vec2 toward, bool bothSides = false,
+                    bool caps = false);
     // Inserts clipboard contents (a sketch fragment, see core::xform::paste) centred at `at`.
     std::map<core::Id, core::Id> paste(const core::Sketch& fragment, core::Vec2 at);
 
