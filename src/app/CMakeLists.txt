@@ -1,13 +1,15 @@
-# The document model and the recording Editor (Qt Core only). Shared by the UI and the
-# Python host, which is why it's separate from the widgets.
+# The document model and the recording Editor, and text shapes from fonts (Qt Core and Gui, no
+# widgets). Shared by the UI and the Python host, which is why it's separate from the widgets.
 add_library(drawdoc STATIC
     Document.cpp
     Document.h
     Editor.cpp
     Editor.h
+    TextShapes.cpp
+    TextShapes.h
 )
 target_include_directories(drawdoc PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(drawdoc PUBLIC drawcore Qt6::Core)
+target_link_libraries(drawdoc PUBLIC drawcore Qt6::Core Qt6::Gui)
 drawapp_warnings(drawdoc)
 
 # Everything else except main() lives in a library so GUI tests can drive the real widgets.
@@ -19,6 +21,8 @@ add_library(drawapp_lib STATIC
     NumberInput.cpp
     NumberInput.h
     ConstraintPanel.cpp
+    FontPicker.cpp
+    FontPicker.h
     ConstraintPanel.h
     FrameClock.cpp
     FrameClock.h
@@ -50,6 +54,8 @@ add_library(drawapp_lib STATIC
     tools/Tool.h
     tools/Handles.cpp
     tools/Handles.h
+    tools/TextTool.cpp
+    tools/TextTool.h
     tools/TransformTools.cpp
     tools/TransformTools.h
 )

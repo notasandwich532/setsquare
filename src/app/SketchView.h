@@ -12,6 +12,7 @@
 #include <QElapsedTimer>
 #include <QPen>
 #include <QPointF>
+#include <QPolygonF>
 #include <QWidget>
 
 #include <deque>
@@ -53,6 +54,7 @@ public:
     // Constraint symbols and dimension labels first (when annotations is true), then points,
     // then curves.
     core::Id pickAt(QPointF screen, bool annotations = true) const;
+    core::Id textAt(QPointF screen) const;  // a text whose box is under the cursor, or none
     // Where a drawing tool should put a point: an existing point, a line midpoint, a spot on a
     // curve, or free space (in that order of preference).
     Snap snap(QPointF screen) const;
@@ -63,6 +65,7 @@ public:
     void editValue(core::Id constraint, QPointF at);
     // Patterns: their command, editing them; offsets: the inline distance editor.
     void editFeature(core::Id feature);
+    void editText(core::Id text);  // the Text tool, on it
 
     // What Paste places (set before switching to ToolKind::Paste).
     void setPasteFragment(core::Sketch fragment);
@@ -123,6 +126,12 @@ public:
         bool divideByRatio = false;
         int divideCount = 3;
         QString divideRatio = QStringLiteral("3:2:1");
+        QString textFont;  // empty: the default
+        double textHeight = 5.0;
+        bool textBold = false;
+        bool textItalic = false;
+        int textOutline = 0;  // core::TextOutline
+        double textMinThickness = 0.0;
     };
     ModifyOptions& modifyOptions() { return m_modifyOptions; }
     const ModifyOptions& modifyOptions() const { return m_modifyOptions; }
@@ -154,6 +163,8 @@ public:
     QPen strokePen(const core::StrokeStyle& style) const;
     // A closed area (with its holes) on screen, for filling.
     QPainterPath regionPath(const core::regions::Region& region) const;
+    QPainterPath textPath(const core::Text& text) const;  // its letters, on screen
+    QPolygonF textBox(const core::Text& text) const;      // round its letters, on screen
 
     // Constraint symbols on the canvas (dimensions are always shown).
     bool showConstraints() const { return m_showConstraints; }

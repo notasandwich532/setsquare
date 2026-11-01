@@ -120,6 +120,7 @@ const std::pair<ToolKind, const char*> kToolNames[] = {
     {ToolKind::Select, "select"},
     {ToolKind::Line, "line"},
     {ToolKind::Point, "point"},
+    {ToolKind::Text, "text"},
     {ToolKind::Rectangle, "rectangle"},
     {ToolKind::Rectangle3Point, "rectangle_3point"},
     {ToolKind::RectangleCenter, "rectangle_center"},
@@ -693,7 +694,10 @@ void MainWindow::createActions()
                     {ToolKind::SlotArc3Point, tr("Three Point Arc Slot"), {}},
                     {ToolKind::SlotArcCenter, tr("Center Point Arc Slot"), {}},
                 });
-    addTools(toolbar, {{ToolKind::Point, tr("Point"), QKeySequence(Qt::Key_P)}});
+    addTools(toolbar, {
+                          {ToolKind::Point, tr("Point"), QKeySequence(Qt::Key_P)},
+                          {ToolKind::Text, tr("Text"), {}},
+                      });
     // Modify tools on a row of their own: one row is too narrow for everything.
     addToolBarBreak();
     auto* modifyBar = addToolBar(tr("Modify"));

@@ -32,9 +32,9 @@ target_include_directories(drawscript PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(drawscript PUBLIC drawdoc PRIVATE pybind11::embed)
 drawapp_warnings(drawscript)
 
-# Headless script runner (console program): drawapp-cli script.py [args...]
+# Headless script runner (console program; an offscreen GUI app, for fonts): drawapp-cli script.py [args...]
 add_executable(drawapp-cli cli.cpp)
-target_link_libraries(drawapp-cli PRIVATE drawscript Qt6::Core)
+target_link_libraries(drawapp-cli PRIVATE drawscript Qt6::Core Qt6::Gui)
 drawapp_warnings(drawapp-cli)
 drawapp_embeds_python(drawapp-cli)
 add_dependencies(drawapp-cli python_runtime)

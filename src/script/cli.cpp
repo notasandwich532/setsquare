@@ -10,7 +10,7 @@
 #include "Document.h"
 #include "PythonHost.h"
 
-#include <QCoreApplication>
+#include <QGuiApplication>
 #include <QStringList>
 
 #include <cstdio>
@@ -25,8 +25,18 @@ void usage()
 
 int main(int argc, char* argv[])
 {
-    QCoreApplication app(argc, argv);
-    QStringList args = QCoreApplication::arguments().mid(1);
+    // A GUI application (fonts, for text) that never shows a window.
+    if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")) {
+        qputenv("QT_QPA_PLATFORM", "offscreen");
+    }
+#ifdef _WIN32
+    // The offscreen platform doesn't find the system fonts on Windows by itself.
+    if (qEnvironmentVariableIsEmpty("QT_QPA_FONTDIR")) {
+        qputenv("QT_QPA_FONTDIR", qgetenv("WINDIR") + "\\Fonts");
+    }
+#endif
+    QGuiApplication app(argc, argv);
+    QStringList args = QGuiApplication::arguments().mid(1);
 
     QString openPath, code, scriptPath;
     while (!args.isEmpty()) {

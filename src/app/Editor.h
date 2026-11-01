@@ -90,6 +90,9 @@ public:
     // Fills the closed area around `at` (a fill already there is recoloured). Throws
     // SketchError, saying how many loose ends there are, if `at` isn't enclosed.
     core::Id fill(core::Vec2 at, const core::Color& color);
+    // Text at t.anchor (an existing point); its letter shapes are made here from its settings.
+    core::Id text(core::Text t);
+    void setText(core::Text t);  // by t.id: new settings (and shape)
 
     // Unchecked (inference while drawing); Document::addConstraint is the checked version.
     core::Id constrain(core::ConstraintType type, std::vector<core::Id> refs, double value = 0.0);

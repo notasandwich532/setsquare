@@ -98,7 +98,29 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
             }
         }
     }
-    if (strokes.empty() && plain.empty() && construction.empty() && fills.empty()) {
+    // Texts: their letters in world coordinates, filled.
+    struct TextArea
+    {
+        Color color;
+        std::vector<std::vector<Vec2>> contours;
+    };
+    std::vector<TextArea> texts;
+    for (const auto& [id, t] : s.texts()) {
+        if (t.shape.empty() || !s.hasEntity(t.anchor)) {
+            continue;
+        }
+        TextArea area{t.hasColor ? t.color : o.plain.color, {}};
+        for (const auto& contour : t.shape) {
+            std::vector<Vec2> pts;
+            for (const Point& p : contour) {
+                const Point w = textToWorld(s.point(t.anchor), t.angle, p);
+                pts.push_back({w.x, w.y});
+            }
+            area.contours.push_back(std::move(pts));
+        }
+        texts.push_back(std::move(area));
+    }
+    if (strokes.empty() && plain.empty() && construction.empty() && fills.empty() && texts.empty()) {
         throw SketchError("there's nothing to export");
     }
 
@@ -121,6 +143,13 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
     for (const Area& a : fills) {
         for (const Vec2& p : a.region.outer) {
             include(p, 0.0);
+        }
+    }
+    for (const TextArea& t : texts) {
+        for (const auto& contour : t.contours) {
+            for (const Vec2& p : contour) {
+                include(p, 0.0);
+            }
         }
     }
     double m = std::max(0.0, o.margin);
@@ -174,6 +203,28 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
         out << "  </g>\n";
     }
 
+    if (!texts.empty()) {
+        layer("text", "Text");
+        for (const TextArea& t : texts) {
+            std::string d;
+            for (const auto& contour : t.contours) {
+                for (size_t i = 0; i < contour.size(); ++i) {
+                    d += (i == 0 ? "M" : "L") + X(contour[i].x) + ',' + Y(contour[i].y) + ' ';
+                }
+                d += "Z ";
+            }
+            if (d.empty()) {
+                continue;
+            }
+            d.pop_back();
+            out << "    <path d=\"" << d << "\" fill=\"" << rgb(t.color) << '"';
+            if (t.color.a != 255) {
+                out << " fill-opacity=\"" << num(t.color.a / 255.0) << '"';
+            }
+            out << " fill-rule=\"nonzero\" stroke=\"none\"/>\n";
+        }
+        out << "  </g>\n";
+    }
     auto writeCurve = [&](const Item& item) {
         const StrokeStyle& st = item.style;
         const double w = st.width > 0.0 ? st.width : kHairline;
@@ -390,13 +441,43 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
             items.push_back({id, "GEOMETRY"});
         }
     }
-    if (items.empty()) {
+    // Texts: each contour of their letters as a closed polyline.
+    struct TextOutline
+    {
+        int color;
+        std::vector<Point> points;
+    };
+    std::vector<TextOutline> textOutlines;
+    for (const auto& [id, t] : s.texts()) {
+        if (!s.hasEntity(t.anchor)) {
+            continue;
+        }
+        const int color = t.hasColor && o.styles ? nearestAci(t.color) : 256;
+        for (const auto& contour : t.shape) {
+            TextOutline out{color, {}};
+            for (const Point& p : contour) {
+                out.points.push_back(textToWorld(s.point(t.anchor), t.angle, p));
+            }
+            if (out.points.size() >= 3) {
+                textOutlines.push_back(std::move(out));
+            }
+        }
+    }
+    if (items.empty() && textOutlines.empty()) {
         throw SketchError("there's nothing to export");
     }
 
     double x0 = 1e300, y0 = 1e300, x1 = -1e300, y1 = -1e300;
     for (const Item& item : items) {
         for (const Vec2& p : sample(s, item.curve, 256)) {
+            x0 = std::min(x0, p.x);
+            y0 = std::min(y0, p.y);
+            x1 = std::max(x1, p.x);
+            y1 = std::max(y1, p.y);
+        }
+    }
+    for (const TextOutline& t : textOutlines) {
+        for (const Point& p : t.points) {
             x0 = std::min(x0, p.x);
             y0 = std::min(y0, p.y);
             x1 = std::max(x1, p.x);
@@ -458,7 +539,8 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
     const Layer layers[] = {{"0", 7, "CONTINUOUS"},
                             {"GEOMETRY", 7, "CONTINUOUS"},
                             {"STROKES", 7, "CONTINUOUS"},
-                            {"CONSTRUCTION", -8, "DASHED"}};
+                            {"CONSTRUCTION", -8, "DASHED"},
+                            {"TEXT", 7, "CONTINUOUS"}};
     w.pair(0, "TABLE");
     w.pair(2, "LAYER");
     w.pair(70, static_cast<int>(std::size(layers)));
@@ -520,6 +602,27 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
             w.real(50, degrees(a.startAngle));
             w.real(51, degrees(a.startAngle + a.sweep));
         }
+    }
+    for (const TextOutline& t : textOutlines) {
+        w.pair(0, "POLYLINE");
+        w.pair(8, "TEXT");
+        if (t.color != 256) {
+            w.pair(62, t.color);
+        }
+        w.pair(66, 1);  // vertices follow
+        w.real(10, 0.0);
+        w.real(20, 0.0);
+        w.real(30, 0.0);
+        w.pair(70, 1);  // closed
+        for (const Point& p : t.points) {
+            w.pair(0, "VERTEX");
+            w.pair(8, "TEXT");
+            w.real(10, p.x);
+            w.real(20, p.y);
+            w.real(30, 0.0);
+        }
+        w.pair(0, "SEQEND");
+        w.pair(8, "TEXT");
     }
     w.pair(0, "ENDSEC");
     w.pair(0, "EOF");

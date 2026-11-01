@@ -162,6 +162,21 @@ d = s.set_divide(d, reversed=False)               # same number of points: the s
 d = s.set_divide(d, count=5)                      # a new count remakes the points: use the returned one
 ```
 
+### Text
+Text is anchored at a point (the start of its baseline), so it can be constrained and dragged like
+other geometry. Its letters come from the font and are kept with the sketch (files open, and
+export, where the font isn't installed).
+
+```python
+app.fonts("script")                       # installed families containing "script"
+t = s.text("Hello", (10, 20), height=8, font="Arial")   # height: capital letters, mm
+t = s.text("Hello", p, angle=30, bold=True, italic=False, color="#202020")
+t = s.text("Scribble", p, font="Segoe Script", outline="merged")      # overlapping strokes joined
+t = s.text("Scribble", p, font="Segoe Script", outline="silhouette")  # only the outside edge
+t = s.text("Thin", p, font="Ink Free", min_thickness=0.8)  # parts narrower than 0.8 mm thickened
+s.edit_text(t, text="Hi", height=10)      # any of the settings; the letters are remade
+t.anchor, t.contours, t.bounds            # its point; its outline as loops of (x, y); extent
+```
 ### Appearance (strokes)
 How curves look in the finished drawing; the solver ignores it. Curves without a stroke draw as
 plain sketch geometry.

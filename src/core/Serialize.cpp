@@ -149,6 +149,36 @@ std::string toJson(const Sketch& sketch, bool compact, const std::vector<std::st
         }
         doc["fills"] = std::move(fills);
     }
+    if (!sketch.texts().empty()) {
+        json texts = json::array();
+        for (const auto& [id, t] : sketch.texts()) {
+            json shape = json::array();
+            for (const auto& contour : t.shape) {
+                json points = json::array();
+                for (const Point& p : contour) {
+                    points.push_back(p.x);
+                    points.push_back(p.y);
+                }
+                shape.push_back(std::move(points));  // flat [x0, y0, x1, y1, ...]
+            }
+            json j{{"id", id}, {"anchor", t.anchor}, {"text", t.text}, {"font", t.font}, {"height", t.height},
+                   {"angle", t.angle}, {"outline", toString(t.outline)}, {"shape", std::move(shape)}};
+            if (t.bold) {
+                j["bold"] = true;
+            }
+            if (t.italic) {
+                j["italic"] = true;
+            }
+            if (t.minThickness > 0.0) {
+                j["min_thickness"] = t.minThickness;
+            }
+            if (t.hasColor) {
+                j["color"] = t.color.hex();
+            }
+            texts.push_back(std::move(j));
+        }
+        doc["texts"] = std::move(texts);
+    }
     if (history && !history->empty()) {
         doc["history"] = *history;
     }
@@ -217,6 +247,33 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
             f.seed = Point{seed.at(0).get<double>(), seed.at(1).get<double>()};
             f.boundary = j.value("boundary", std::vector<Id>{});
             sketch.insertFill(f);
+        }
+        for (const json& j : doc.value("texts", json::array())) {
+            Text t;
+            t.id = j.at("id").get<Id>();
+            t.anchor = j.at("anchor").get<Id>();
+            t.text = j.value("text", std::string());
+            t.font = j.value("font", std::string());
+            t.bold = j.value("bold", false);
+            t.italic = j.value("italic", false);
+            t.height = j.value("height", 10.0);
+            t.angle = j.value("angle", 0.0);
+            t.minThickness = j.value("min_thickness", 0.0);
+            if (!textOutlineFromString(j.value("outline", std::string("as_designed")), t.outline)) {
+                throw SketchError("unknown text outline '" + j.value("outline", std::string()) + "'");
+            }
+            if (j.contains("color")) {
+                t.hasColor = Color::fromHex(j.at("color").get<std::string>(), t.color);
+            }
+            for (const json& contour : j.value("shape", json::array())) {
+                const std::vector<double> flat = contour.get<std::vector<double>>();
+                std::vector<Point> points;
+                for (size_t i = 0; i + 1 < flat.size(); i += 2) {
+                    points.push_back({flat[i], flat[i + 1]});
+                }
+                t.shape.push_back(std::move(points));
+            }
+            sketch.insertText(t);
         }
         if (history) {
             *history = doc.value("history", std::vector<std::string>{});

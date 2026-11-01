@@ -1,5 +1,7 @@
 #include "Editor.h"
 
+#include "TextShapes.h"
+
 #include <core/Regions.h>
 #include <core/Serialize.h>
 
@@ -33,6 +35,9 @@ QString Editor::name(const core::Sketch& s, Id id)
     }
     if (s.hasFill(id)) {
         return QStringLiteral("f%1").arg(id);
+    }
+    if (s.hasText(id)) {
+        return QStringLiteral("t%1").arg(id);
     }
     if (s.hasEntity(id)) {
         switch (s.entity(id).kind()) {
@@ -479,6 +484,69 @@ void Editor::clearStroke(const std::vector<Id>& curves)
         m_sketch.clearStroke(c);
     }
     log(QStringLiteral("s.clear_stroke(%1)").arg(list(m_sketch, curves)));
+}
+
+namespace
+{
+// A Python string literal.
+QString pyString(const std::string& text)
+{
+    QString out = QStringLiteral("\"");
+    for (const QChar ch : QString::fromStdString(text)) {
+        if (ch == QLatin1Char('\\') || ch == QLatin1Char('"')) {
+            out += QLatin1Char('\\');
+        }
+        if (ch == QLatin1Char('\n')) {
+            out += QStringLiteral("\\n");
+            continue;
+        }
+        out += ch;
+    }
+    return out + QLatin1Char('"');
+}
+
+// The settings of a text as Python keyword arguments (leaving out the defaults).
+QString textArgs(const core::Text& t)
+{
+    QStringList args;
+    args << QStringLiteral("height=") + Editor::number(t.height);
+    args << QStringLiteral("font=") + pyString(t.font);
+    if (t.angle != 0.0) {
+        args << QStringLiteral("angle=") + Editor::number(t.angle);
+    }
+    if (t.bold) {
+        args << QStringLiteral("bold=True");
+    }
+    if (t.italic) {
+        args << QStringLiteral("italic=True");
+    }
+    if (t.outline != core::TextOutline::AsDesigned) {
+        args << QStringLiteral("outline=\"%1\"").arg(QString::fromLatin1(core::toString(t.outline)));
+    }
+    if (t.minThickness > 0.0) {
+        args << QStringLiteral("min_thickness=") + Editor::number(t.minThickness);
+    }
+    if (t.hasColor) {
+        args << QStringLiteral("color=\"%1\"").arg(QString::fromStdString(t.color.hex()));
+    }
+    return args.join(QStringLiteral(", "));
+}
+}  // namespace
+
+Id Editor::text(core::Text t)
+{
+    textshapes::update(t);
+    const Id id = m_sketch.addText(t);
+    log(QStringLiteral("%1 = s.text(%2, %3, %4)")
+            .arg(name(m_sketch, id), pyString(t.text), name(m_sketch, t.anchor), textArgs(t)));
+    return id;
+}
+
+void Editor::setText(core::Text t)
+{
+    textshapes::update(t);
+    m_sketch.setText(t);
+    log(QStringLiteral("s.edit_text(%1, text=%2, %3)").arg(name(m_sketch, t.id), pyString(t.text), textArgs(t)));
 }
 
 Id Editor::fill(core::Vec2 at, const core::Color& color)

@@ -15,6 +15,7 @@ enum class ToolKind
     Select,
     Line,
     Point,
+    Text,
     Rectangle,
     Rectangle3Point,
     RectangleCenter,

@@ -643,6 +643,18 @@ void Sketch::remove(Id id)
     if (m_constraints.erase(id) > 0 || m_fills.erase(id) > 0) {
         return;
     }
+    if (auto t = m_texts.find(id); t != m_texts.end()) {
+        // The text, and its anchor too unless something else is built on it.
+        const Id anchor = t->second.anchor;
+        m_texts.erase(t);
+        const bool constrained = std::ranges::any_of(m_constraints, [&](const auto& kv) {
+            return std::ranges::find(kv.second.refs, anchor) != kv.second.refs.end();
+        });
+        if (hasEntity(anchor) && !isReference(anchor) && !isPointUsed(anchor) && !constrained) {
+            remove(anchor);
+        }
+        return;
+    }
     if (!hasEntity(id)) {
         throw SketchError("unknown id " + std::to_string(id));
     }
@@ -686,6 +698,7 @@ void Sketch::remove(Id id)
         m_entities.erase(d);
         m_strokes.erase(d);
     }
+    std::erase_if(m_texts, [&](const auto& kv) { return doomed.contains(kv.second.anchor); });
     std::erase_if(m_constraints, [&](const auto& kv) {
         return std::ranges::any_of(kv.second.refs, [&](Id r) { return doomed.contains(r); });
     });
@@ -792,7 +805,95 @@ const Fill& Sketch::fill(Id id) const
 
 bool Sketch::isPointUsed(Id point) const
 {
-    return std::ranges::any_of(m_entities, [&](const auto& kv) { return referencesPoint(kv.second, point); });
+    return std::ranges::any_of(m_entities, [&](const auto& kv) { return referencesPoint(kv.second, point); })
+        || std::ranges::any_of(m_texts, [&](const auto& kv) { return kv.second.anchor == point; });
+}
+
+// --- texts ---
+
+const char* toString(TextOutline outline)
+{
+    switch (outline) {
+        case TextOutline::AsDesigned: return "as_designed";
+        case TextOutline::Merged: return "merged";
+        case TextOutline::Silhouette: return "silhouette";
+    }
+    return "?";
+}
+
+bool textOutlineFromString(const std::string& name, TextOutline& out)
+{
+    for (TextOutline o : {TextOutline::AsDesigned, TextOutline::Merged, TextOutline::Silhouette}) {
+        if (name == toString(o)) {
+            out = o;
+            return true;
+        }
+    }
+    return false;
+}
+
+Point textToWorld(const Point& anchor, double angleDeg, const Point& local)
+{
+    const double a = angleDeg * std::numbers::pi / 180.0;
+    const double c = std::cos(a), s = std::sin(a);
+    return {anchor.x + c * local.x - s * local.y, anchor.y + s * local.x + c * local.y};
+}
+
+namespace
+{
+void checkText(const Sketch& s, const Text& t)
+{
+    if (!s.hasEntity(t.anchor) || s.entity(t.anchor).kind() != EntityKind::Point) {
+        throw SketchError("text: its anchor must be a point");
+    }
+    if (!(t.height > 0.0) || !std::isfinite(t.height)) {
+        throw SketchError("text: the height must be positive");
+    }
+    if (!(t.minThickness >= 0.0) || !std::isfinite(t.minThickness)) {
+        throw SketchError("text: the minimum thickness can't be negative");
+    }
+    if (!std::isfinite(t.angle)) {
+        throw SketchError("text: the angle must be a number");
+    }
+}
+}  // namespace
+
+Id Sketch::addText(const Text& text)
+{
+    checkText(*this, text);
+    Text t = text;
+    t.id = nextId();
+    m_texts.emplace(t.id, std::move(t));
+    return m_nextId - 1;
+}
+
+void Sketch::setText(const Text& text)
+{
+    auto it = m_texts.find(text.id);
+    if (it == m_texts.end()) {
+        throw SketchError("unknown text " + std::to_string(text.id));
+    }
+    checkText(*this, text);
+    it->second = text;
+}
+
+void Sketch::insertText(const Text& text)
+{
+    if (text.id == kNoId || hasEntity(text.id) || hasConstraint(text.id) || hasFill(text.id) || hasText(text.id)) {
+        throw SketchError("duplicate or invalid id " + std::to_string(text.id));
+    }
+    checkText(*this, text);
+    m_texts.emplace(text.id, text);
+    m_nextId = std::max(m_nextId, text.id + 1);
+}
+
+const Text& Sketch::text(Id id) const
+{
+    auto it = m_texts.find(id);
+    if (it == m_texts.end()) {
+        throw SketchError("unknown text " + std::to_string(id));
+    }
+    return it->second;
 }
 
 bool Sketch::removeIfUnused(Id point)
@@ -824,6 +925,7 @@ void Sketch::clear()
     m_constraints.clear();
     m_strokes.clear();
     m_fills.clear();
+    m_texts.clear();
     m_origin = kNoId;
     m_axes = {kNoId, kNoId};
     m_axisEnds = {kNoId, kNoId};

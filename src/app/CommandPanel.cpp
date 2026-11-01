@@ -162,6 +162,12 @@ QCheckBox* CommandPanel::addCheck(const QString& label, const char* name, bool c
     return box;
 }
 
+void CommandPanel::addWidget(const QString& label, QWidget* input)
+{
+    input->setParent(this);
+    addRow(label, input);
+}
+
 void CommandPanel::addButtons()
 {
     auto* row = new QWidget(this);

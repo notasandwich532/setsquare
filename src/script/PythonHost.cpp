@@ -8,6 +8,7 @@
 
 #include "Document.h"
 #include "Editor.h"
+#include "TextShapes.h"
 
 #include <core/Dimensions.h>
 #include <core/Export.h>
@@ -108,6 +109,8 @@ struct ConstraintH : Item
 {};
 struct FillH : Item
 {};
+struct TextH : Item
+{};
 
 const core::Entity& entity(Id id)
 {
@@ -133,6 +136,9 @@ py::object wrap(Id id)
     }
     if (s.hasFill(id)) {
         return py::cast(FillH{{id}});
+    }
+    if (s.hasText(id)) {
+        return py::cast(TextH{{id}});
     }
     switch (entity(id).kind()) {
         case EntityKind::Point: return py::cast(PointH{{id}});
@@ -679,6 +685,62 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
             return "<Fill f" + std::to_string(f.id) + " " + sketch().fill(f.id).color.hex() + ">";
         });
 
+    auto textOf = [](Id id) -> const core::Text& {
+        if (!sketch().hasText(id)) {
+            throw py::value_error("text " + std::to_string(id) + " no longer exists");
+        }
+        return sketch().text(id);
+    };
+    py::class_<TextH, Item>(m, "Text", "Text in the drawing (see Sketch.text); change it with Sketch.edit_text.")
+        .def_property_readonly("text", [textOf](const TextH& t) { return textOf(t.id).text; })
+        .def_property_readonly("font", [textOf](const TextH& t) { return textOf(t.id).font; })
+        .def_property_readonly("height", [textOf](const TextH& t) { return textOf(t.id).height; },
+                               "Capital letter height, mm.")
+        .def_property_readonly("angle", [textOf](const TextH& t) { return textOf(t.id).angle; })
+        .def_property_readonly("bold", [textOf](const TextH& t) { return textOf(t.id).bold; })
+        .def_property_readonly("italic", [textOf](const TextH& t) { return textOf(t.id).italic; })
+        .def_property_readonly("outline", [textOf](const TextH& t) { return std::string(core::toString(textOf(t.id).outline)); },
+                               "'as_designed', 'merged' or 'silhouette'.")
+        .def_property_readonly("min_thickness", [textOf](const TextH& t) { return textOf(t.id).minThickness; })
+        .def_property_readonly("color", [textOf](const TextH& t) -> py::object {
+            const core::Text& text = textOf(t.id);
+            return text.hasColor ? py::cast(text.color.hex()) : py::none();
+        })
+        .def_property_readonly("anchor", [textOf](const TextH& t) { return wrap(textOf(t.id).anchor); },
+                               "The point at the start of its baseline.")
+        .def_property_readonly("contours", [textOf](const TextH& t) {
+            py::list out;
+            const core::Text& text = textOf(t.id);
+            const core::Point& anchor = sketch().point(text.anchor);
+            for (const auto& contour : text.shape) {
+                py::list pts;
+                for (const core::Point& p : contour) {
+                    const core::Point w = core::textToWorld(anchor, text.angle, p);
+                    pts.append(py::make_tuple(w.x, w.y));
+                }
+                out.append(pts);
+            }
+            return out;
+        }, "The outline of its letters: closed loops of (x, y) where they are now.")
+        .def_property_readonly("bounds", [textOf](const TextH& t) {
+            const core::Text& text = textOf(t.id);
+            const core::Point& anchor = sketch().point(text.anchor);
+            double x0 = 1e300, y0 = 1e300, x1 = -1e300, y1 = -1e300;
+            for (const auto& contour : text.shape) {
+                for (const core::Point& p : contour) {
+                    const core::Point w = core::textToWorld(anchor, text.angle, p);
+                    x0 = std::min(x0, w.x), y0 = std::min(y0, w.y), x1 = std::max(x1, w.x), y1 = std::max(y1, w.y);
+                }
+            }
+            return py::make_tuple(x0, y0, x1, y1);
+        }, "(x0, y0, x1, y1) round its letters.")
+        .def("__repr__", [](const TextH& t) {
+            if (!sketch().hasText(t.id)) {
+                return "<Text " + std::to_string(t.id) + " (deleted)>";
+            }
+            return "<Text t" + std::to_string(t.id) + " \"" + sketch().text(t.id).text + "\">";
+        });
+
     // --- solve status ------------------------------------------------------------------------
 
     py::class_<core::SolveResult>(m, "SolveResult")
@@ -1060,6 +1122,71 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
         }, py::arg("at"), py::arg("color") = "#c3c3c3",
            "Fill the closed area around `at` (as a paint bucket would; a fill already there is recoloured). "
            "Raises ValueError if `at` isn't enclosed: see loose_ends().")
+        .def("text", [](const SketchH&, const std::string& text, py::handle at, double height, py::object font,
+                        double angle, bool bold, bool italic, const std::string& outline, double minThickness,
+                        py::object color) {
+            core::Text t;
+            t.text = text;
+            t.font = font.is_none() ? textshapes::defaultFamily().toStdString() : font.cast<std::string>();
+            t.height = height;
+            t.angle = angle;
+            t.bold = bold;
+            t.italic = italic;
+            if (!core::textOutlineFromString(outline, t.outline)) {
+                throw py::value_error("outline: 'as_designed', 'merged' or 'silhouette'");
+            }
+            t.minThickness = minThickness;
+            if (!color.is_none()) {
+                t.hasColor = true;
+                t.color = colorArg(color);
+            }
+            return wrap(editReturningId("Text", [&](Editor& ed) {
+                t.anchor = pointArg(ed, at);
+                return ed.text(t);
+            }));
+        }, py::arg("text"), py::arg("at"), py::arg("height") = 10.0, py::arg("font") = py::none(),
+           py::arg("angle") = 0.0, py::arg("bold") = false, py::arg("italic") = false,
+           py::arg("outline") = "as_designed", py::arg("min_thickness") = 0.0, py::arg("color") = py::none(),
+           "Text with its baseline starting at `at` (a point, or (x, y) for a new one). height: capital letters, "
+           "mm. outline: 'as_designed', 'merged' (overlaps joined) or 'silhouette' (outside edge only). "
+           "min_thickness: thicken any part narrower than this (mm). color: fill it in the drawing.")
+        .def("edit_text", [](const SketchH&, py::handle text, py::object str, py::object height, py::object font,
+                             py::object angle, py::object bold, py::object italic, py::object outline,
+                             py::object minThickness, py::object color) {
+            const Id id = idOf(text);
+            if (!sketch().hasText(id)) {
+                throw py::value_error("not a text");
+            }
+            core::Text t = sketch().text(id);
+            if (!str.is_none()) t.text = str.cast<std::string>();
+            if (!height.is_none()) t.height = height.cast<double>();
+            if (!font.is_none()) t.font = font.cast<std::string>();
+            if (!angle.is_none()) t.angle = angle.cast<double>();
+            if (!bold.is_none()) t.bold = bold.cast<bool>();
+            if (!italic.is_none()) t.italic = italic.cast<bool>();
+            if (!outline.is_none() && !core::textOutlineFromString(outline.cast<std::string>(), t.outline)) {
+                throw py::value_error("outline: 'as_designed', 'merged' or 'silhouette'");
+            }
+            if (!minThickness.is_none()) t.minThickness = minThickness.cast<double>();
+            if (!color.is_none()) {
+                t.hasColor = true;
+                t.color = colorArg(color);
+            }
+            editReturningId("Text", [&](Editor& ed) {
+                ed.setText(t);
+                return id;
+            });
+        }, py::arg("text_item"), py::arg("text") = py::none(), py::arg("height") = py::none(),
+           py::arg("font") = py::none(), py::arg("angle") = py::none(), py::arg("bold") = py::none(),
+           py::arg("italic") = py::none(), py::arg("outline") = py::none(), py::arg("min_thickness") = py::none(),
+           py::arg("color") = py::none(), "Change a text's settings (any of them); its letters are remade.")
+        .def_property_readonly("texts", [](const SketchH&) {
+            std::vector<Id> ids;
+            for (const auto& [id, t] : sketch().texts()) {
+                ids.push_back(id);
+            }
+            return wrapAll(ids);
+        })
         .def_property_readonly("fills", [](const SketchH&) {
             std::vector<Id> ids;
             for (const auto& [id, f] : sketch().fills()) {
@@ -1366,6 +1493,13 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
     py::class_<AppH>(m, "App")
         .def_property_readonly("has_ui", [](const AppH&) { return static_cast<bool>(g_ui.fit); })
         .def("fit", [](const AppH&) { ui().fit(); }, "Zoom to show the whole drawing.")
+        .def("fonts", [](const AppH&, const std::string& search) {
+            std::vector<std::string> out;
+            for (const QString& f : textshapes::families(QString::fromStdString(search))) {
+                out.push_back(f.toStdString());
+            }
+            return out;
+        }, py::arg("search") = "", "Installed font families whose names contain `search` (any case).")
         .def_property(
             "selection", [](const AppH&) {
                 const auto ids = ui().selection();

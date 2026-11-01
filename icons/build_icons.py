@@ -360,7 +360,18 @@ def icon_select():
     return finish("select")
 
 
+def icon_text():
+    """A letter, made by the Text tool, on its click point."""
+    start()
+    at = s.point(4.2, 3)
+    pin(at, 4.2, 3)
+    s.text("A", at, height=17, font="Arial", bold=True, outline="merged", color=GREY)
+    marker(at)
+    return finish("text")
+
+
 def icon_line():
+
     start()
     l = line((4, 5), (20, 19), GREY)
     pin(l.p1, 4, 5)
@@ -1019,7 +1030,7 @@ ICONS = {
 }
 ICONS.update({
     f.__name__.removeprefix("icon_"): f
-    for f in [icon_select, icon_line, icon_point, icon_rectangle, icon_rectangle_3point, icon_rectangle_center, icon_circle,
+    for f in [icon_select, icon_text, icon_line, icon_point, icon_rectangle, icon_rectangle_3point, icon_rectangle_center, icon_circle,
               icon_circle_2point, icon_circle_3point, icon_circle_tangent2, icon_circle_tangent3, icon_arc, icon_arc3,
               icon_arc_tangent, icon_polygon_inscribed, icon_polygon_circumscribed, icon_polygon_edge, icon_slot,
               icon_slot_overall, icon_slot_center_point, icon_arc_slot, icon_arc_slot_3point, icon_trim,

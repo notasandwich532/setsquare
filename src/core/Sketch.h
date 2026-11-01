@@ -153,6 +153,42 @@ struct Fill
     std::vector<Id> boundary;  // the curves around it when it was last found (sorted)
 };
 
+// Text in the drawing, anchored at a point (the start of its baseline), so it can be constrained
+// and dragged like any other geometry. The letter shapes come from the font through the app (they
+// need Qt) and are kept here as outlines, so the core can draw, save and export text without
+// fonts, and a file opens with its text where the font isn't installed.
+enum class TextOutline
+{
+    AsDesigned,  // the font's own contours, overlaps and all
+    Merged,      // overlapping strokes joined into one outline (holes like an "o" kept)
+    Silhouette,  // only the outside edge: nothing inside the letters at all
+};
+const char* toString(TextOutline outline);
+bool textOutlineFromString(const std::string& name, TextOutline& out);
+
+struct Text
+{
+    Id id = kNoId;
+    Id anchor = kNoId;  // a point: the left end of the baseline
+    std::string text;
+    std::string font;  // family
+    bool bold = false;
+    bool italic = false;
+    double height = 10.0;  // capital letter height, mm
+    double angle = 0.0;    // degrees, baseline direction from +x
+    TextOutline outline = TextOutline::AsDesigned;
+    double minThickness = 0.0;  // mm; 0 = as the font has it
+    bool hasColor = false;
+    Color color;  // when set: filled in this colour in the drawing (else like plain geometry)
+
+    // The letters: closed contours in text space (mm; x along the baseline from the anchor, y
+    // up), filled by the non-zero winding rule. Made by the app from the settings above.
+    std::vector<std::vector<Point>> shape;
+};
+
+// The world position of a point in a text's own space.
+Point textToWorld(const Point& anchor, double angleDeg, const Point& local);
+
 // ---------------------------------------------------------------------------------------------
 // Sketch: owns geometry and constraints. Solving lives in Solver.
 // ---------------------------------------------------------------------------------------------
@@ -215,6 +251,15 @@ public:
     bool hasFill(Id id) const { return m_fills.contains(id); }
     const Fill& fill(Id id) const;
     const std::map<Id, Fill>& fills() const { return m_fills; }
+
+    // Texts share the id space too. Removing a text's anchor point removes the text; remove()
+    // deletes a text (and its anchor, if nothing else uses it).
+    Id addText(const Text& text);     // text.id is ignored; returns the new id
+    void setText(const Text& text);   // replaces an existing text (by id)
+    void insertText(const Text& text);  // with its id (loading)
+    bool hasText(Id id) const { return m_texts.contains(id); }
+    const Text& text(Id id) const;
+    const std::map<Id, Text>& texts() const { return m_texts; }
 
     // --- origin and axes ---
     // A fixed point at (0, 0) plus fixed X and Y axis lines through it, which geometry can snap
@@ -287,6 +332,7 @@ private:
     std::map<Id, Constraint> m_constraints;
     std::map<Id, StrokeStyle> m_strokes;
     std::map<Id, Fill> m_fills;
+    std::map<Id, Text> m_texts;
     Id m_nextId = 1;
     Id m_origin = kNoId;
     std::array<Id, 2> m_axes{kNoId, kNoId};

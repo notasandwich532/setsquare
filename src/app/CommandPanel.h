@@ -50,6 +50,7 @@ public:
     QCheckBox* addCheck(const QString& label, const char* name, bool checked);
     QLineEdit* addText(const QString& label, const char* name, const QString& text,
                        const QString& placeholder = {});
+    void addWidget(const QString& label, QWidget* input);  // any other input (owned by the panel)
     void addButtons();  // OK and Cancel
     void setRowVisible(QWidget* input, bool visible);
 

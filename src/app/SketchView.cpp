@@ -9,6 +9,7 @@
 #include "tools/SelectTool.h"
 #include "tools/ShapeTools.h"
 #include "tools/StyleTools.h"
+#include "tools/TextTool.h"
 #include "tools/TransformTools.h"
 
 #include <QDoubleSpinBox>
@@ -131,6 +132,7 @@ void SketchView::setTool(ToolKind kind)
         case ToolKind::ArcCenter: m_tool = std::make_unique<CenterArcTool>(*this); break;
         case ToolKind::Arc3Point: m_tool = std::make_unique<ThreePointArcTool>(*this); break;
         case ToolKind::Point: m_tool = std::make_unique<PointTool>(*this); break;
+        case ToolKind::Text: m_tool = std::make_unique<TextTool>(*this, std::exchange(m_editFeature, core::kNoId)); break;
         case ToolKind::Rectangle3Point: m_tool = std::make_unique<Rectangle3Tool>(*this); break;
         case ToolKind::RectangleCenter: m_tool = std::make_unique<RectangleCenterTool>(*this); break;
         case ToolKind::Circle2Point: m_tool = std::make_unique<Circle2Tool>(*this); break;
@@ -269,6 +271,67 @@ void SketchView::setPaint(const Paint& paint)
     emit paintChanged();
 }
 
+QPainterPath SketchView::textPath(const core::Text& t) const
+{
+    QPainterPath path;
+    path.setFillRule(Qt::WindingFill);
+    const core::Sketch& s = m_doc.sketch();
+    if (!s.hasEntity(t.anchor)) {
+        return path;
+    }
+    const core::Point& anchor = s.point(t.anchor);
+    for (const auto& contour : t.shape) {
+        QPolygonF polygon;
+        for (const core::Point& p : contour) {
+            const core::Point w = core::textToWorld(anchor, t.angle, p);
+            polygon << toScreen({w.x, w.y});
+        }
+        path.addPolygon(polygon);
+        path.closeSubpath();
+    }
+    return path;
+}
+
+QPolygonF SketchView::textBox(const core::Text& t) const
+{
+    // Round its letters (in its own direction), or a small box at the anchor if it has none.
+    double x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+    bool any = false;
+    for (const auto& contour : t.shape) {
+        for (const core::Point& p : contour) {
+            x0 = any ? std::min(x0, p.x) : p.x;
+            y0 = any ? std::min(y0, p.y) : p.y;
+            x1 = any ? std::max(x1, p.x) : p.x;
+            y1 = any ? std::max(y1, p.y) : p.y;
+            any = true;
+        }
+    }
+    if (!any) {
+        x1 = t.height;
+        y1 = t.height;
+    }
+    const core::Sketch& s = m_doc.sketch();
+    const core::Point& anchor = s.point(t.anchor);
+    QPolygonF box;
+    for (const core::Point corner : {core::Point{x0, y0}, core::Point{x1, y0}, core::Point{x1, y1}, core::Point{x0, y1}}) {
+        const core::Point w = core::textToWorld(anchor, t.angle, corner);
+        box << toScreen({w.x, w.y});
+    }
+    return box;
+}
+
+core::Id SketchView::textAt(QPointF screen) const
+{
+    const core::Sketch& s = m_doc.sketch();
+    core::Id found = core::kNoId;
+    for (const auto& [id, t] : s.texts()) {  // the topmost (last) wins
+        if (s.hasEntity(t.anchor) && textBox(t).containsPoint(screen, Qt::OddEvenFill)) {
+            found = id;
+        }
+    }
+    return found;
+}
+
 QPainterPath SketchView::regionPath(const core::regions::Region& region) const
 {
     QPainterPath path;
@@ -350,7 +413,8 @@ core::Id SketchView::pickAt(QPointF screen, bool annotations) const
             }
         }
     }
-    return core::pick(m_doc.sketch(), toWorld(screen), options);
+    const core::Id hit = core::pick(m_doc.sketch(), toWorld(screen), options);
+    return hit != core::kNoId ? hit : textAt(screen);  // geometry first, then text under it
 }
 
 Snap SketchView::snap(QPointF screen) const
@@ -430,7 +494,8 @@ void SketchView::deleteSelection()
     }
     tryEdit(tr("Delete"), [&](Editor& ed) {
         for (core::Id id : doomed) {
-            if (ed.sketch().hasEntity(id) || ed.sketch().hasConstraint(id)) {
+            const core::Sketch& s = ed.sketch();
+            if (s.hasEntity(id) || s.hasConstraint(id) || s.hasText(id) || s.hasFill(id)) {
                 ed.remove(id);  // may already be gone via an earlier cascade
             }
         }
@@ -459,6 +524,17 @@ void SketchView::fitAll()
         if (core::isDimension(c.type)) {
             if (const core::DimensionLayout L = core::layoutDimension(s, c); L.valid) {
                 include(L.label);  // dimensions often sit outside the geometry
+            }
+        }
+    }
+    for (const auto& [id, t] : s.texts()) {
+        if (!s.hasEntity(t.anchor)) {
+            continue;
+        }
+        for (const auto& contour : t.shape) {
+            for (const core::Point& p : contour) {
+                const core::Point w = core::textToWorld(s.point(t.anchor), t.angle, p);
+                include({w.x, w.y});
             }
         }
     }
@@ -785,6 +861,33 @@ void SketchView::drawSketch(QPainter& painter) const
         painter.setPen(pen);
         drawCurve(id, sketch.entity(id));
         decorated.insert(id);
+    }
+
+    // Texts: filled faintly with an outline while sketching (in their anchor's colour, or their
+    // own), solid in presentation view.
+    for (const auto& [id, t] : sketch.texts()) {
+        if (!sketch.hasEntity(t.anchor)) {
+            continue;
+        }
+        const QPainterPath path = textPath(t);
+        QColor color = t.hasColor ? QColor(t.color.r, t.color.g, t.color.b, t.color.a)
+                                  : styleFor(sketch.entity(t.anchor)).color();
+        if (m_presentation) {
+            if (!t.hasColor) {
+                color = colors.fullyConstrained;  // as plain geometry shows
+            }
+            painter.fillPath(path, color);
+            if (m_selection.contains(id) || id == m_hovered) {
+                painter.strokePath(path, QPen(m_selection.contains(id) ? colors.selection : colors.hover, 1.0));
+            }
+            continue;
+        }
+        QColor faint = color;
+        faint.setAlphaF(faint.alphaF() * 0.3);
+        painter.fillPath(path, faint);
+        const bool hot = m_selection.contains(id) || id == m_hovered;
+        const QColor edge = m_selection.contains(id) ? colors.selection : id == m_hovered ? colors.hover : color;
+        painter.strokePath(path, QPen(edge, hot ? kHighlightWidth : 1.0));
     }
 
     // Curves first, points on top.

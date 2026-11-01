@@ -82,7 +82,12 @@ void SelectTool::startDrag()
         return;
     }
 
-    const core::EntityKind kind = sketch.entity(m_pressed).kind();
+    if (!sketch.hasEntity(m_pressed) && !sketch.hasText(m_pressed)) {
+        m_state = State::Idle;
+        return;
+    }
+    const core::EntityKind kind =
+        sketch.hasText(m_pressed) ? core::EntityKind::Point : sketch.entity(m_pressed).kind();  // (text: its anchor)
     const bool round = kind == core::EntityKind::Circle || kind == core::EntityKind::Arc;
 
     if (round && selection.size() <= 1) {
@@ -97,6 +102,9 @@ void SelectTool::startDrag()
                 for (core::Id p : sketch.definingPoints(id)) {
                     points.insert(p);
                 }
+            }
+            else if (sketch.hasText(id)) {
+                points.insert(sketch.text(id).anchor);  // a text moves by its anchor
             }
         }
         doc().beginDrag({points.begin(), points.end()});
@@ -152,6 +160,10 @@ void SelectTool::doubleClick(const ToolEvent& e)
 {
     const core::Id hit = view().pickAt(e.screen);
     const core::Sketch& sketch = doc().sketch();
+    if (sketch.hasText(hit)) {
+        view().editText(hit);
+        return;
+    }
     if (!sketch.hasConstraint(hit)) {
         return;
     }

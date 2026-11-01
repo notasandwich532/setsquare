@@ -529,6 +529,14 @@ void SketchView::editDimension(Id id)
     editValue(id, toScreen(core::layoutDimension(s, s.constraint(id)).label));
 }
 
+void SketchView::editText(Id id)
+{
+    if (m_doc.sketch().hasText(id)) {
+        m_editFeature = id;
+        setTool(ToolKind::Text);
+    }
+}
+
 void SketchView::editFeature(Id id)
 {
     const core::Sketch& s = m_doc.sketch();

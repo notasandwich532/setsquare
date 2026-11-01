@@ -23,7 +23,7 @@ const ToolKind kCreateTools[] = {
     ToolKind::CircleTangent2, ToolKind::CircleTangent3, ToolKind::ArcCenter,           ToolKind::Arc3Point,
     ToolKind::ArcTangent,     ToolKind::PolygonInscribed, ToolKind::PolygonCircumscribed, ToolKind::PolygonEdge,
     ToolKind::SlotCenterToCenter, ToolKind::SlotOverall, ToolKind::SlotCenterPoint,    ToolKind::SlotArc3Point,
-    ToolKind::SlotArcCenter, ToolKind::Select};
+    ToolKind::SlotArcCenter, ToolKind::Select, ToolKind::Text};
 
 const ToolKind kModifyTools[] = {
     ToolKind::Trim,         ToolKind::TrimToConstruction, ToolKind::Extend,        ToolKind::Break,

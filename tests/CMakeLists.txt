@@ -20,6 +20,7 @@ add_executable(core_tests
     core/test_sketch.cpp
     core/test_solver.cpp
     core/test_style.cpp
+    core/test_text.cpp
 )
 target_link_libraries(core_tests PRIVATE drawcore planegcs Catch2::Catch2WithMain)
 set_target_properties(core_tests PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
@@ -38,6 +39,7 @@ add_executable(app_tests
     app/test_scripting.cpp
     app/test_shape_tools.cpp
     app/test_style_tools.cpp
+    app/test_text.cpp
     app/test_tools.cpp
     app/test_transform_tools.cpp
 )
