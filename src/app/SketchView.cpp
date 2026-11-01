@@ -170,6 +170,9 @@ void SketchView::setTool(ToolKind kind)
             m_tool = std::make_unique<CircularPatternTool>(*this, std::exchange(m_editFeature, core::kNoId));
             break;
         case ToolKind::Offset: m_tool = std::make_unique<OffsetTool>(*this); break;
+        case ToolKind::Divide:
+            m_tool = std::make_unique<DivideTool>(*this, std::exchange(m_editFeature, core::kNoId));
+            break;
         case ToolKind::Paste: m_tool = std::make_unique<PasteTool>(*this, m_pasteFragment); break;
         case ToolKind::StrokeBrush: m_tool = std::make_unique<StrokeBrushTool>(*this); break;
         case ToolKind::Fill: m_tool = std::make_unique<FillTool>(*this); break;

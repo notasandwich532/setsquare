@@ -108,11 +108,13 @@ enum class ConstraintType
     LinearPattern,    // (sources..., copies...): value = spacing;
                       // params = {count, angle, count2, spacing2, symmetric, symmetric2}
     CircularPattern,  // (centre point, sources..., copies...): value = total angle; params = {count}
+    Divide,           // (line, points...): value = the number of points;
+                      // params = {by ratio, reversed, parts...} (see feature::DivideParams)
 };
 
 const char* toString(ConstraintType type);
 bool isDimension(ConstraintType type);  // a dimension drawn on the canvas
-bool isFeature(ConstraintType type);    // offset or pattern
+bool isFeature(ConstraintType type);    // offset, pattern or divide
 bool hasValue(ConstraintType type);     // dimensions and features
 bool constraintTypeFromString(const std::string& name, ConstraintType& out);
 

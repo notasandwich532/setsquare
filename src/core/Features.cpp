@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <exception>
 #include <functional>
 #include <map>
 #include <numbers>
@@ -382,6 +384,10 @@ Id setCircularPattern(Sketch& s, Id id, const CircularPatternParams& p)
 void placeCopies(Sketch& s, Id id)
 {
     const Constraint& c = s.constraint(id);
+    if (c.type == ConstraintType::Divide) {
+        placeDividePoints(s, id);
+        return;
+    }
     const Pattern p = pattern(c);
     for (size_t k = 0; k < p.copies.size(); ++k) {
         const Affine t = instanceTransform(s, c, k + 1);
@@ -404,6 +410,9 @@ std::vector<Id> sourcePoints(const Sketch& s, const Constraint& c)
     std::vector<Id> sources;
     if (c.type == ConstraintType::Offset) {
         sources = offsetRefs(c).sources;
+    }
+    else if (c.type == ConstraintType::Divide) {
+        sources = {c.refs.front()};
     }
     else {
         const Pattern p = pattern(c);
@@ -669,6 +678,169 @@ Id offset(Sketch& s, const std::vector<Id>& curves, double d, Vec2 toward, bool 
         settings.push_back(double(capArcs.size()));
     }
     return s.addConstraint(ConstraintType::Offset, std::move(refs), d, settings);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Dividing a line
+// ---------------------------------------------------------------------------------------------
+
+namespace
+{
+// params = {byRatio, reversed, parts...}
+std::vector<double> divideParamVector(const DivideParams& p)
+{
+    std::vector<double> out{p.byRatio ? 1.0 : 0.0, p.reversed ? 1.0 : 0.0};
+    out.insert(out.end(), p.parts.begin(), p.parts.end());
+    return out;
+}
+
+void checkParts(const std::vector<double>& parts)
+{
+    if (parts.size() < 2) {
+        throw SketchError("divide: needs at least two parts (one point)");
+    }
+    if (parts.size() > 1001) {
+        throw SketchError("divide: at most 1000 points");
+    }
+    for (double v : parts) {
+        if (!(v > 0.0) || !std::isfinite(v)) {
+            throw SketchError("divide: the parts of the ratio must be positive numbers");
+        }
+    }
+}
+}  // namespace
+
+DivideParams evenly(int points)
+{
+    if (points < 1) {
+        throw SketchError("divide: needs at least one point");
+    }
+    return {std::vector<double>(static_cast<size_t>(points) + 1, 1.0), false, false};
+}
+
+std::vector<double> parseRatio(const std::string& text)
+{
+    std::vector<double> parts;
+    std::string token;
+    auto flush = [&] {
+        if (token.empty()) {
+            return;
+        }
+        size_t used = 0;
+        double v = 0.0;
+        try {
+            v = std::stod(token, &used);
+        }
+        catch (const std::exception&) {
+            used = 0;
+        }
+        if (used != token.size()) {
+            throw SketchError("divide: '" + token + "' isn't a number");
+        }
+        parts.push_back(v);
+        token.clear();
+    };
+    for (char ch : text) {
+        if (ch == ':' || ch == ',' || ch == ' ' || ch == '\t' || ch == '/') {
+            flush();
+        }
+        else {
+            token += ch;
+        }
+    }
+    flush();
+    checkParts(parts);
+    return parts;
+}
+
+std::string ratioText(const std::vector<double>& parts)
+{
+    std::string out;
+    for (double v : parts) {
+        if (!out.empty()) {
+            out += ':';
+        }
+        char buf[32];
+        std::snprintf(buf, sizeof buf, "%g", v);
+        out += buf;
+    }
+    return out;
+}
+
+DivideParams divideParams(const Constraint& c)
+{
+    if (c.type != ConstraintType::Divide) {
+        throw SketchError("not a divide");
+    }
+    return {{c.params.begin() + 2, c.params.end()}, c.params.at(1) != 0.0, c.params.at(0) != 0.0};
+}
+
+std::vector<double> divideFractions(const DivideParams& p)
+{
+    checkParts(p.parts);
+    double total = 0.0;
+    for (double v : p.parts) {
+        total += v;
+    }
+    std::vector<double> out;
+    double run = 0.0;
+    for (size_t i = 0; i + 1 < p.parts.size(); ++i) {
+        run += p.parts[i];
+        const double t = run / total;
+        out.push_back(p.reversed ? 1.0 - t : t);
+    }
+    return out;
+}
+
+Id divide(Sketch& s, Id line, const DivideParams& p)
+{
+    if (!s.hasEntity(line) || s.entity(line).kind() != EntityKind::Line || s.isReference(line)) {
+        throw SketchError("divide: pick a line");
+    }
+    const Line& l = s.line(line);
+    const Vec2 a = at(s, l.p1), b = at(s, l.p2);
+    std::vector<Id> refs{line};
+    for (double t : divideFractions(p)) {
+        const Vec2 q = a + t * (b - a);
+        refs.push_back(s.addPoint(q.x, q.y));
+    }
+    const double count = double(refs.size() - 1);
+    return s.addConstraint(ConstraintType::Divide, std::move(refs), count, divideParamVector(p));
+}
+
+Id setDivide(Sketch& s, Id id, const DivideParams& p)
+{
+    const Constraint& c = s.constraint(id);
+    if (c.type != ConstraintType::Divide) {
+        throw SketchError("not a divide");
+    }
+    checkParts(p.parts);
+    if (p.parts.size() == c.refs.size()) {  // as many points (refs: the line, then the points)
+        s.setConstraintParams(id, divideParamVector(p));
+        placeDividePoints(s, id);
+        return id;
+    }
+    const Id line = c.refs.front();
+    const std::vector<Id> old(c.refs.begin() + 1, c.refs.end());
+    s.remove(id);
+    for (Id point : old) {
+        if (s.hasEntity(point)) {
+            s.remove(point);
+        }
+    }
+    return divide(s, line, p);
+}
+
+void placeDividePoints(Sketch& s, Id id)
+{
+    const Constraint& c = s.constraint(id);
+    const Line& l = s.line(c.refs.front());
+    const Vec2 a = at(s, l.p1), b = at(s, l.p2);
+    const std::vector<double> t = divideFractions(divideParams(c));
+    for (size_t i = 0; i < t.size(); ++i) {
+        const Vec2 q = a + t[i] * (b - a);
+        s.point(c.refs[i + 1]) = Point{q.x, q.y};
+    }
 }
 
 }  // namespace core::feature

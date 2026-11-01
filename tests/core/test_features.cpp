@@ -505,3 +505,91 @@ TEST_CASE("Offset a circle", "[offset]")
     CHECK(solveClean(s).dof == 3);
     CHECK_THROWS_AS(feature::offset(s, {c}, 12, {0, 0}), SketchError);
 }
+
+// --- dividing a line ---
+
+TEST_CASE("Divide: a ratio's parts are the gaps from the start, biggest first for 3:2:1", "[features][divide]")
+{
+    CHECK(feature::parseRatio("3:2:1") == std::vector<double>{3, 2, 1});
+    CHECK(feature::parseRatio(" 1, 2.5 ,1 ") == std::vector<double>{1, 2.5, 1});
+    CHECK(feature::ratioText({3, 2, 1}) == "3:2:1");
+    CHECK_THROWS_AS(feature::parseRatio("3"), SketchError);       // no point
+    CHECK_THROWS_AS(feature::parseRatio("3:0:1"), SketchError);   // a gap of nothing
+    CHECK_THROWS_AS(feature::parseRatio("3:-1"), SketchError);
+    CHECK_THROWS_AS(feature::parseRatio("3:two"), SketchError);
+
+    feature::DivideParams p{{3, 2, 1}, false, true};
+    auto t = feature::divideFractions(p);
+    REQUIRE(t.size() == 2);
+    CHECK(t[0] == Approx(0.5));
+    CHECK(t[1] == Approx(5.0 / 6.0));
+    p.reversed = true;
+    t = feature::divideFractions(p);
+    CHECK(t[0] == Approx(0.5));
+    CHECK(t[1] == Approx(1.0 / 6.0));
+
+    t = feature::divideFractions(feature::evenly(3));
+    CHECK(t == std::vector<double>{0.25, 0.5, 0.75});
+}
+
+TEST_CASE("Divide: the points stay at their fractions as the line moves, adding no freedom", "[features][divide]")
+{
+    Sketch s;
+    const Id l = s.addLine(0, 0, 60, 0);
+    const Id k = feature::divide(s, l, {{3, 2, 1}, false, true});
+    const Constraint c = s.constraint(k);
+    REQUIRE(c.refs.size() == 3);
+    CHECK(c.value == 2.0);
+    CHECK(solveClean(s).dof == 4);  // just the line's
+
+    // Fix the line's ends somewhere else: the points follow.
+    const Line line = s.line(l);
+    s.point(line.p1) = Point{6, 12};
+    s.point(line.p2) = Point{36, 42};
+    s.entity(line.p1).fixed = true;
+    s.entity(line.p2).fixed = true;
+    CHECK(solveClean(s).dof == 0);
+    CHECK(at(s, c.refs[1]).x == Approx(21.0).margin(1e-7));  // halfway
+    CHECK(at(s, c.refs[1]).y == Approx(27.0).margin(1e-7));
+    CHECK(at(s, c.refs[2]).x == Approx(31.0).margin(1e-7));  // five sixths
+    CHECK(at(s, c.refs[2]).y == Approx(37.0).margin(1e-7));
+}
+
+TEST_CASE("Divide: changing the spacing moves the points; a new count makes new ones", "[features][divide]")
+{
+    Sketch s;
+    const Id l = s.addLine(0, 0, 12, 0);
+    const Id k = feature::divide(s, l, feature::evenly(1));
+    const Id point = s.constraint(k).refs[1];
+    CHECK(at(s, point).x == Approx(6.0));
+
+    CHECK(feature::setDivide(s, k, {{1, 2}, true, true}) == k);  // still one point: same feature
+    CHECK(at(s, point).x == Approx(8.0));  // a third of the way from the end
+    CHECK(solveClean(s).dof == 4);
+
+    const Id again = feature::setDivide(s, k, feature::evenly(3));
+    CHECK(again != k);
+    CHECK_FALSE(s.hasEntity(point));
+    CHECK(s.constraint(again).refs.size() == 4);
+    CHECK(at(s, s.constraint(again).refs[3]).x == Approx(9.0));
+}
+
+TEST_CASE("Divide: saved and loaded; deleting a point deletes the divide", "[features][divide]")
+{
+    Sketch s;
+    const Id l = s.addLine(0, 0, 10, 10);
+    const Id k = feature::divide(s, l, {{3, 2, 1}, true, true});
+    Sketch back = fromJson(toJson(s));
+    REQUIRE(back.hasConstraint(k));
+    const auto p = feature::divideParams(back.constraint(k));
+    CHECK(p.parts == std::vector<double>{3, 2, 1});
+    CHECK(p.reversed);
+    CHECK(p.byRatio);
+    CHECK(solveClean(back).dof == 4);
+
+    back.remove(back.constraint(k).refs[1]);
+    CHECK_FALSE(back.hasConstraint(k));
+
+    CHECK_THROWS_AS(feature::divide(s, s.line(l).p1, feature::evenly(2)), SketchError);  // not a line
+    CHECK_THROWS_AS(s.setConstraintValue(k, 5), SketchError);  // the value is the count
+}

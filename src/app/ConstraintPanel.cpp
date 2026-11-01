@@ -38,6 +38,7 @@ QString typeName(core::ConstraintType type)
         case T::Offset: return QObject::tr("Offset");
         case T::LinearPattern: return QObject::tr("Rectangular pattern");
         case T::CircularPattern: return QObject::tr("Circular pattern");
+        case T::Divide: return QObject::tr("Divide");
     }
     return {};
 }
@@ -60,6 +61,14 @@ QString featureSummary(const core::Constraint& c)
         case T::CircularPattern: {
             const auto p = core::feature::circularParams(c);
             return QObject::tr("%1 over %2°").arg(p.count).arg(num(p.angle));
+        }
+        case T::Divide: {
+            const auto p = core::feature::divideParams(c);
+            if (!p.byRatio) {
+                return QObject::tr("%n point(s) evenly", nullptr, static_cast<int>(p.parts.size()) - 1);
+            }
+            return QObject::tr("ratio %1%2").arg(QString::fromStdString(core::feature::ratioText(p.parts)),
+                                                 p.reversed ? QObject::tr(", reversed") : QString());
         }
         default: return {};
     }
@@ -108,6 +117,9 @@ QString ConstraintPanel::describe(const core::Constraint& c) const
         text += QStringLiteral("  ") + m_view.formatDimension(c);
     }
     const core::Sketch& s = m_doc.sketch();
+    if (c.type == core::ConstraintType::Divide) {
+        return text + QStringLiteral("  ") + featureSummary(c) + QStringLiteral("   (line %1)").arg(c.refs.front());
+    }
     if (core::isFeature(c.type)) {
         const size_t sources = c.type == core::ConstraintType::Offset ? core::feature::offsetRefs(c).sources.size()
                                                                        : core::feature::pattern(c).sources.size();

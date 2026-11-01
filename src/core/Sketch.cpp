@@ -44,6 +44,7 @@ const char* toString(ConstraintType type)
         case ConstraintType::Offset: return "offset";
         case ConstraintType::LinearPattern: return "linearPattern";
         case ConstraintType::CircularPattern: return "circularPattern";
+        case ConstraintType::Divide: return "divide";
     }
     return "?";
 }
@@ -65,7 +66,7 @@ bool hasValue(ConstraintType type)
 
 bool constraintTypeFromString(const std::string& name, ConstraintType& out)
 {
-    for (int i = 0; i <= static_cast<int>(ConstraintType::CircularPattern); ++i) {
+    for (int i = 0; i <= static_cast<int>(ConstraintType::Divide); ++i) {
         const auto type = static_cast<ConstraintType>(i);
         if (name == toString(type)) {
             out = type;
@@ -479,7 +480,8 @@ void Sketch::validate(ConstraintType type, const std::vector<Id>& refs, double v
             break;
         case ConstraintType::Offset:
         case ConstraintType::LinearPattern:
-        case ConstraintType::CircularPattern: break;  // validateFeature
+        case ConstraintType::CircularPattern:
+        case ConstraintType::Divide: break;  // validateFeature
     }
 }
 
@@ -584,6 +586,28 @@ void Sketch::validateFeature(ConstraintType type, const std::vector<Id>& refs, d
             matchingGroups(1, n, "the centre, sources then each copy");
             if (!(value > 0.0 && value <= 360.0)) {
                 fail("angle must be more than 0 and at most 360 degrees");
+            }
+            break;
+        }
+        case ConstraintType::Divide: {
+            if (refs.size() < 2 || kindOf(refs[0]) != EntityKind::Line) {
+                fail("expects a line, then its points");
+            }
+            for (size_t i = 1; i < refs.size(); ++i) {
+                if (kindOf(refs[i]) != EntityKind::Point) {
+                    fail("expects a line, then its points");
+                }
+            }
+            if (params.size() != refs.size() + 2) {  // 2 flags, then a part per point and one more
+                fail("expects params {by ratio, reversed, parts...} with one more part than points");
+            }
+            for (size_t i = 2; i < params.size(); ++i) {
+                if (!(params[i] > 0.0) || !std::isfinite(params[i])) {
+                    fail("the parts must be positive");
+                }
+            }
+            if (value != double(refs.size() - 1)) {
+                fail("the value is the number of points (change the spacing to change it)");
             }
             break;
         }

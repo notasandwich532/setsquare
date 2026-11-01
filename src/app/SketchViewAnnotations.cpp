@@ -470,9 +470,13 @@ void SketchView::editFeature(Id id)
         return;
     }
 
-    // Patterns: their command, editing them.
+    // Patterns and divides: their command, editing them.
     m_editFeature = id;
-    setTool(c.type == ConstraintType::CircularPattern ? ToolKind::CircularPattern : ToolKind::RectangularPattern);
+    switch (c.type) {
+        case ConstraintType::CircularPattern: setTool(ToolKind::CircularPattern); break;
+        case ConstraintType::Divide: setTool(ToolKind::Divide); break;
+        default: setTool(ToolKind::RectangularPattern); break;
+    }
 }
 
 void SketchView::editValue(Id id, QPointF at)

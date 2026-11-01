@@ -9,6 +9,7 @@ class QComboBox;
 class QDoubleSpinBox;
 class QFormLayout;
 class QLabel;
+class QLineEdit;
 class QSpinBox;
 
 // A selection input of a command panel: shows "3 selected" (or "Select"), highlighted while it's
@@ -47,6 +48,8 @@ public:
                               const QString& suffix = QStringLiteral(" mm"));
     QComboBox* addChoice(const QString& label, const char* name, const QStringList& items, int current = 0);
     QCheckBox* addCheck(const QString& label, const char* name, bool checked);
+    QLineEdit* addText(const QString& label, const char* name, const QString& text,
+                       const QString& placeholder = {});
     void addButtons();  // OK and Cancel
     void setRowVisible(QWidget* input, bool visible);
 

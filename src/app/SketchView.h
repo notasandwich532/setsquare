@@ -120,6 +120,9 @@ public:
         double offsetDistance = 5.0;
         bool offsetBothSides = false;
         bool offsetCaps = true;
+        bool divideByRatio = false;
+        int divideCount = 3;
+        QString divideRatio = QStringLiteral("3:2:1");
     };
     ModifyOptions& modifyOptions() { return m_modifyOptions; }
     const ModifyOptions& modifyOptions() const { return m_modifyOptions; }

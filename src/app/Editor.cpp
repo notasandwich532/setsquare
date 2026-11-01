@@ -406,6 +406,34 @@ Id Editor::setPattern(Id pattern, const feature::CircularPatternParams& p)
     return id;
 }
 
+namespace
+{
+QString divideArgs(const feature::DivideParams& p)
+{
+    QString args = p.byRatio ? QStringLiteral("ratio=\"%1\"").arg(QString::fromStdString(feature::ratioText(p.parts)))
+                             : QStringLiteral("count=%1").arg(p.parts.size() - 1);
+    if (p.reversed) {
+        args += QStringLiteral(", reversed=True");
+    }
+    return args;
+}
+}  // namespace
+
+Id Editor::divide(Id line, const feature::DivideParams& p)
+{
+    const Id id = feature::divide(m_sketch, line, p);
+    log(QStringLiteral("%1 = s.divide(%2, %3)").arg(name(m_sketch, id), name(m_sketch, line), divideArgs(p)));
+    return id;
+}
+
+Id Editor::setDivide(Id divide, const feature::DivideParams& p)
+{
+    const QString what = name(m_sketch, divide);
+    const Id id = feature::setDivide(m_sketch, divide, p);
+    log(QStringLiteral("%1 = s.set_divide(%2, %3)").arg(name(m_sketch, id), what, divideArgs(p)));
+    return id;
+}
+
 Id Editor::offset(const std::vector<Id>& curves, double distance, core::Vec2 toward, bool bothSides, bool caps)
 {
     const QString what = list(m_sketch, curves);

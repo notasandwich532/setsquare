@@ -74,6 +74,10 @@ public:
     // `toward` picks the side; with bothSides it's ignored (and caps closes an open chain's ends).
     core::Id offset(const std::vector<core::Id>& curves, double distance, core::Vec2 toward, bool bothSides = false,
                     bool caps = false);
+    // Points spaced along a line, linked to it. setDivide returns the feature's id, which
+    // changes when the number of points does.
+    core::Id divide(core::Id line, const core::feature::DivideParams& p);
+    core::Id setDivide(core::Id divide, const core::feature::DivideParams& p);
     // Inserts clipboard contents (a sketch fragment, see core::xform::paste) centred at `at`.
     std::map<core::Id, core::Id> paste(const core::Sketch& fragment, core::Vec2 at);
 

@@ -8,6 +8,7 @@
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QLineEdit>
 #include <QSpinBox>
 #include <QStyle>
 #include <QToolButton>
@@ -125,6 +126,17 @@ QDoubleSpinBox* CommandPanel::addNumber(const QString& label, const char* name, 
     connect(box, &QDoubleSpinBox::valueChanged, this, &CommandPanel::changed);
     addRow(label, box);
     return box;
+}
+
+QLineEdit* CommandPanel::addText(const QString& label, const char* name, const QString& text,
+                                 const QString& placeholder)
+{
+    auto* edit = new QLineEdit(text, this);
+    edit->setObjectName(QLatin1String(name));
+    edit->setPlaceholderText(placeholder);
+    connect(edit, &QLineEdit::textChanged, this, &CommandPanel::changed);
+    addRow(label, edit);
+    return edit;
 }
 
 QComboBox* CommandPanel::addChoice(const QString& label, const char* name, const QStringList& items, int current)

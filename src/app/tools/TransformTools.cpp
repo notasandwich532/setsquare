@@ -3,6 +3,7 @@
 #include "../CommandPanel.h"
 #include "../Document.h"
 #include "../SketchView.h"
+#include "../Theme.h"
 #include "ShapeTools.h"
 
 #include <core/Features.h>
@@ -13,6 +14,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QLineEdit>
 #include <QPainter>
 #include <QSignalBlocker>
 #include <QSpinBox>
@@ -1210,6 +1212,182 @@ void OffsetTool::dragHandle(int /*id*/, Vec2 world, Vec2 pressedAt, Qt::Keyboard
 QString OffsetTool::dragLabel(int /*id*/) const
 {
     return length(m_distance->value());
+}
+
+// =============================================================================================
+// Divide
+// =============================================================================================
+
+void DivideTool::buildPanel()
+{
+    const core::Sketch& s = doc().sketch();
+    SketchView::ModifyOptions& o = view().modifyOptions();
+    bool ratio = o.divideByRatio;
+    int count = o.divideCount;
+    QString ratioText = o.divideRatio;
+    bool reversed = false;
+    Id line = kNoId;
+    if (m_editing != kNoId && s.hasConstraint(m_editing) && s.constraint(m_editing).type == core::ConstraintType::Divide) {
+        const core::Constraint& c = s.constraint(m_editing);
+        const auto p = core::feature::divideParams(c);
+        ratio = p.byRatio;
+        reversed = p.reversed;
+        line = c.refs.front();
+        if (ratio) {
+            ratioText = QString::fromStdString(core::feature::ratioText(p.parts));
+        }
+        else {
+            count = static_cast<int>(p.parts.size()) - 1;
+        }
+    }
+    else {
+        m_editing = kNoId;
+    }
+
+    m_line = addPick(QObject::tr("Line"), "line", QObject::tr("click the line to put points on"),
+                     [this](Id id) { return isLine(id); }, false);
+    m_type = panel()->addChoice(QObject::tr("Spacing"), "spacing", {QObject::tr("Evenly"), QObject::tr("Ratio")},
+                                ratio ? 1 : 0);
+    m_count = panel()->addCount(QObject::tr("Points"), "points", count, 1);
+    m_ratio = panel()->addText(QObject::tr("Ratio"), "ratio", ratioText, QStringLiteral("3:2:1"));
+    m_ratio->setToolTip(QObject::tr("The gaps along the line, from the arrow's end: 3:2:1 makes two points, "
+                                    "with the biggest gap first"));
+    m_reverse = panel()->addCheck(QObject::tr("Reverse"), "reverse", reversed);
+    m_reverse->setToolTip(QObject::tr("Start from the other end (or click the arrow)"));
+    if (m_editing != kNoId) {
+        setPicked(m_line, {line});
+        setPickEnabled(m_line, false);
+    }
+}
+
+bool DivideTool::byRatio() const
+{
+    return m_type && m_type->currentIndex() == 1;
+}
+
+bool DivideTool::params(core::feature::DivideParams& out, QString* why) const
+{
+    try {
+        if (byRatio()) {
+            out.parts = core::feature::parseRatio(m_ratio->text().toStdString());
+            out.byRatio = true;
+            out.reversed = m_reverse->isChecked();
+        }
+        else {
+            out = core::feature::evenly(m_count->value());
+        }
+    }
+    catch (const core::SketchError& e) {
+        if (why) {
+            *why = QString::fromStdString(e.what());
+        }
+        return false;
+    }
+    return true;
+}
+
+bool DivideTool::ready() const
+{
+    return !picked(m_line).empty();  // (a ratio that doesn't read is reported on OK)
+}
+
+void DivideTool::changed()
+{
+    if (!m_reverse) {
+        return;
+    }
+    panel()->setRowVisible(m_count, !byRatio());
+    panel()->setRowVisible(m_ratio, byRatio());
+    panel()->setRowVisible(m_reverse, byRatio());
+    core::feature::DivideParams p;
+    QString why;
+    const bool ok = params(p, &why);
+    m_ratio->setStyleSheet(ok || !byRatio() ? QString() : QStringLiteral("color: #ff5555;"));
+    m_ratio->setToolTip(ok || !byRatio() ? QObject::tr("The gaps along the line, from the arrow's end: 3:2:1 makes "
+                                                       "two points, with the biggest gap first")
+                                         : why);
+    if (m_editing == kNoId) {
+        SketchView::ModifyOptions& o = view().modifyOptions();
+        o.divideByRatio = byRatio();
+        o.divideCount = m_count->value();
+        o.divideRatio = m_ratio->text();
+    }
+}
+
+bool DivideTool::commit()
+{
+    core::feature::DivideParams p;
+    QString why;
+    if (!params(p, &why)) {
+        emit view().message(why);
+        return false;
+    }
+    const Id line = picked(m_line).front();
+    return view().tryEdit(QObject::tr("Divide"), [&](Editor& ed) {
+        if (m_editing != kNoId) {
+            ed.setDivide(m_editing, p);
+        }
+        else {
+            ed.divide(line, p);
+        }
+    });
+}
+
+void DivideTool::paintPreview(QPainter& painter)
+{
+    core::feature::DivideParams p;
+    if (picked(m_line).empty() || !params(p)) {
+        return;
+    }
+    // The points as they'd be, on a scratch copy: new ones, or the edited divide's moved ones.
+    core::Sketch scratch = doc().sketch();
+    std::set<Id> shown;
+    try {
+        const Id k = m_editing != kNoId ? core::feature::setDivide(scratch, m_editing, p)
+                                        : core::feature::divide(scratch, picked(m_line).front(), p);
+        const core::Constraint& c = scratch.constraint(k);
+        shown.insert(c.refs.begin() + 1, c.refs.end());
+    }
+    catch (const core::SketchError&) {
+        return;
+    }
+    view().drawPreviewSketch(painter, scratch, [&](Id id) { return shown.contains(id); });
+    // Rings round them, so they show on the (highlighted) line.
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(QPen(theme::canvas().hover, 1.5));
+    painter.setBrush(Qt::NoBrush);
+    for (Id point : shown) {
+        painter.drawEllipse(view().toScreen({scratch.point(point).x, scratch.point(point).y}), 5.0, 5.0);
+    }
+    painter.restore();
+}
+
+std::vector<Handle> DivideTool::handles() const
+{
+    // A ratio's start: an arrow beside the line at the end it's measured from, pointing along it.
+    if (picked(m_line).empty() || !byRatio()) {
+        return {};
+    }
+    const core::Sketch& s = doc().sketch();
+    const core::Line& l = s.line(picked(m_line).front());
+    Vec2 a{s.point(l.p1).x, s.point(l.p1).y}, b{s.point(l.p2).x, s.point(l.p2).y};
+    if (m_reverse->isChecked()) {
+        std::swap(a, b);
+    }
+    const double len = norm(b - a);
+    if (len <= 0.0) {
+        return {};
+    }
+    const Vec2 u = (1.0 / len) * (b - a);
+    const Vec2 side{-u.y, u.x};
+    const double gap = kHandleGap / view().zoom();
+    return {{Handle::Kind::Arrow, 1, a + gap * side, u}};
+}
+
+void DivideTool::beginHandleDrag(int /*id*/)
+{
+    m_reverse->toggle();  // clicking the arrow turns it round
 }
 
 // =============================================================================================

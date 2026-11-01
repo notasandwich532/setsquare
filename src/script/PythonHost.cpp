@@ -307,6 +307,33 @@ core::Vec2 vecArg(py::handle h)
     return {x, y};
 }
 
+// s.divide's spacing: count=n, or ratio="3:2:1" / [3, 2, 1].
+core::feature::DivideParams divideArgs(const py::object& count, const py::object& ratio, bool reversed)
+{
+    if (count.is_none() == ratio.is_none()) {
+        throw py::value_error("give count= or ratio= (one of them)");
+    }
+    core::feature::DivideParams p;
+    if (!count.is_none()) {
+        p = core::feature::evenly(count.cast<int>());
+    }
+    else {
+        std::string text;
+        if (py::isinstance<py::str>(ratio)) {
+            text = ratio.cast<std::string>();
+        }
+        else {
+            for (py::handle part : ratio) {
+                text += std::to_string(part.cast<double>()) + ":";
+            }
+        }
+        p.parts = core::feature::parseRatio(text);
+        p.byRatio = true;
+    }
+    p.reversed = reversed;
+    return p;
+}
+
 // Adds a (checked) constraint or dimension; refuses over-constraining like the UI does.
 py::object addConstraint(ConstraintType type, std::vector<Id> refs, py::object value, py::object label,
                          std::uint8_t flip = 0)
@@ -527,11 +554,14 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
         .def_property_readonly("refs", [](const ConstraintH& c) { return wrapAll(constraintOf(c.id).refs); })
         .def_property_readonly("is_dimension", [](const ConstraintH& c) { return core::isDimension(constraintOf(c.id).type); })
         .def_property_readonly("is_feature", [](const ConstraintH& c) { return core::isFeature(constraintOf(c.id).type); },
-                               "A pattern or offset.")
+                               "A pattern, offset or divide.")
         .def_property_readonly("sources", [](const ConstraintH& c) {
             const core::Constraint& k = constraintOf(c.id);
             if (k.type == ConstraintType::Offset) {
                 return wrapAll(core::feature::offsetRefs(k).sources);
+            }
+            if (k.type == ConstraintType::Divide) {
+                return wrapAll(std::vector<Id>{k.refs.front()});
             }
             if (core::isFeature(k.type)) {
                 return wrapAll(core::feature::pattern(k).sources);
@@ -547,6 +577,9 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
                 if (!refs.offsets2.empty()) {
                     out.append(wrapAll(refs.offsets2));
                 }
+            }
+            else if (k.type == ConstraintType::Divide) {
+                out.append(wrapAll(std::vector<Id>(k.refs.begin() + 1, k.refs.end())));
             }
             else if (core::isFeature(k.type)) {
                 for (const auto& instance : core::feature::pattern(k).copies) {
@@ -1135,6 +1168,33 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
            "Linked offset of a chain of lines/arcs (a list, or one curve for its whole chain) or a circle, on the "
            "side `toward` is on, or with both_sides=True to both sides (caps=True closes an open chain's ends with "
            "half circles). Returns the offset; its value is the distance.")
+        .def("divide", [](const SketchH&, py::handle line, py::object count, py::object ratio, bool reversed) {
+            const Id l = idOf(line);
+            const core::feature::DivideParams p = divideArgs(count, ratio, reversed);
+            return wrap(editReturningId("Divide", [&](Editor& ed) { return ed.divide(l, p); }));
+        }, py::arg("line"), py::arg("count") = py::none(), py::arg("ratio") = py::none(), py::arg("reversed") = false,
+           "Points along a line, kept there as it moves: `count` evenly spaced, or with ratio=\"3:2:1\" (or "
+           "[3, 2, 1]) the gaps from the line's start to its end in that ratio (reversed=True: from its end). "
+           "Returns the feature; its refs are the line then the points.")
+        .def("set_divide", [](const SketchH&, py::handle feature, py::object count, py::object ratio,
+                              py::object reversed) {
+            const Id id = idOf(feature);
+            const core::Constraint& k = constraintOf(id);
+            if (k.type != ConstraintType::Divide) {
+                throw py::value_error("not a divide");
+            }
+            const core::feature::DivideParams old = core::feature::divideParams(k);
+            core::feature::DivideParams p = old;
+            if (!count.is_none() || !ratio.is_none()) {
+                p = divideArgs(count, ratio, old.reversed);
+            }
+            if (!reversed.is_none()) {
+                p.reversed = reversed.cast<bool>();
+            }
+            return wrap(editReturningId("Divide", [&](Editor& ed) { return ed.setDivide(id, p); }));
+        }, py::arg("divide"), py::arg("count") = py::none(), py::arg("ratio") = py::none(),
+           py::arg("reversed") = py::none(),
+           "Change a divide's spacing. A different number of points remakes them; returns the divide (a new one then).")
         .def("chain", [](const SketchH&, py::handle curve) { return wrapAll(core::feature::chainAt(sketch(), idOf(curve))); },
              py::arg("curve"), "The curves joined end to end with this one, in order.")
         .def("extract", [](const SketchH&, py::handle items) {

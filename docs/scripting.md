@@ -147,6 +147,20 @@ data = s.extract(items)                 # JSON, as the clipboard holds it
 pasted = s.paste(data, at=(x, y))       # centred at (x, y)
 ```
 
+### Dividing a line
+Points along a line that stay at their places on it as it moves or stretches (the Divide tool).
+Evenly, or by a ratio of the gaps from the line's start (`p1`) to its end: `3:2:1` makes two
+points with the biggest gap first; `reversed=True` measures from the end instead.
+
+```python
+d = s.divide(line, count=3)                       # 3 points, 4 equal gaps
+d = s.divide(line, ratio="3:2:1")                 # or ratio=[3, 2, 1]
+d = s.divide(line, ratio="3:2:1", reversed=True)  # biggest gap at p2's end
+d.copies[0]                                       # the points, in order from the start
+d = s.set_divide(d, reversed=False)               # same number of points: the same divide
+d = s.set_divide(d, count=5)                      # a new count remakes the points: use the returned one
+```
+
 ### Appearance (strokes)
 How curves look in the finished drawing; the solver ignores it. Curves without a stroke draw as
 plain sketch geometry.

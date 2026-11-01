@@ -863,6 +863,35 @@ def icon_offset():
     return finish("offset")
 
 
+def icon_divide():
+    """A centre finder: a square V resting on a circle, its blade marked off by a divide (the
+    middle mark is the centre)."""
+    start()
+    c = stroke(s.circle((14, 14), 6), GREY)
+    pin(c.center, 14, 14)
+    s.radius(c, value=6)
+    apex = s.point(8, 8)
+    floor = line(apex, (21, 8), GREEN, width=3)
+    wall = line(apex, (8, 21), GREEN, width=3)
+    s.horizontal(floor)
+    s.vertical(wall)
+    s.tangent(floor, c)
+    s.tangent(wall, c)
+    s.distance(floor, value=13)
+    s.distance(wall, value=13)
+    blade = line(apex, (20, 20), GREEN, width=1.5)
+    s.coincident(c.center, blade)
+    s.distance(blade, value=12 * math.sqrt(2))
+    marks = s.divide(blade, count=3)
+    for p in marks.copies[0]:
+        x, y = p.pos
+        sq = stroke(s.rectangle_center(p, (x + 1, y + 1)), GREEN, width=1.5)
+        s.distance(sq[0], value=2)
+        s.distance(sq[1], value=2)
+        s.fill(at=(x, y), color=GREEN)
+    return finish("divide")
+
+
 # --- appearance -------------------------------------------------------------------------------
 # After MS Paint's: the tool in GREY, the paint in AMBER (the appearance tools' accent).
 
@@ -971,7 +1000,7 @@ ICONS.update({
               icon_slot_overall, icon_slot_center_point, icon_arc_slot, icon_arc_slot_3point, icon_trim,
               icon_trim_construction, icon_extend, icon_break, icon_fillet, icon_chamfer_equal, icon_chamfer_2distances,
               icon_chamfer_angle, icon_move, icon_scale, icon_mirror, icon_rectangular_pattern, icon_circular_pattern,
-              icon_offset, icon_stroke_brush, icon_fill, icon_presentation]
+              icon_offset, icon_divide, icon_stroke_brush, icon_fill, icon_presentation]
 })
 
 wanted = sys.argv[1:] or list(ICONS)

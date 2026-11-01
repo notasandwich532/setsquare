@@ -19,6 +19,7 @@
 #include <QComboBox>
 #include <QCoreApplication>
 #include <QDoubleSpinBox>
+#include <QLineEdit>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QTest>
@@ -464,4 +465,86 @@ TEST_CASE("Offset: both sides, with the ends capped", "[transform][offset]")
     std::ranges::sort(ys);
     CHECK(ys[0] == Approx(46.0).margin(1e-6));
     CHECK(ys[1] == Approx(54.0).margin(1e-6));
+}
+
+TEST_CASE("Divide: points evenly along a line, kept there as it moves", "[transform][divide]")
+{
+    Fixture f;
+    f.view.setTool(ToolKind::Divide);
+    f.click(20, 10.2);  // the bottom side, 20 long
+    f.field<QComboBox>("spacing")->setCurrentIndex(0);
+    f.field<QSpinBox>("points")->setValue(3);
+    f.ok();
+    const Id k = f.feature(ConstraintType::Divide);
+    REQUIRE(k != kNoId);
+    const Constraint c = f.sketch().constraint(k);
+    REQUIRE(c.refs.size() == 4);
+    CHECK(c.refs[0] == f.rect.sides[0]);
+    for (size_t i = 1; i < 4; ++i) {
+        CHECK(f.pos(c.refs[i]).x == Approx(10.0 + 5.0 * double(i)).margin(1e-6));
+        CHECK(f.pos(c.refs[i]).y == Approx(10.0).margin(1e-6));
+    }
+    CHECK(f.doc.solveResult().dof == 4);  // the rectangle's; the points add none
+    REQUIRE(!f.recorded.isEmpty());
+    CHECK(f.recorded.last().contains("s.divide(") );
+    CHECK(f.recorded.last().contains("count=3"));
+}
+
+TEST_CASE("Divide: by a ratio, from the arrow's end; clicking the arrow turns it round", "[transform][divide]")
+{
+    Fixture f;
+    f.view.setTool(ToolKind::Divide);
+    f.click(20, 10.2);
+    f.field<QComboBox>("spacing")->setCurrentIndex(1);
+    f.field<QLineEdit>("ratio")->setText("3:2:1");
+    auto* reverse = f.field<QCheckBox>("reverse");
+    CHECK_FALSE(reverse->isChecked());
+    f.view.fitAll();  // (closer, for the snapshot)
+    saveSnapshot(f.view, QStringLiteral("-panel"));
+    // The arrow sits beside the start of the line (10, 10), pointing along it.
+    const QPoint arrow = f.at(10, 10) + QPoint(10, -18);
+    QTest::mouseMove(&f.view, arrow);
+    QTest::mouseClick(&f.view, Qt::LeftButton, {}, arrow);
+    CHECK(reverse->isChecked());
+    f.ok();
+    const Id k = f.feature(ConstraintType::Divide);
+    REQUIRE(k != kNoId);
+    const Constraint c = f.sketch().constraint(k);
+    REQUIRE(c.refs.size() == 3);
+    // From (30, 10) back: gaps 10, 6.67, 3.33.
+    CHECK(f.pos(c.refs[1]).x == Approx(20.0).margin(1e-6));
+    CHECK(f.pos(c.refs[2]).x == Approx(30.0 - 50.0 / 3.0).margin(1e-6));
+    CHECK(f.recorded.last().contains("ratio=\"3:2:1\", reversed=True"));
+}
+
+TEST_CASE("Divide: a ratio that doesn't read is refused, with why", "[transform][divide]")
+{
+    Fixture f;
+    QStringList messages;
+    QObject::connect(&f.view, &SketchView::message, [&](const QString& m) { messages << m; });
+    f.view.setTool(ToolKind::Divide);
+    f.click(20, 10.2);
+    f.field<QComboBox>("spacing")->setCurrentIndex(1);
+    f.field<QLineEdit>("ratio")->setText("3:x");
+    f.ok();
+    CHECK(f.feature(ConstraintType::Divide) == kNoId);
+    REQUIRE(!messages.isEmpty());
+    CHECK(messages.last().contains("isn't a number"));
+}
+
+TEST_CASE("Divide: double-clicking it in the list edits it", "[transform][divide]")
+{
+    Fixture f;
+    Id k = kNoId;
+    f.doc.modify("divide", [&](Sketch& s) { k = feature::divide(s, f.rect.sides[0], feature::evenly(1)); });
+    f.view.editFeature(k);
+    f.settle();
+    CHECK(f.view.toolKind() == ToolKind::Divide);
+    CHECK(f.field<QSpinBox>("points")->value() == 1);
+    f.field<QSpinBox>("points")->setValue(4);
+    f.ok();
+    const Id edited = f.feature(ConstraintType::Divide);
+    REQUIRE(edited != kNoId);
+    CHECK(f.sketch().constraint(edited).refs.size() == 5);
+    CHECK(f.count(EntityKind::Point) == 4 + 4);  // the rectangle's corners and the new points only
 }

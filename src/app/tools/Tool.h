@@ -50,6 +50,7 @@ enum class ToolKind
     RectangularPattern,
     CircularPattern,
     Offset,
+    Divide,
     Paste,
 
     StrokeBrush,

@@ -153,6 +153,7 @@ const std::pair<ToolKind, const char*> kToolNames[] = {
     {ToolKind::RectangularPattern, "rectangular_pattern"},
     {ToolKind::CircularPattern, "circular_pattern"},
     {ToolKind::Offset, "offset"},
+    {ToolKind::Divide, "divide"},
     {ToolKind::Paste, "paste"},
     {ToolKind::StrokeBrush, "stroke_brush"},
     {ToolKind::Fill, "fill"},
@@ -726,7 +727,10 @@ void MainWindow::createActions()
                     {ToolKind::RectangularPattern, tr("Rectangular Pattern"), {}},
                     {ToolKind::CircularPattern, tr("Circular Pattern"), {}},
                 });
-    addTools(modifyBar, {{ToolKind::Offset, tr("Offset"), {}}});
+    addTools(modifyBar, {
+                            {ToolKind::Offset, tr("Offset"), {}},
+                            {ToolKind::Divide, tr("Divide"), {}},
+                        });
     // (Tool settings are in panels on the canvas, not up here.)
 
     // Appearance, on a row of its own: presentation view, the stroke brush and the colour bar.

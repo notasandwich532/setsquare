@@ -18,6 +18,7 @@ class CommandPanel;
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
+class QLineEdit;
 class QSpinBox;
 class SelectionButton;
 
@@ -308,6 +309,41 @@ private:
     core::Vec2 m_clickedAt;  // where the first curve was picked: its side is positive
     double m_dragStart = 0.0;
     std::vector<core::Id> m_lastPick;
+};
+
+// Divide: points along a line, linked to it. Evenly (a number of points), or by a ratio of the
+// gaps along it ("3:2:1": the biggest gap first); a ratio starts from the end the arrow shows,
+// and clicking the arrow (or "Reverse") starts it from the other end. Started on an existing
+// divide, it edits that.
+class DivideTool : public CommandTool
+{
+public:
+    DivideTool(SketchView& view, core::Id editing = core::kNoId)
+        : CommandTool(view)
+        , m_editing(editing)
+    {}
+
+protected:
+    QString title() const override { return QObject::tr("Divide"); }
+    void buildPanel() override;
+    bool ready() const override;
+    bool commit() override;
+    void paintPreview(QPainter& painter) override;
+    std::vector<Handle> handles() const override;
+    void beginHandleDrag(int id) override;
+    void changed() override;
+
+private:
+    bool byRatio() const;
+    // The settings as asked for; false (with why) if the ratio doesn't read.
+    bool params(core::feature::DivideParams& out, QString* why = nullptr) const;
+
+    core::Id m_editing;
+    int m_line = 0;
+    QComboBox* m_type = nullptr;
+    QSpinBox* m_count = nullptr;
+    QLineEdit* m_ratio = nullptr;
+    QCheckBox* m_reverse = nullptr;
 };
 
 // Paste: the clipboard's contents follow the cursor; click to place them.

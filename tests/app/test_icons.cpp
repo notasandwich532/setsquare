@@ -29,7 +29,7 @@ const ToolKind kModifyTools[] = {
     ToolKind::Trim,         ToolKind::TrimToConstruction, ToolKind::Extend,        ToolKind::Break,
     ToolKind::Fillet,       ToolKind::ChamferEqual,       ToolKind::ChamferTwoDistances, ToolKind::ChamferDistanceAngle,
     ToolKind::Move,         ToolKind::Scale,              ToolKind::Mirror,        ToolKind::RectangularPattern,
-    ToolKind::CircularPattern, ToolKind::Offset};
+    ToolKind::CircularPattern, ToolKind::Offset,             ToolKind::Divide};
 
 const ToolKind kAppearanceTools[] = {ToolKind::StrokeBrush, ToolKind::Fill};
 

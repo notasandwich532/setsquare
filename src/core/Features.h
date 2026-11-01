@@ -93,4 +93,37 @@ std::vector<Id> chainAt(const Sketch& sketch, Id curve);
 Id offset(Sketch& sketch, const std::vector<Id>& curves, double distance, Vec2 toward, bool bothSides = false,
           bool caps = false);
 
+// --- dividing a line ---
+//
+// Points spaced along a line and kept there as the line moves (ConstraintType::Divide, refs
+// (line, points...), value = the number of points). The gaps from one end of the line, past each
+// point, to the other end are in the ratio `parts`: n points evenly is n + 1 equal parts, and
+// 3:2:1 puts two points with the biggest gap first. `reversed` measures from the line's second
+// end (p2) instead of its first.
+
+struct DivideParams
+{
+    std::vector<double> parts{1.0, 1.0};  // one more than the points; all positive
+    bool reversed = false;
+    bool byRatio = false;  // how it was asked for (the command panel shows that way again)
+};
+
+DivideParams evenly(int points);
+// "3:2:1" (or with spaces/commas) -> {3, 2, 1}. Throws SketchError unless it's at least two
+// positive numbers.
+std::vector<double> parseRatio(const std::string& text);
+std::string ratioText(const std::vector<double>& parts);  // {3, 2, 1} -> "3:2:1"
+
+DivideParams divideParams(const Constraint& c);
+// Where each point goes, as fractions along the line from p1 (0) to p2 (1), in point order.
+std::vector<double> divideFractions(const DivideParams& p);
+
+// Adds the points and the feature; returns the feature's id.
+Id divide(Sketch& sketch, Id line, const DivideParams& params);
+// Changes the spacing. With a different number of points, they're made afresh (and the feature
+// gets a new id, returned).
+Id setDivide(Sketch& sketch, Id divide, const DivideParams& params);
+// Puts the points exactly where the settings say along the line as it is now.
+void placeDividePoints(Sketch& sketch, Id divide);
+
 }  // namespace core::feature

@@ -142,6 +142,36 @@ private:
     double m_norm = 1.0;
 };
 
+// One coordinate of "q is the fraction t of the way from a to b" (dividing a line). Linear.
+class ConstraintAlong : public GCS::Constraint
+{
+public:
+    ConstraintAlong(GCS::Point& a, GCS::Point& b, GCS::Point& q, double t, int component)
+        : m_t(t)
+    {
+        pvec = component == 0 ? GCS::VEC_pD{a.x, b.x, q.x} : GCS::VEC_pD{a.y, b.y, q.y};
+        origpvec = pvec;
+        rescale();
+    }
+
+    double error() override { return scale * (*pvec[2] - (1.0 - m_t) * *pvec[0] - m_t * *pvec[1]); }
+
+    double grad(double* param) override
+    {
+        const double coef[3] = {-(1.0 - m_t), -m_t, 1.0};
+        double deriv = 0.0;
+        for (size_t i = 0; i < 3; ++i) {
+            if (pvec[i] == param) {
+                deriv += coef[i];
+            }
+        }
+        return scale * deriv;
+    }
+
+private:
+    double m_t;
+};
+
 Vec2 operator-(Vec2 a, Vec2 b)
 {
     return {a.x - b.x, a.y - b.y};
@@ -537,6 +567,19 @@ void Solver::Impl::addConstraint(const Sketch& sketch, const Constraint& c)
         case ConstraintType::LinearPattern:
         case ConstraintType::CircularPattern: addPattern(sketch, c); break;
         case ConstraintType::Offset: addOffset(sketch, c); break;
+        case ConstraintType::Divide: {
+            const Line& l = sketch.line(r[0]);
+            const std::vector<double> t = feature::divideFractions(feature::divideParams(c));
+            for (size_t i = 0; i < t.size(); ++i) {
+                for (int component = 0; component < 2; ++component) {
+                    auto* along = new ConstraintAlong(points.at(l.p1), points.at(l.p2), points.at(r[i + 1]), t[i],
+                                                      component);
+                    along->setTag(tag);
+                    sys.addConstraint(along);  // the system owns it
+                }
+            }
+            break;
+        }
     }
 }
 
