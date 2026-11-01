@@ -66,6 +66,7 @@ ConstraintType typeFor(ToolKind kind)
         case ToolKind::Perpendicular: return ConstraintType::Perpendicular;
         case ToolKind::Tangent: return ConstraintType::Tangent;
         case ToolKind::Equal: return ConstraintType::Equal;
+        case ToolKind::Ratio: return ConstraintType::Ratio;
         case ToolKind::Midpoint: return ConstraintType::Midpoint;
         case ToolKind::Concentric: return ConstraintType::Concentric;
         case ToolKind::Symmetric: return ConstraintType::Symmetric;
@@ -93,6 +94,8 @@ QString ConstraintTool::hint() const
         case ToolKind::Perpendicular: return QObject::tr("Perpendicular: pick two lines");
         case ToolKind::Tangent: return QObject::tr("Tangent: pick a line and a circle/arc, or two circles/arcs");
         case ToolKind::Equal: return QObject::tr("Equal: pick two lines, or two circles/arcs");
+        case ToolKind::Ratio:
+            return QObject::tr("Ratio: pick two lines, or two circles/arcs; then type how many times the second the first is");
         case ToolKind::Midpoint: return QObject::tr("Midpoint: pick a point and a line");
         case ToolKind::Concentric: return QObject::tr("Concentric: pick two circles/arcs");
         case ToolKind::Symmetric: return QObject::tr("Symmetric: pick two points, then the line of symmetry");
@@ -149,10 +152,15 @@ ConstraintTool::Outcome ConstraintTool::tryApply(const std::vector<Id>& refs)
         return Outcome::Incomplete;
     }
     QString error;
-    const Id made = doc().addConstraint(type, refs, 0.0, &error);
+    // A ratio starts as things are (nothing jumps), then asks for the value.
+    const double value = type == ConstraintType::Ratio ? core::measure(s, type, refs) : 0.0;
+    const Id made = doc().addConstraint(type, refs, value, &error);
     if (made == kNoId) {
         emit view().message(error);
         return Outcome::Rejected;
+    }
+    if (type == ConstraintType::Ratio) {
+        QMetaObject::invokeMethod(&view(), [v = &view(), made] { v->editDimension(made); }, Qt::QueuedConnection);
     }
     if (doc().sketch().constraint(made).type != type) {
         emit view().message(QObject::tr("The point was already halfway along: it's now kept on the line"));

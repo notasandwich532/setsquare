@@ -25,6 +25,7 @@ QString typeName(core::ConstraintType type)
         case T::Perpendicular: return QObject::tr("Perpendicular");
         case T::Tangent: return QObject::tr("Tangent");
         case T::Equal: return QObject::tr("Equal");
+        case T::Ratio: return QObject::tr("Ratio");
         case T::Midpoint: return QObject::tr("Midpoint");
         case T::Concentric: return QObject::tr("Concentric");
         case T::Symmetric: return QObject::tr("Symmetric");
@@ -115,6 +116,9 @@ QString ConstraintPanel::describe(const core::Constraint& c) const
     QString text = typeName(c.type);
     if (core::isDimension(c.type)) {
         text += QStringLiteral("  ") + m_view.formatDimension(c);
+    }
+    if (c.type == core::ConstraintType::Ratio) {
+        text += QStringLiteral("  %1 : 1").arg(QString::number(c.value, 'g', 6));
     }
     const core::Sketch& s = m_doc.sketch();
     if (c.type == core::ConstraintType::Divide) {

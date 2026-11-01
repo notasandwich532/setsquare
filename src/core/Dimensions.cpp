@@ -166,6 +166,19 @@ double measure(const Sketch& s, ConstraintType type, const std::vector<Id>& refs
             rayAngles(s, refs, flip, r1, r2);
             return std::abs(wrapPi(r2 - r1)) * 180.0 / kPi;
         }
+        case ConstraintType::Ratio: {
+            // First over second: lengths of lines, or radii.
+            auto size = [&](Id id) {
+                if (s.entity(id).kind() == EntityKind::Line) {
+                    Vec2 a, b;
+                    lineEnds(s, id, a, b);
+                    return std::hypot(b.x - a.x, b.y - a.y);
+                }
+                return roundRadius(s, id);
+            };
+            const double second = size(refs[1]);
+            return second > 0.0 ? size(refs[0]) / second : 1.0;
+        }
         default: return 0.0;
     }
 }

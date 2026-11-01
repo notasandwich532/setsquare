@@ -152,8 +152,15 @@ void SelectTool::doubleClick(const ToolEvent& e)
 {
     const core::Id hit = view().pickAt(e.screen);
     const core::Sketch& sketch = doc().sketch();
-    if (sketch.hasConstraint(hit) && core::isDimension(sketch.constraint(hit).type)) {
+    if (!sketch.hasConstraint(hit)) {
+        return;
+    }
+    const core::ConstraintType type = sketch.constraint(hit).type;
+    if (core::isDimension(type) || type == core::ConstraintType::Ratio) {
         view().editDimension(hit);
+    }
+    else if (core::isFeature(type)) {
+        view().editFeature(hit);  // its symbol: back into its command
     }
 }
 

@@ -35,6 +35,7 @@ const char* toString(ConstraintType type)
         case ConstraintType::Concentric: return "concentric";
         case ConstraintType::Symmetric: return "symmetric";
         case ConstraintType::Collinear: return "collinear";
+        case ConstraintType::Ratio: return "ratio";
         case ConstraintType::Distance: return "distance";
         case ConstraintType::HorizontalDistance: return "horizontalDistance";
         case ConstraintType::VerticalDistance: return "verticalDistance";
@@ -61,7 +62,7 @@ bool isFeature(ConstraintType type)
 
 bool hasValue(ConstraintType type)
 {
-    return isDimension(type) || isFeature(type);
+    return isDimension(type) || isFeature(type) || type == ConstraintType::Ratio;
 }
 
 bool constraintTypeFromString(const std::string& name, ConstraintType& out)
@@ -427,6 +428,14 @@ void Sketch::validate(ConstraintType type, const std::vector<Id>& refs, double v
         case ConstraintType::Equal:
             if (!(kinds({K::Line, K::Line}) || roundPair())) {
                 fail("expects (line, line) or (circle|arc, circle|arc)");
+            }
+            break;
+        case ConstraintType::Ratio:
+            if (!(kinds({K::Line, K::Line}) || roundPair())) {
+                fail("expects (line, line) or (circle|arc, circle|arc)");
+            }
+            if (!(value > 0.0) || !std::isfinite(value)) {
+                fail("the ratio must be positive");
             }
             break;
         case ConstraintType::Midpoint:

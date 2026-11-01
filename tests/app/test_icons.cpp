@@ -14,7 +14,7 @@ namespace
 {
 const ToolKind kConstraintTools[] = {ToolKind::Dimension,     ToolKind::Coincident, ToolKind::HorizontalVertical,
                                      ToolKind::Parallel,      ToolKind::Perpendicular, ToolKind::Tangent,
-                                     ToolKind::Equal,         ToolKind::Midpoint,   ToolKind::Concentric,
+                                     ToolKind::Equal,         ToolKind::Ratio,      ToolKind::Midpoint,   ToolKind::Concentric,
                                      ToolKind::Symmetric,     ToolKind::Collinear,  ToolKind::Fix};
 
 const ToolKind kCreateTools[] = {

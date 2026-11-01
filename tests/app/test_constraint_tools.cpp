@@ -486,3 +486,45 @@ TEST_CASE("Selecting one of a chain of equal constraints shows the whole chain",
     CHECK_FALSE(pinkNear(-20, -30));
     (void)other;
 }
+
+TEST_CASE("Ratio: pick two lines, type how many times the second the first is; edit it later", "[constraints][ratio]")
+{
+    Fixture f;
+    const Id a = f.line(0, 0, 30, 0);
+    const Id b = f.line(0, 10, 20, 10);
+    // Pin each line's start and direction, so only their lengths can change.
+    f.doc.modify("pin", [&](Sketch& s) {
+        for (Id l : {a, b}) {
+            s.entity(s.line(l).p1).fixed = true;
+            s.addConstraint(CT::Horizontal, {l});
+        }
+    });
+    f.view.setTool(ToolKind::Ratio);
+    f.click(15, 0);
+    f.click(10, 10);
+    QCoreApplication::processEvents();  // the value box opens once the pick is done
+    const auto made = f.constraintsOfType(CT::Ratio);
+    REQUIRE(made.size() == 1);
+    CHECK(f.sketch().constraint(made[0]).value == Approx(1.5));  // as drawn: nothing jumped
+    CHECK(f.length(a) == Approx(30.0));
+    f.typeIntoEditor("2");
+    CHECK(f.sketch().constraint(made[0]).value == Approx(2.0));
+    CHECK(f.length(a) == Approx(2.0 * f.length(b)).margin(1e-7));
+
+    // Later: double-click its symbol to change it.
+    f.view.setTool(ToolKind::Select);
+    QPoint symbol(-1, -1);
+    for (int dy = -40; dy <= 40 && symbol.x() < 0; dy += 2) {
+        for (int dx = -60; dx <= 60; dx += 2) {
+            const QPoint p = f.at(f.length(a) / 2, 0) + QPoint(dx, dy);
+            if (f.view.pickAt(QPointF(p)) == made[0]) {
+                symbol = p;
+                break;
+            }
+        }
+    }
+    REQUIRE(symbol.x() >= 0);
+    QTest::mouseDClick(&f.view, Qt::LeftButton, {}, symbol);
+    f.typeIntoEditor("0.5");
+    CHECK(f.length(a) == Approx(0.5 * f.length(b)).margin(1e-7));
+}

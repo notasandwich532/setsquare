@@ -172,6 +172,80 @@ private:
     double m_t;
 };
 
+// "p is k times q", for radii. (Not PlaneGCS's proportional constraint: its system merges the two
+// parameters of any "equal" constraint into one before solving, losing the ratio.)
+class ConstraintScaled : public GCS::Constraint
+{
+public:
+    ConstraintScaled(double* p, double* q, double k)
+        : m_k(k)
+    {
+        pvec = {p, q};
+        origpvec = pvec;
+        rescale();
+    }
+
+    double error() override { return scale * (*pvec[0] - m_k * *pvec[1]); }
+
+    double grad(double* param) override
+    {
+        double deriv = 0.0;
+        if (param == pvec[0]) {
+            deriv += 1.0;
+        }
+        if (param == pvec[1]) {
+            deriv -= m_k;
+        }
+        return scale * deriv;
+    }
+
+private:
+    double m_k;
+};
+
+// "Line 1 is k times as long as line 2": |b1 - a1| - k |b2 - a2| = 0.
+class ConstraintLengthRatio : public GCS::Constraint
+{
+public:
+    ConstraintLengthRatio(GCS::Line& l1, GCS::Line& l2, double k)
+        : m_k(k)
+    {
+        pvec = {l1.p1.x, l1.p1.y, l1.p2.x, l1.p2.y, l2.p1.x, l2.p1.y, l2.p2.x, l2.p2.y};
+        origpvec = pvec;
+        rescale();
+    }
+
+    double error() override { return scale * (length(0) - m_k * length(4)); }
+
+    double grad(double* param) override
+    {
+        double deriv = 0.0;
+        for (size_t first : {size_t{0}, size_t{4}}) {
+            const double dx = *pvec[first + 2] - *pvec[first], dy = *pvec[first + 3] - *pvec[first + 1];
+            const double len = std::hypot(dx, dy);
+            if (len <= 0.0) {
+                continue;
+            }
+            const double sign = first == 0 ? 1.0 : -m_k;
+            const double coef[4] = {-dx / len, -dy / len, dx / len, dy / len};
+            for (size_t i = 0; i < 4; ++i) {
+                if (pvec[first + i] == param) {
+                    deriv += sign * coef[i];
+                }
+            }
+        }
+        return scale * deriv;
+    }
+
+private:
+    double length(size_t first) const
+    {
+        return std::hypot(*pvec[first + 2] - *pvec[first], *pvec[first + 3] - *pvec[first + 1]);
+    }
+
+    double m_k;
+};
+
 Vec2 operator-(Vec2 a, Vec2 b)
 {
     return {a.x - b.x, a.y - b.y};
@@ -468,6 +542,19 @@ void Solver::Impl::addConstraint(const Sketch& sketch, const Constraint& c)
             }
             else {
                 sys.addConstraintEqualRadius(round(r[0]), round(r[1]), tag);
+            }
+            break;
+
+        case ConstraintType::Ratio:
+            if (kind(0) == EntityKind::Line) {
+                auto* ratio = new ConstraintLengthRatio(ln(r[0]), ln(r[1]), c.value);
+                ratio->setTag(tag);
+                sys.addConstraint(ratio);  // the system owns it
+            }
+            else {
+                auto* ratio = new ConstraintScaled(radiusOf(r[0]), radiusOf(r[1]), c.value);
+                ratio->setTag(tag);
+                sys.addConstraint(ratio);  // the system owns it
             }
             break;
 

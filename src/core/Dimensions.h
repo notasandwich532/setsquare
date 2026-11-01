@@ -12,7 +12,8 @@ namespace core
 {
 
 // Current value of a dimension as the geometry stands (same units as Constraint::value:
-// positive lengths, angles in degrees in [0, 180]). The refs must be valid for the type.
+// positive lengths, angles in degrees in [0, 180]; a ratio constraint's first-over-second). The
+// refs must be valid for the type.
 double measure(const Sketch& sketch, ConstraintType type, const std::vector<Id>& refs, std::uint8_t flip = 0);
 
 // For an angle between two lines: the Constraint::flip that selects the angle (of the four

@@ -164,6 +164,7 @@ const std::pair<ToolKind, const char*> kToolNames[] = {
     {ToolKind::Perpendicular, "perpendicular"},
     {ToolKind::Tangent, "tangent"},
     {ToolKind::Equal, "equal"},
+    {ToolKind::Ratio, "ratio"},
     {ToolKind::Midpoint, "midpoint"},
     {ToolKind::Concentric, "concentric"},
     {ToolKind::Symmetric, "symmetric"},
@@ -776,6 +777,7 @@ void MainWindow::createActions()
                                 {ToolKind::Perpendicular, tr("Perpendicular"), {}},
                                 {ToolKind::Tangent, tr("Tangent"), {}},  // (T is Trim, as in Fusion)
                                 {ToolKind::Equal, tr("Equal"), QKeySequence(Qt::Key_E)},
+                                {ToolKind::Ratio, tr("Ratio"), {}},
                                 {ToolKind::Midpoint, tr("Midpoint"), {}},
                                 {ToolKind::Concentric, tr("Concentric"), {}},
                                 {ToolKind::Symmetric, tr("Symmetric"), {}},

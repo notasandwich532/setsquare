@@ -82,6 +82,7 @@ s.horizontal(l)           s.horizontal(p, q)        s.vertical(...)
 s.parallel(l1, l2)        s.perpendicular(l1, l2)   s.equal(a, b)
 s.tangent(line, circle)   s.tangent(circle1, arc2)  s.concentric(c1, c2)
 s.midpoint(p, l)          s.symmetric(p, q, axis_line)     s.collinear(l1, l2)
+k = s.ratio(a, b, value=1.5)   # a's length (or radius) is 1.5 times b's; k.value = 2 changes it
 p.fixed = True            l.construction = True
 ```
 

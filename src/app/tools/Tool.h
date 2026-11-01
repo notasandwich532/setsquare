@@ -63,6 +63,7 @@ enum class ToolKind
     Perpendicular,
     Tangent,
     Equal,
+    Ratio,
     Midpoint,
     Concentric,
     Symmetric,

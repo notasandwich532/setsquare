@@ -1,6 +1,8 @@
 // Solver adapter: each constraint type, diagnosis (DOF, conflicts, redundancy,
 // fully-constrained entities) and interactive dragging.
 
+#include <core/Dimensions.h>
+#include <core/Serialize.h>
 #include <core/Sketch.h>
 #include <core/Solver.h>
 
@@ -352,4 +354,41 @@ TEST_CASE("Dragging a free line moves both endpoints", "[solver][drag]")
     const SolveResult r = solver.solve();
     CHECK(r.ok);
     CHECK(r.dof == 3);
+}
+
+TEST_CASE("Ratio: one line k times another's length, or one radius k times another's", "[solver][ratio]")
+{
+    Sketch s;
+    const Id a = s.addLine(0, 0, 30, 0);
+    const Id b = s.addLine(0, 10, 20, 10);
+    for (Id l : {a, b}) {
+        s.entity(s.line(l).p1).fixed = true;
+        s.addConstraint(ConstraintType::Horizontal, {l});
+    }
+    s.addConstraint(ConstraintType::Distance, {b}, 12.0);
+    CHECK(measure(s, ConstraintType::Ratio, {a, b}) == Catch::Approx(1.5));
+    const Id k = s.addConstraint(ConstraintType::Ratio, {a, b}, 1.5);
+    SolveResult r = solve(s);
+    CHECK(r.ok);
+    CHECK(r.dof == 0);
+    CHECK(r.redundant.empty());
+    CHECK(s.point(s.line(a).p2).x == Catch::Approx(18.0).margin(1e-7));
+
+    s.setConstraintValue(k, 2.5);  // changed afterwards
+    REQUIRE(solve(s).ok);
+    CHECK(s.point(s.line(a).p2).x == Catch::Approx(30.0).margin(1e-7));
+
+    // Radii.
+    const Id big = s.addCircle(100, 0, 9), small = s.addCircle(130, 0, 2);
+    s.addConstraint(ConstraintType::Radius, {small}, 2.0);
+    s.addConstraint(ConstraintType::Ratio, {big, small}, 3.0);
+    REQUIRE(solve(s).ok);
+    CHECK(s.circle(big).radius == Catch::Approx(6.0).margin(1e-7));
+
+    // Saved and loaded with its value; only lines with lines, rounds with rounds, and positive.
+    Sketch back = fromJson(toJson(s));
+    CHECK(back.constraint(k).value == Catch::Approx(2.5));
+    CHECK_THROWS_AS(s.addConstraint(ConstraintType::Ratio, {a, big}, 2.0), SketchError);
+    CHECK_THROWS_AS(s.addConstraint(ConstraintType::Ratio, {a, b}, 0.0), SketchError);
+    CHECK_THROWS_AS(s.setConstraintValue(k, -1.0), SketchError);
 }

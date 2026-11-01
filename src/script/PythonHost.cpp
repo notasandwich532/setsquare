@@ -339,7 +339,7 @@ py::object addConstraint(ConstraintType type, std::vector<Id> refs, py::object v
                          std::uint8_t flip = 0)
 {
     double v = 0.0;
-    if (core::isDimension(type)) {
+    if (core::isDimension(type) || type == ConstraintType::Ratio) {
         if (value.is_none()) {
             // Measure in the normalised order (point before line).
             std::vector<Id> measured = refs;
@@ -938,6 +938,11 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
         .def("concentric", constraintFn(ConstraintType::Concentric))
         .def("symmetric", constraintFn(ConstraintType::Symmetric), "(point, point, line)")
         .def("collinear", constraintFn(ConstraintType::Collinear), "(line, line)")
+        .def("ratio", [](const SketchH&, py::handle a, py::handle b, py::object value) {
+            return addConstraint(ConstraintType::Ratio, {idOf(a), idOf(b)}, value, py::none());
+        }, py::arg("a"), py::arg("b"), py::arg("value") = py::none(),
+           "(line, line) lengths or (circle|arc, circle|arc) radii: a is `value` times b (default: as they are "
+           "now). Change it later with k.value = ...")
 
         // dimensions: value=None keeps the current size
         .def("distance", dimensionFn(ConstraintType::Distance), py::arg("value") = py::none(),

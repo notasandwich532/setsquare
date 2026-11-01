@@ -133,6 +133,25 @@ def equal():
     return finish("equal")
 
 
+def ratio():
+    """Two bars, the red one twice the grey one (held by a ratio), a tick marking the half."""
+    start()
+    top = line((3.5, 16), (20.5, 16), RED, width=3.5)
+    bottom = line((3.5, 8), (12, 8), GREY, width=3.5)
+    s.horizontal(top)
+    s.horizontal(bottom)
+    s.distance(top, value=17)
+    pin(top.p1, 3.5, 16)
+    pin(bottom.p1, 3.5, 8)
+    s.ratio(top, bottom, value=2)
+    tick = line((12, 4.5), (12, 19.5), GREY, width=THIN, dash="dashed")
+    s.vertical(tick)
+    s.coincident(bottom.p2, tick)
+    s.vertical_distance(s.origin, tick.p1, value=4.5)
+    s.distance(tick, value=15)
+    return finish("ratio")
+
+
 def parallel():
     """Two parallel slanted lines, one red."""
     start()
@@ -989,7 +1008,7 @@ def icon_presentation():
 
 ICONS = {
     f.__name__: f
-    for f in [horizontal_vertical, coincident, tangent, equal, parallel, perpendicular, fix, midpoint, concentric,
+    for f in [horizontal_vertical, coincident, tangent, equal, ratio, parallel, perpendicular, fix, midpoint, concentric,
               collinear, symmetric, dimension]
 }
 ICONS.update({

@@ -321,6 +321,18 @@ std::vector<SketchView::Annotation> SketchView::layoutAnnotations() const
             }
             continue;
         }
+        if (c.type == ConstraintType::Ratio) {
+            // Each side's share: "1.5" on the first, "1" on the second.
+            const QString shares[2] = {formatNumber(c.value), QStringLiteral("1")};
+            for (int i = 0; i < 2; ++i) {
+                Annotation a{id, false, {}, shares[i], {}, {}};
+                const double w = std::max(kGlyphSize, fm.horizontalAdvance(shares[i]) + 8.0);
+                a.rect = QRectF(symbolPos(c.refs[static_cast<size_t>(i)]) - QPointF(w / 2, kGlyphSize / 2),
+                                QSizeF(w, kGlyphSize));
+                out.push_back(std::move(a));
+            }
+            continue;
+        }
         const QString symbol = symbolFor(c.type);
         const bool pointPair = (c.type == ConstraintType::Horizontal || c.type == ConstraintType::Vertical)
             && c.refs.size() == 2;
@@ -496,7 +508,21 @@ void SketchView::drawDimension(QPainter& painter, const core::DimensionLayout& L
 void SketchView::editDimension(Id id)
 {
     const core::Sketch& s = m_doc.sketch();
-    if (!s.hasConstraint(id) || !core::isDimension(s.constraint(id).type)) {
+    if (!s.hasConstraint(id)) {
+        return;
+    }
+    if (s.constraint(id).type == ConstraintType::Ratio) {
+        // At its first symbol (the one showing the value).
+        for (const Annotation& a : layoutAnnotations()) {
+            if (a.id == id) {
+                editValue(id, a.rect.center());
+                return;
+            }
+        }
+        editValue(id, rect().center());  // (symbols hidden)
+        return;
+    }
+    if (!core::isDimension(s.constraint(id).type)) {
         return;
     }
     editValue(id, toScreen(core::layoutDimension(s, s.constraint(id)).label));

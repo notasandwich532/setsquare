@@ -92,6 +92,8 @@ enum class ConstraintType
     Concentric,     // (circle|arc, circle|arc)
     Symmetric,      // (point, point, line)
     Collinear,      // (line, line)
+    Ratio,          // (line, line) lengths, or (circle|arc, circle|arc) radii: the first is 
+                    // alue times the second (value > 0; editable like a dimension's)
 
     // Dimensions (driving, carry a value)
     Distance,            // (point, point), (point, line), or (line) for its length
@@ -115,7 +117,7 @@ enum class ConstraintType
 const char* toString(ConstraintType type);
 bool isDimension(ConstraintType type);  // a dimension drawn on the canvas
 bool isFeature(ConstraintType type);    // offset, pattern or divide
-bool hasValue(ConstraintType type);     // dimensions and features
+bool hasValue(ConstraintType type);     // dimensions, features and ratios
 bool constraintTypeFromString(const std::string& name, ConstraintType& out);
 
 struct Constraint

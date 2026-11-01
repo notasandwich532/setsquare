@@ -61,6 +61,9 @@ QString Editor::constraintCall(const core::Sketch& s, Id id)
     for (Id r : c.refs) {
         args << name(s, r);
     }
+    if (c.type == core::ConstraintType::Ratio) {
+        args << QStringLiteral("value=") + number(c.value);
+    }
     if (core::isDimension(c.type)) {
         args << QStringLiteral("value=") + number(c.value);
         if (c.labelX != 0.0 || c.labelY != 0.0) {
