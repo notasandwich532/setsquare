@@ -1,5 +1,7 @@
 #include "TextShapes.h"
 
+#include <QDir>
+#include <QFileInfo>
 #include <QFont>
 #include <QFontDatabase>
 #include <QFontMetricsF>
@@ -244,44 +246,6 @@ QPolygonF simplify(const QPolygonF& loop, double tolerance)
     return out;
 }
 
-// Fewer points on an open polyline, staying within `tolerance` of it (Douglas-Peucker).
-QPolygonF simplifyOpen(const QPolygonF& line, double tolerance)
-{
-    const int n = static_cast<int>(line.size());
-    if (n < 3) {
-        return line;
-    }
-    std::vector<bool> keep(static_cast<size_t>(n), false);
-    keep.front() = keep.back() = true;
-    std::function<void(int, int)> run = [&](int a, int b) {
-        const QPointF p = line[a], d = line[b] - line[a];
-        const double len = std::hypot(d.x(), d.y());
-        double worst = -1;
-        int at = -1;
-        for (int i = a + 1; i < b; ++i) {
-            const QPointF r = line[i] - p;
-            const double dist = len > 0 ? std::abs(d.x() * r.y() - d.y() * r.x()) / len : std::hypot(r.x(), r.y());
-            if (dist > worst) {
-                worst = dist;
-                at = i;
-            }
-        }
-        if (worst > tolerance && at > a) {
-            keep[static_cast<size_t>(at)] = true;
-            run(a, at);
-            run(at, b);
-        }
-    };
-    run(0, n - 1);
-    QPolygonF out;
-    for (int i = 0; i < n; ++i) {
-        if (keep[static_cast<size_t>(i)]) {
-            out << line[i];
-        }
-    }
-    return out;
-}
-
 // Thins a binary shape to its 1-pixel skeleton, keeping it connected (Zhang-Suen). Only pixels
 // on the current edge are looked at each pass, so it costs about the shape's area overall.
 void thin(std::vector<std::uint8_t>& img, int w, int h)
@@ -505,12 +469,14 @@ std::vector<Branch> branchesOf(const std::vector<std::uint8_t>& skel, int w, int
     return out;
 }
 
-// Thickens the parts narrower than `width` to it, leaving the rest as it is: a stroke `width`
-// wide runs along the centre line (skeleton) wherever the shape is thinner than that. Spurs of
-// the skeleton running into the corners of thick strokes are pruned first, or their strokes would
-// show as lumps; free ends are carried on to the tip, and branches meeting at a fork are joined
-// with a round. The shape and strokes are drawn together on a fine grid and traced back into
-// smooth outlines.
+// Thickens the parts narrower than `width` to it, leaving the rest as it is: the shape, together
+// with a disc `width` across centred on every point of its centre line (skeleton). Where the
+// shape is thick enough those discs are inside it anyway; where it's thin they make it exactly
+// that thick, carrying straight on through junctions with thick strokes (no dip on top of a T)
+// and rounding joints between thin ones. The skeleton's spurs into the corners of thick strokes
+// are pruned first (their discs would be lumps), and free ends are pulled back so a thin tip is
+// thickened to its end and no further. Worked out as distances on a fine grid and traced back
+// into smooth outlines.
 QPainterPath thicken(const QPainterPath& shape, double width)
 {
     const QRectF box = shape.boundingRect();
@@ -559,14 +525,13 @@ QPainterPath thicken(const QPainterPath& shape, double width)
     std::vector<Branch> branches = branchesOf(skel, w, h, degree);
     auto depthAt = [&](int i) { return depth[static_cast<size_t>(i)]; };
 
-    // Prune spurs: branches from a fork to a dead end that run into a corner rather than along a
-    // stroke. Going into a corner, the depth falls away steadily to nothing (about half the fork's
-    // depth on average), and the spur is short for that depth even at an acute corner; along a
-    // stroke it stays about as deep. Again until none go, as pruning can leave new ones.
+    // Prune spurs: branches from a fork to a dead end that run into a corner of a thick stroke.
+    // Along a spur the depth rises from nothing at the tip at the sine of half the corner's angle:
+    // steeply into a corner (a 90 degree one: 0.7), gently along a sharp prong such as a serif's
+    // tip (30 degrees: 0.26). Corners (60 degrees and over) go; prongs are narrow parts, and stay
+    // to be thickened. Judged all together (at a stroke's cut end, both corners' spurs go), and
+    // again until none go, as pruning can leave new ones.
     for (int pass = 0; pass < 4; ++pass) {
-        // Which branches are spurs, judged all together: at a stroke's end the centre line can
-        // fork into both corners of the cut, and both spurs go (pruning one at a time, the other
-        // would no longer look like a spur and leave a stub).
         auto isSpur = [&](const Branch& b, int& forkOut) {
             for (int side = 0; side < 2; ++side) {
                 const int fork = b.ends[side], end = b.ends[1 - side];
@@ -574,14 +539,9 @@ QPainterPath thicken(const QPainterPath& shape, double width)
                     || degree[static_cast<size_t>(end)] != 1) {
                     continue;
                 }
-                const double forkDepth = depthAt(fork);
-                double mean = 0;
-                for (int p : b.pixels) {
-                    mean += depthAt(p);
-                }
-                mean /= double(b.pixels.size());
+                const double rise = depthAt(fork) - depthAt(end);
                 const double length = double(b.pixels.size());
-                if (length < 2.0 * forkDepth + 2.0 || (mean < 0.6 * forkDepth && length < 4.0 * forkDepth + 2.0)) {
+                if (rise >= 0.5 * length - 1.5) {
                     forkOut = fork;
                     return true;
                 }
@@ -628,7 +588,15 @@ QPainterPath thicken(const QPainterPath& shape, double width)
                 degree[static_cast<size_t>(node)] = c;
             }
         }
-    }    // Forks still joining branches after pruning (where a round joint goes).
+    }
+    // Nothing narrow anywhere: leave the letters exactly as they are.
+    const bool anyNarrow = std::ranges::any_of(branches, [&](const Branch& b) {
+        return std::ranges::any_of(b.pixels, [&](int p) { return depthAt(p) < r; });
+    });
+    if (!anyNarrow) {
+        return shape;
+    }
+    // Branch ends that are free (not joined to another branch).
     std::map<int, int> joins;
     for (const Branch& b : branches) {
         for (int e : b.ends) {
@@ -637,109 +605,91 @@ QPainterPath thicken(const QPainterPath& shape, double width)
             }
         }
     }
-
-    // The narrow stretches of each branch, as polylines on the grid.
-    QPainterPath strokes;
-    std::vector<QPointF> rounds;
+    // The centre lines discs go along: every branch, with each free end pulled back by however
+    // far a disc there would reach past the tip (half the width less the depth there), so a thin
+    // tip is thickened right to its end and no further.
+    std::vector<std::uint8_t> centres(inside.size(), 0);
+    QPainterPath caps;  // flat ends (grid coordinates)
     auto pointOf = [&](int i) { return QPointF(i % w + 0.5, i / w + 0.5); };
     for (const Branch& b : branches) {
         const size_t n = b.pixels.size();
-        size_t i = 0;
-        while (i < n) {
-            if (depthAt(b.pixels[i]) >= r) {
-                ++i;
-                continue;
+        auto trim = [&](int end, int pixel) -> size_t {
+            if (end < 0 || joins[end] >= 2) {
+                return 0;
             }
-            size_t j = i;
-            while (j + 1 < n && depthAt(b.pixels[j + 1]) < r) {
-                ++j;
+            return static_cast<size_t>(std::max(0.0f, r - depthAt(pixel)));
+        };
+        size_t front = trim(b.ends[0], b.pixels.front());
+        size_t back = trim(b.ends[1], b.pixels.back());
+        if (front + back >= n) {
+            // Too short to pull back that far: a stub off a junction keeps its last disc there
+            // (and its flat end), a lone stroke its middle (flat both ways).
+            if (front > 0 && back > 0) {
+                front = n / 2;
+                back = n - 1 - front;
             }
-            QPolygonF run;
-            for (size_t q = i; q <= j; ++q) {
-                run << pointOf(b.pixels[q]);
-            }
-            // Smooth out the pixel staircase (a wide stroke shows every step), ends kept.
-            {
-                const int m = std::max(2, static_cast<int>(std::lround(r / 3)));
-                QPolygonF smooth = run;
-                for (int q = 1; q + 1 < run.size(); ++q) {
-                    const int lo = std::max(0, q - m), hi = std::min(static_cast<int>(run.size()) - 1, q + m);
-                    const int reach = std::min(q - lo, hi - q);  // symmetric, so ends don't drift
-                    QPointF sum(0, 0);
-                    for (int s = q - reach; s <= q + reach; ++s) {
-                        sum += run[s];
-                    }
-                    smooth[q] = sum / double(2 * reach + 1);
-                }
-                run = smooth;
-            }
-            run = simplifyOpen(run, 0.5);
-            // Where a run ends at the branch's end: a free end goes on to the tip (as far as it's
-            // deep there), and a fork gets a round joint.
-            auto extend = [&](bool atStart) {
-                const size_t at = atStart ? i : j;
-                const int end = atStart ? b.ends[0] : b.ends[1];
-                if ((atStart && i != 0) || (!atStart && j != n - 1) || end < 0) {
-                    return;
-                }
-                if (joins[end] >= 2) {
-                    rounds.push_back(pointOf(b.pixels[at]));
-                    return;
-                }
-                if (run.size() < 2) {
-                    return;
-                }
-                const QPointF tip = atStart ? run.first() : run.last();
-                const QPointF from = atStart ? run[std::min<qsizetype>(3, run.size() - 1)]
-                                             : run[std::max<qsizetype>(0, run.size() - 4)];
-                QPointF d = tip - from;
-                const double len = std::hypot(d.x(), d.y());
-                if (len <= 0) {
-                    return;
-                }
-                const QPointF further = tip + d / len * double(depthAt(b.pixels[at]) + 1.0);
-                if (atStart) {
-                    run.prepend(further);
-                }
-                else {
-                    run.append(further);
-                }
-            };
-            extend(true);
-            extend(false);
-            if (run.size() >= 2) {
-                strokes.addPolygon(run);
+            else if (front > 0) {
+                front = n - 1;
             }
             else {
-                rounds.push_back(run.first());
+                back = n - 1;
             }
-            i = j + 1;
+        }
+        for (size_t q = front; q + back < n; ++q) {
+            centres[static_cast<size_t>(b.pixels[q])] = 1;
+        }
+        // A thin free end finishes flat, not round: a strip as wide as the minimum from the last
+        // disc out to the tip, along the end's direction (taken from a disc's width back, so a
+        // pointed prong's wobble doesn't turn it).
+        for (int side = 0; side < 2; ++side) {
+            const size_t cut = side == 0 ? front : back;
+            if (cut == 0) {
+                continue;
+            }
+            auto pixelAt = [&](size_t k) { return side == 0 ? b.pixels[k] : b.pixels[n - 1 - k]; };
+            const QPointF last = pointOf(pixelAt(cut));           // the last disc's centre
+            const QPointF end = pointOf(pixelAt(0));
+            const QPointF back2 = pointOf(pixelAt(std::min(n - 1, cut + static_cast<size_t>(r))));
+            QPointF d = last - back2;
+            double len = std::hypot(d.x(), d.y());
+            if (len <= 0) {
+                d = end - last;
+                len = std::hypot(d.x(), d.y());
+            }
+            if (len <= 0) {
+                continue;
+            }
+            d /= len;
+            // Out to where the tip is: the skeleton's end and the depth left there.
+            const double reach = QPointF::dotProduct(end - last, d) + double(depthAt(pixelAt(0))) + 1.0;
+            if (reach <= 0) {
+                continue;
+            }
+            const QPointF across(-d.y() * double(r), d.x() * double(r));
+            const QPointF far = last + d * reach;
+            caps.addPolygon(QPolygonF({last + across, far + across, far - across, last - across}));
+            caps.closeSubpath();
         }
     }
-    if (strokes.isEmpty() && rounds.empty()) {
-        return shape;
-    }
-
-    // Draw the strokes over the shape, then trace the whole.
-    painter.resetTransform();
-    painter.setBrush(Qt::NoBrush);
-    painter.setPen(QPen(Qt::white, 2 * double(r), Qt::SolidLine, Qt::FlatCap, Qt::RoundJoin));
-    painter.drawPath(strokes);
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(Qt::white);
-    for (const QPointF& c : rounds) {
-        painter.drawEllipse(c, double(r), double(r));
-    }
+    // The flat ends go into the drawing of the letters (so into the coverage, below).
+    painter.setTransform(QTransform());
+    painter.drawPath(caps);
     painter.end();
 
-    std::vector<float> field(inside.size());
+    // The result as a field (negative inside): the letters as drawn (anti-aliased coverage, for
+    // smooth edges), and everything within half the width of those centre lines.
+    std::vector<float> toCentre = distanceSquared(centres, w, h);
+    for (float& d : toCentre) {
+        d = std::sqrt(d);
+    }    std::vector<float> field(inside.size());
     for (int y = 0; y < h; ++y) {
         const uchar* row = image.constScanLine(y);
         for (int x = 0; x < w; ++x) {
-            field[static_cast<size_t>(y) * w + x] = 127.5f - float(row[x]);  // negative inside
+            const size_t i = static_cast<size_t>(y) * w + x;
+            const float coverage = (127.5f - float(row[x])) / 255.0f;  // about -0.5 inside to 0.5 out
+            field[i] = std::min(coverage, toCentre[i] - r);
         }
-    }
-    QPainterPath out;
+    }    QPainterPath out;
     out.setFillRule(Qt::WindingFill);
     const QTransform back = toGrid.inverted();
     for (const QPolygonF& loop : traceZero(field, w, h)) {
@@ -819,6 +769,17 @@ QStringList families(const QString& search)
     out.sort(Qt::CaseInsensitive);
     out.removeDuplicates();
     return out;
+}
+
+void addUserFonts()
+{
+#ifdef _WIN32
+    const QString dir = qEnvironmentVariable("LOCALAPPDATA") + QStringLiteral("/Microsoft/Windows/Fonts");
+    for (const QFileInfo& file : QDir(dir).entryInfoList({QStringLiteral("*.ttf"), QStringLiteral("*.otf"),
+                                                           QStringLiteral("*.ttc")}, QDir::Files)) {
+        QFontDatabase::addApplicationFont(file.absoluteFilePath());
+    }
+#endif
 }
 
 QString defaultFamily()

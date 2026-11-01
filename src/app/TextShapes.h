@@ -19,6 +19,11 @@ void update(core::Text& text);
 // it's empty.
 QStringList families(const QString& search = {});
 
+// Without a window system (the offscreen platform: drawapp-cli, tests), Qt only sees the fonts in
+// one folder; this adds the user's own installed fonts too (on Windows, those installed "for me
+// only"). Call once, after the application object is made.
+void addUserFonts();
+
 // A font family to start new text with (installed on this machine).
 QString defaultFamily();
 

@@ -3,6 +3,7 @@
 #include <catch2/catch_session.hpp>
 
 #include "PythonHost.h"
+#include "TextShapes.h"
 
 #include <QApplication>
 
@@ -21,6 +22,7 @@ int main(int argc, char* argv[])
     }
 #endif
     QApplication app(argc, argv);
+    textshapes::addUserFonts();
     QString error;
     if (!script::initialise(&error)) {
         std::fprintf(stderr, "warning: %s (scripting tests will fail)\n", qPrintable(error));

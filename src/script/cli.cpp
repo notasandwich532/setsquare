@@ -9,6 +9,7 @@
 
 #include "Document.h"
 #include "PythonHost.h"
+#include "TextShapes.h"
 
 #include <QGuiApplication>
 #include <QStringList>
@@ -36,6 +37,7 @@ int main(int argc, char* argv[])
     }
 #endif
     QGuiApplication app(argc, argv);
+    textshapes::addUserFonts();
     QStringList args = QGuiApplication::arguments().mid(1);
 
     QString openPath, code, scriptPath;
