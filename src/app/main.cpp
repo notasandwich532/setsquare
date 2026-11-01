@@ -1,3 +1,4 @@
+#include "Icons.h"
 #include "MainWindow.h"
 #include "PythonHost.h"
 #include "Theme.h"
@@ -13,6 +14,7 @@ int main(int argc, char* argv[])
     QApplication app(argc, argv);
     QApplication::setApplicationName("drawing_app");
     QApplication::setOrganizationName("drawing_app");
+    QApplication::setWindowIcon(icons::appIcon());
 
     QCommandLineParser parser;
     parser.setApplicationDescription("Parametric 2D drawing app");

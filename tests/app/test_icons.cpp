@@ -127,3 +127,14 @@ TEST_CASE("The appearance tools and presentation view have icons that render", "
     CHECK(QSvgRenderer(svg).isValid());
     CHECK(!icons::svg(QStringLiteral("presentation"), QIcon::On).contains("#f2b33d"));
 }
+TEST_CASE("The app icon is compiled in and draws at window/taskbar sizes", "[icons]")
+{
+    const QIcon icon = icons::appIcon();
+    REQUIRE_FALSE(icon.isNull());
+    for (int size : {16, 32, 256}) {
+        INFO(size);
+        const QImage image = icon.pixmap(size).toImage();
+        CHECK(image.width() == size);
+        CHECK(inkPixels(image, Qt::transparent) > size * size / 2);  // a filled tile, mostly
+    }
+}

@@ -87,6 +87,25 @@ QIcon forName(const QString& name)
     return QIcon(new SvgIconEngine(std::move(data)));
 }
 
+QIcon appIcon()
+{
+    QSvgRenderer renderer(QStringLiteral(":/icons/app/drawapp.svg"));
+    if (!renderer.isValid()) {
+        return {};
+    }
+    QIcon icon;
+    for (int size : {16, 20, 24, 32, 40, 48, 64, 128, 256}) {
+        QPixmap pm(size, size);
+        pm.fill(Qt::transparent);
+        QPainter painter(&pm);
+        painter.setRenderHint(QPainter::Antialiasing);
+        renderer.render(&painter, QRectF(0, 0, size, size));
+        painter.end();
+        icon.addPixmap(pm);
+    }
+    return icon;
+}
+
 QByteArray svg(const QString& name, QIcon::State state)
 {
     QByteArray data = load(name);
