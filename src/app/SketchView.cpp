@@ -648,14 +648,35 @@ void SketchView::drawSketch(QPainter& painter) const
         }
     }
 
-    // What the selected constraints and dimensions act on, shown bright pink.
+    // What the selected constraints and dimensions act on, shown bright pink. Constraints that
+    // chain (equal, parallel, concentric, collinear) show the whole chain: three lines made equal
+    // by two constraints are all equal, and the symbol on them stands for both.
     std::set<core::Id> constrained;
+    auto chains = [](core::ConstraintType t) {
+        return t == core::ConstraintType::Equal || t == core::ConstraintType::Parallel
+            || t == core::ConstraintType::Concentric || t == core::ConstraintType::Collinear;
+    };
     for (core::Id id : m_selection) {
-        if (sketch.hasConstraint(id)) {
-            for (core::Id r : sketch.constraint(id).refs) {
-                constrained.insert(r);
+        if (!sketch.hasConstraint(id)) {
+            continue;
+        }
+        const core::Constraint& c = sketch.constraint(id);
+        constrained.insert(c.refs.begin(), c.refs.end());
+        if (!chains(c.type)) {
+            continue;
+        }
+        std::set<core::Id> group(c.refs.begin(), c.refs.end());
+        for (bool grew = true; grew;) {
+            grew = false;
+            for (const auto& [oid, other] : sketch.constraints()) {
+                if (other.type == c.type && std::ranges::any_of(other.refs, [&](core::Id r) { return group.contains(r); })) {
+                    for (core::Id r : other.refs) {
+                        grew |= group.insert(r).second;
+                    }
+                }
             }
         }
+        constrained.insert(group.begin(), group.end());
     }
 
     auto styleFor = [&](const core::Entity& e) {

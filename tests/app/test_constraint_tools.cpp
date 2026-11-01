@@ -455,3 +455,34 @@ TEST_CASE("Selecting a constraint shows its geometry in pink", "[constraints][se
     f.view.setSelection({k});
     CHECK(pinkPixels() > 100);  // the whole line
 }
+
+TEST_CASE("Selecting one of a chain of equal constraints shows the whole chain", "[constraints][selection]")
+{
+    Fixture f;
+    const Id a = f.line(-30, 20, -10, 20);
+    const Id b = f.line(-5, 0, 15, 0);
+    const Id c = f.line(20, -20, 40, -20);
+    const Id other = f.line(-30, -30, -10, -30);  // equal to nothing
+    Id first = kNoId;
+    f.doc.modify("equal", [&](Sketch& s) {
+        first = s.addConstraint(CT::Equal, {a, b});
+        s.addConstraint(CT::Equal, {b, c});
+    });
+    f.view.setSelection({first});
+    const QImage image = f.view.grab().toImage();
+    auto pinkNear = [&](double x, double y) {
+        const QPoint p = f.at(x, y);
+        for (int dy = -2; dy <= 2; ++dy) {
+            const QColor col = image.pixelColor(p.x(), p.y() + dy);
+            if (col.red() > 230 && col.green() < 90 && col.blue() > 180) {
+                return true;
+            }
+        }
+        return false;
+    };
+    CHECK(pinkNear(-20, 20));
+    CHECK(pinkNear(5, 0));
+    CHECK(pinkNear(30, -20));  // only equal through b, but part of the chain
+    CHECK_FALSE(pinkNear(-20, -30));
+    (void)other;
+}
