@@ -581,3 +581,24 @@ TEST_CASE("Features and fixed items show a symbol on the canvas that selects the
     QTest::mouseClick(&f.view, Qt::LeftButton, {}, offsetSymbol);
     CHECK(f.view.selection().contains(k));
 }
+TEST_CASE("A command panel works out sums; Enter on half a sum doesn't go ahead", "[transform][expression]")
+{
+    Fixture f;
+    f.selectRect();
+    f.view.setTool(ToolKind::Move);
+    auto* dx = f.field<QDoubleSpinBox>("dx");
+    dx->selectAll();
+    QTest::keyClicks(dx, "3*(");
+    QTest::keyClick(dx, Qt::Key_Return);
+    f.settle();
+    CHECK(f.view.toolKind() == ToolKind::Move);  // still open: nothing made from "3*("
+    CHECK(dx->value() == Approx(0.0));            // put back
+    CHECK(f.pos(f.rect.corners[0]).x == Approx(10.0).margin(1e-6));
+
+    dx->selectAll();
+    QTest::keyClicks(dx, "3*(2+1)");
+    QTest::keyClick(dx, Qt::Key_Return);  // works it out, then OK
+    f.settle();
+    CHECK(f.view.toolKind() == ToolKind::Select);
+    CHECK(f.pos(f.rect.corners[0]).x == Approx(19.0).margin(1e-6));
+}

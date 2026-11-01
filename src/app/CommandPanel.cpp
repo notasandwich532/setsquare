@@ -1,5 +1,7 @@
 #include "CommandPanel.h"
 
+#include "NumberInput.h"
+
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -105,7 +107,7 @@ SelectionButton* CommandPanel::addSelection(const QString& label, const char* na
 
 QSpinBox* CommandPanel::addCount(const QString& label, const char* name, int value, int min, int max)
 {
-    auto* box = new QSpinBox(this);
+    auto* box = new ExpressionCountBox(this);
     box->setObjectName(QLatin1String(name));
     box->setRange(min, max);
     box->setValue(value);
@@ -117,7 +119,7 @@ QSpinBox* CommandPanel::addCount(const QString& label, const char* name, int val
 QDoubleSpinBox* CommandPanel::addNumber(const QString& label, const char* name, double value, double min, double max,
                                         const QString& suffix)
 {
-    auto* box = new QDoubleSpinBox(this);
+    auto* box = new ExpressionSpinBox(this);
     box->setObjectName(QLatin1String(name));
     box->setDecimals(3);
     box->setRange(min, max);
@@ -214,7 +216,18 @@ bool CommandPanel::eventFilter(QObject* watched, QEvent* event)
     else if (watched != m_canvas && event->type() == QEvent::KeyPress) {
         const int key = static_cast<QKeyEvent*>(event)->key();
         if (key == Qt::Key_Return || key == Qt::Key_Enter) {
-            emit accepted();
+            // A sum typed in a number box is worked out first; one that doesn't read is put back,
+            // and that Enter doesn't go ahead (so nothing is made from a half-typed sum).
+            bool settled = true;
+            if (auto* number = qobject_cast<ExpressionSpinBox*>(watched)) {
+                settled = number->commitText();
+            }
+            else if (auto* count = qobject_cast<ExpressionCountBox*>(watched)) {
+                settled = count->commitText();
+            }
+            if (settled) {
+                emit accepted();
+            }
             return true;
         }
         if (key == Qt::Key_Escape) {

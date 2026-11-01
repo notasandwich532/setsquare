@@ -9,6 +9,7 @@ set(QT_BIN_DIR "${QT6_INSTALL_PREFIX}/${QT6_INSTALL_BINS}")
 add_executable(core_tests
     core/test_builders.cpp
     core/test_dimensions.cpp
+    core/test_expression.cpp
     core/test_export.cpp
     core/test_features.cpp
     core/test_geometry.cpp

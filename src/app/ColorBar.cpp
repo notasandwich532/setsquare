@@ -1,6 +1,7 @@
 #include "ColorBar.h"
 
 #include "Document.h"
+#include "NumberInput.h"
 #include "SketchView.h"
 
 #include <QColorDialog>
@@ -206,8 +207,12 @@ ColorBar::ColorBar(SketchView& view, QWidget* parent)
             return;
         }
         const QString text = m_width->currentText().trimmed();
-        bool ok = false;
-        double w = text.section(QLatin1Char(' '), 0, 0).toDouble(&ok);
+        double w = 0.0;
+        QString bare = text;
+        if (bare.endsWith(QStringLiteral("mm"))) {
+            bare.chop(2);  // as the list shows them: "0.5 mm"
+        }
+        bool ok = readNumber(bare, w);
         if (text.compare(tr("Hairline"), Qt::CaseInsensitive) == 0) {
             w = 0.0;
             ok = true;

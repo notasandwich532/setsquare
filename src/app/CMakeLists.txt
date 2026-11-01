@@ -16,6 +16,8 @@ add_library(drawapp_lib STATIC
     ColorBar.h
     CommandPanel.cpp
     CommandPanel.h
+    NumberInput.cpp
+    NumberInput.h
     ConstraintPanel.cpp
     ConstraintPanel.h
     FrameClock.cpp

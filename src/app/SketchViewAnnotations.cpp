@@ -2,6 +2,7 @@
 
 #include "Document.h"
 #include "Icons.h"
+#include "NumberInput.h"
 #include "SketchView.h"
 #include "Theme.h"
 
@@ -581,11 +582,10 @@ void SketchView::editValue(Id id, QPointF at)
     };
     editor->onCancel = close;
     editor->onAccept = [this, editor, id, close] {
-        bool ok = false;
-        const double value = QLocale::c().toDouble(editor->text().trimmed(), &ok);
+        double value = 0.0;
         QString error;
-        if (!ok) {
-            emit message(tr("Not a number: %1").arg(editor->text()));
+        if (!readNumber(editor->text(), value, &error)) {
+            emit message(tr("Can't work out \"%1\": %2").arg(editor->text().trimmed(), error));
         }
         else if (!m_doc.setDimensionValue(id, value, &error)) {
             emit message(error);

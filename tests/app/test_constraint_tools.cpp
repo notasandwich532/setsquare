@@ -12,8 +12,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QCoreApplication>
+#include <QDoubleSpinBox>
 #include <QLineEdit>
 #include <QSignalSpy>
+#include <QSpinBox>
 #include <QTest>
 
 #include <cmath>
@@ -527,4 +529,57 @@ TEST_CASE("Ratio: pick two lines, type how many times the second the first is; e
     QTest::mouseDClick(&f.view, Qt::LeftButton, {}, symbol);
     f.typeIntoEditor("0.5");
     CHECK(f.length(a) == Approx(0.5 * f.length(b)).margin(1e-7));
+}
+TEST_CASE("Number inputs take sums: the dimension box, panels and counts", "[constraints][expression]")
+{
+    Fixture f;
+    // A dimension typed as a sum.
+    const Id l = f.line(0, 0, 30, 0);
+    Id d = kNoId;
+    f.doc.modify("dim", [&](Sketch& s) {
+        s.entity(s.line(l).p1).fixed = true;
+        s.addConstraint(CT::Horizontal, {l});
+        d = s.addConstraint(CT::Distance, {l}, 30.0);
+    });
+    f.view.editDimension(d);
+    f.typeIntoEditor("(100 - 2*15) / 2");
+    CHECK(f.sketch().constraint(d).value == Approx(35.0));
+    CHECK(f.length(l) == Approx(35.0));
+
+    // Something that doesn't work out is refused, saying why; the value stays.
+    QStringList messages;
+    QObject::connect(&f.view, &SketchView::message, [&](const QString& m) { messages << m; });
+    f.view.editDimension(d);
+    f.typeIntoEditor("35/0");
+    CHECK(f.sketch().constraint(d).value == Approx(35.0));
+    REQUIRE(!messages.isEmpty());
+    CHECK(messages.last().contains("divide by zero"));
+
+    // A panel's number box: worked out on Enter, shown as the result.
+    f.view.setTool(ToolKind::Fillet);
+    QCoreApplication::processEvents();
+    auto* radius = f.view.findChild<QDoubleSpinBox*>("radius");
+    REQUIRE(radius != nullptr);
+    radius->selectAll();
+    QTest::keyClicks(radius, "2*3+0.5");
+    QTest::keyClick(radius, Qt::Key_Return);
+    CHECK(radius->value() == Approx(6.5));
+    CHECK(radius->text().startsWith("6.5"));  // shown as the result
+    CHECK(f.view.modifyOptions().filletRadius == Approx(6.5));
+    // Unreadable: Enter puts it back as it was before typing (not the "2" it passed through).
+    radius->selectAll();
+    QTest::keyClicks(radius, "2*(");
+    QTest::keyClick(radius, Qt::Key_Return);
+    CHECK(radius->value() == Approx(6.5));
+    CHECK(f.view.modifyOptions().filletRadius == Approx(6.5));
+
+    // A count: whole results only.
+    f.view.setTool(ToolKind::Divide);
+    QCoreApplication::processEvents();
+    auto* points = f.view.findChild<QSpinBox*>("points");
+    REQUIRE(points != nullptr);
+    points->selectAll();
+    QTest::keyClicks(points, "12/4");
+    QTest::keyClick(points, Qt::Key_Return);
+    CHECK(points->value() == 3);
 }

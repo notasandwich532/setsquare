@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "NumberInput.h"
 
 #include "ColorBar.h"
 #include "Icons.h"
@@ -320,7 +321,7 @@ void MainWindow::exportSvg()
     plain->setChecked(m_svgOptions.undecorated);
     auto* construction = new QCheckBox(tr("Construction geometry (grey, dashed)"), &dialog);
     construction->setChecked(m_svgOptions.construction);
-    auto* margin = new QDoubleSpinBox(&dialog);
+    auto* margin = new ExpressionSpinBox(&dialog);
     margin->setRange(0.0, 1000.0);
     margin->setDecimals(2);
     margin->setSuffix(QStringLiteral(" mm"));
