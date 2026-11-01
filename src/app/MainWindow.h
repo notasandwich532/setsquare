@@ -44,6 +44,7 @@ private:
     void newSketch();
 
     // Clipboard: the selection (and the constraints among it) as a sketch fragment.
+    void showHistory();  // the document's command history, to read, copy or save as a macro
     void copySelection();
     void pasteClipboard();  // starts the Paste tool with the clipboard's fragment
 

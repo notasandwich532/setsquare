@@ -114,7 +114,7 @@ Constraint constraintFromJson(const json& j)
 }
 }  // namespace
 
-std::string toJson(const Sketch& sketch, bool compact)
+std::string toJson(const Sketch& sketch, bool compact, const std::vector<std::string>* history)
 {
     json entities = json::array();
     for (const auto& [id, e] : sketch.entities()) {
@@ -141,10 +141,13 @@ std::string toJson(const Sketch& sketch, bool compact)
         }
         doc["strokes"] = std::move(strokes);
     }
+    if (history && !history->empty()) {
+        doc["history"] = *history;
+    }
     return compact ? doc.dump() : doc.dump(2) + "\n";
 }
 
-Sketch fromJson(const std::string& text)
+Sketch fromJson(const std::string& text, std::vector<std::string>* history)
 {
     try {
         const json doc = json::parse(text);
@@ -194,6 +197,9 @@ Sketch fromJson(const std::string& text)
                 throw SketchError("unknown line style '" + dash + "'");
             }
             sketch.setStroke(j.at("curve").get<Id>(), style);
+        }
+        if (history) {
+            *history = doc.value("history", std::vector<std::string>{});
         }
         return sketch;
     }

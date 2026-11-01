@@ -39,8 +39,8 @@ public:
     void endTransaction();
     bool inTransaction() const { return m_transactionDepth > 0; }
 
-    // While alive, nothing is emitted through recorded(); used for calls made from Python,
-    // which is already code.
+    // While alive, nothing is emitted through recorded() (it still goes into the history); used
+    // for calls made from Python, which is already code.
     class SilentRecording
     {
     public:
@@ -94,6 +94,13 @@ public:
     // an origin point.
     void reset(core::Sketch sketch = {});
 
+    // --- command history ---
+    // The Python commands that built the current sketch, oldest first, one per edit: what the
+    // recorder writes for UI actions and for calls made from scripts and the console. Undo takes
+    // the undone commands off (redo puts them back), so replaying the history on a new sketch
+    // rebuilds this one. Saved in .dsk files.
+    const QStringList& history() const { return m_history; }
+
     // --- files ---
     QString filePath() const { return m_filePath; }  // empty until saved or opened
     bool isModified() const { return m_revision != m_savedRevision; }
@@ -110,11 +117,12 @@ signals:
     void recorded(const QString& python);
 
 private:
-    void pushUndo(core::Sketch snapshot);
+    void pushUndo(core::Sketch snapshot, QStringList history);
     // Replaces the current sketch with a new state as one undo step (or folds it into the
     // open transaction).
     void commit(core::Sketch next);
-    void record(const QString& python);
+    void record(const QString& python);      // an edit: recorded and kept in the history
+    void announce(const QString& python);    // recorded but not history (undo, save, ...)
     // Commits a solved working copy if it isn't more over-constrained than the current sketch.
     // `hold`: points to keep in place where the sketch leaves a choice.
     bool commitChecked(core::Sketch working, QString* error, const std::vector<core::Id>& hold = {});
@@ -130,6 +138,7 @@ private:
     {
         core::Sketch sketch;
         quint64 revision;
+        QStringList history;  // the commands that built `sketch`
     };
     std::vector<Snapshot> m_undo;
     std::vector<Snapshot> m_redo;
@@ -155,8 +164,10 @@ private:
 
     int m_transactionDepth = 0;
     core::Sketch m_beforeTransaction;
+    QStringList m_historyBeforeTransaction;
     quint64 m_revisionBeforeTransaction = 0;
     bool m_transactionChanged = false;
 
     int m_silence = 0;
+    QStringList m_history;
 };

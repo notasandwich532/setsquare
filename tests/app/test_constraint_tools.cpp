@@ -433,3 +433,25 @@ TEST_CASE("Points onto a curve, from a selection", "[constraints][selection]")
         CHECK(distanceTo(f.sketch(), l, {at.x, at.y}) == Approx(0.0).margin(1e-6));
     }
 }
+
+TEST_CASE("Selecting a constraint shows its geometry in pink", "[constraints][selection]")
+{
+    Fixture f;
+    const Id l = f.line(-20, 10, 20, 12);
+    Id k = kNoId;
+    f.doc.modify("horizontal", [&](Sketch& s) { k = s.addConstraint(CT::Horizontal, {l}); });
+    auto pinkPixels = [&] {
+        const QImage image = f.view.grab().toImage();
+        int count = 0;
+        for (int y = 0; y < image.height(); ++y) {
+            for (int x = 0; x < image.width(); ++x) {
+                const QColor c = image.pixelColor(x, y);
+                count += c.red() > 230 && c.green() < 90 && c.blue() > 180;
+            }
+        }
+        return count;
+    };
+    CHECK(pinkPixels() == 0);
+    f.view.setSelection({k});
+    CHECK(pinkPixels() > 100);  // the whole line
+}

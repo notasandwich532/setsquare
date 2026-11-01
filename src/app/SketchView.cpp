@@ -37,6 +37,7 @@ constexpr double kCurveWidth = 1.6;
 constexpr double kHighlightWidth = 2.6;
 constexpr double kPointRadius = 2.6;
 constexpr double kRadToDeg = 180.0 / std::numbers::pi;
+const QColor kConstrainedPink(0xff, 0x2b, 0xd6);  // geometry of the selected constraints
 }  // namespace
 
 // Tool helpers that need the full view definition.
@@ -627,6 +628,16 @@ void SketchView::drawSketch(QPainter& painter) const
         }
     }
 
+    // What the selected constraints and dimensions act on, shown bright pink.
+    std::set<core::Id> constrained;
+    for (core::Id id : m_selection) {
+        if (sketch.hasConstraint(id)) {
+            for (core::Id r : sketch.constraint(id).refs) {
+                constrained.insert(r);
+            }
+        }
+    }
+
     auto styleFor = [&](const core::Entity& e) {
         QColor color = result.fullyConstrained.contains(e.id) ? colors.fullyConstrained : colors.underConstrained;
         if (e.construction) {
@@ -636,7 +647,11 @@ void SketchView::drawSketch(QPainter& painter) const
             color = colors.conflict;
         }
         double width = kCurveWidth;
-        if (m_selection.contains(e.id)) {
+        if (constrained.contains(e.id)) {
+            color = kConstrainedPink;
+            width = kHighlightWidth;
+        }
+        else if (m_selection.contains(e.id)) {
             color = colors.selection;
             width = kHighlightWidth;
         }
@@ -650,10 +665,12 @@ void SketchView::drawSketch(QPainter& painter) const
 
     // The axes are drawn with the grid; here they only light up when hovered or selected.
     for (core::Id axis : {sketch.xAxis(), sketch.yAxis()}) {
-        if (axis == core::kNoId || m_presentation || !(m_selection.contains(axis) || axis == m_hovered)) {
+        const bool pink = constrained.contains(axis);
+        if (axis == core::kNoId || m_presentation || !(pink || m_selection.contains(axis) || axis == m_hovered)) {
             continue;
         }
-        painter.setPen(QPen(m_selection.contains(axis) ? colors.selection : colors.hover, kHighlightWidth));
+        painter.setPen(QPen(pink ? kConstrainedPink : m_selection.contains(axis) ? colors.selection : colors.hover,
+                            kHighlightWidth));
         const QPointF o = toScreen({0, 0});
         if (axis == sketch.xAxis()) {
             painter.drawLine(QPointF(0, o.y()), QPointF(width(), o.y()));
@@ -713,7 +730,7 @@ void SketchView::drawSketch(QPainter& painter) const
             continue;  // reference geometry isn't part of the drawing
         }
         if (m_presentation && decorated.contains(id)) {
-            if (!m_selection.contains(id) && id != m_hovered) {
+            if (!m_selection.contains(id) && id != m_hovered && !constrained.contains(id)) {
                 continue;  // its stroke is what shows
             }
             // Selected or hovered: a thin highlight over the stroke.
@@ -738,7 +755,7 @@ void SketchView::drawSketch(QPainter& painter) const
         }
         const core::Point& p = std::get<core::Point>(e.geom);
         QPen pen = styleFor(e);
-        const bool highlighted = m_selection.contains(id) || id == m_hovered;
+        const bool highlighted = m_selection.contains(id) || id == m_hovered || constrained.contains(id);
         const double r = highlighted ? kPointRadius + 1.2 : kPointRadius;
         painter.setPen(Qt::NoPen);
         painter.setBrush(pen.color());

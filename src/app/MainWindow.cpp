@@ -14,6 +14,11 @@
 
 #include <QClipboard>
 #include <QCursor>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QPlainTextEdit>
+#include <QPushButton>
+#include <QVBoxLayout>
 #include <QDesktopServices>
 #include <QGuiApplication>
 #include <QMenu>
@@ -293,6 +298,54 @@ namespace
 const QString kSketchMime = QStringLiteral("application/x-drawapp-sketch");
 }
 
+void MainWindow::showHistory()
+{
+    QDialog dialog(this);
+    dialog.setObjectName(QStringLiteral("historyDialog"));
+    dialog.setWindowTitle(tr("Command History"));
+    dialog.resize(720, 480);
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* note = new QLabel(tr("The commands that built this drawing, oldest first. It's saved with the file, and "
+                               "running it in a new sketch rebuilds the drawing."),
+                            &dialog);
+    note->setWordWrap(true);
+    layout->addWidget(note);
+    auto* text = new QPlainTextEdit(&dialog);
+    text->setObjectName(QStringLiteral("historyText"));
+    text->setReadOnly(true);
+    text->setLineWrapMode(QPlainTextEdit::NoWrap);
+    QFont mono(QStringLiteral("Consolas"));
+    mono.setStyleHint(QFont::Monospace);
+    text->setFont(mono);
+    const QString history = m_doc->history().join(QLatin1Char('\n'));
+    text->setPlainText(history.isEmpty() ? tr("# (nothing yet)") : history);
+    layout->addWidget(text);
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+    auto* copy = buttons->addButton(tr("Copy"), QDialogButtonBox::ActionRole);
+    auto* saveMacro = buttons->addButton(tr("Save as Macro..."), QDialogButtonBox::ActionRole);
+    connect(copy, &QPushButton::clicked, &dialog, [history] { QGuiApplication::clipboard()->setText(history); });
+    connect(saveMacro, &QPushButton::clicked, &dialog, [this, &dialog, history] {
+        const QString path = QFileDialog::getSaveFileName(&dialog, tr("Save History as Macro"),
+                                                          macrosFolder() + QStringLiteral("/history.py"),
+                                                          tr("Python (*.py)"));
+        if (path.isEmpty()) {
+            return;
+        }
+        QFile file(path);
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            QMessageBox::critical(&dialog, tr("Save failed"), file.errorString());
+            return;
+        }
+        file.write((QStringLiteral("# Command history from Drawing App. Run in a new sketch to rebuild it.\n") + history
+                    + QLatin1Char('\n'))
+                       .toUtf8());
+    });
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+    dialog.exec();
+}
+
 void MainWindow::copySelection()
 {
     std::vector<core::Id> items;
@@ -366,6 +419,10 @@ void MainWindow::createActions()
     auto* saveAs = fileMenu->addAction(tr("Save &As..."));
     saveAs->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S));
     connect(saveAs, &QAction::triggered, this, &MainWindow::saveAs);
+    fileMenu->addSeparator();
+    auto* historyAction = fileMenu->addAction(tr("Command &History..."));
+    historyAction->setToolTip(tr("The commands that built this drawing (saved with it)"));
+    connect(historyAction, &QAction::triggered, this, &MainWindow::showHistory);
     fileMenu->addSeparator();
     auto* quit = fileMenu->addAction(tr("&Quit"));
     quit->setShortcut(QKeySequence::Quit);

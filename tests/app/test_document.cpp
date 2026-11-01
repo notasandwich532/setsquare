@@ -1,6 +1,7 @@
 // Document file handling: save/open round trip and the modified flag.
 
 #include "Document.h"
+#include "PythonHost.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -92,4 +93,48 @@ TEST_CASE("Files without an origin get one when opened", "[document][files]")
     REQUIRE(doc.open(path));
     CHECK(doc.sketch().origin() != kNoId);
     CHECK(doc.sketch().entities().size() == 6);  // the point, plus origin and axes
+}
+
+TEST_CASE("The command history follows edits, undo and redo, and is saved", "[document][history]")
+{
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    Document doc;
+    Id line = kNoId;
+    doc.edit("line", [&](Editor& ed) { line = ed.line(ed.point(0, 0), ed.point(30, 5)); });
+    REQUIRE(doc.history().size() == 1);
+    CHECK(doc.history()[0].contains("s.line("));
+    doc.addConstraint(ConstraintType::Horizontal, {line});
+    doc.addConstraint(ConstraintType::Distance, {line}, 30.0);
+    CHECK(doc.history().size() == 3);
+
+    doc.undo();  // the undone command comes off
+    CHECK(doc.history().size() == 2);
+    doc.redo();
+    CHECK(doc.history().size() == 3);
+    CHECK(doc.history().last().contains("s.distance("));
+
+    // Calls made from Python go in too, as the same kind of line.
+    script::setDocument(&doc);
+    script::resetConsole();
+    REQUIRE(script::runConsole(QStringLiteral("s.circle((50, 0), 4)")).ok);
+    script::setDocument(nullptr);
+    REQUIRE(doc.history().size() == 4);
+    CHECK(doc.history().last().contains("s.circle("));
+
+    const QString path = dir.filePath("history.dsk");
+    REQUIRE(doc.save(path));
+    Document loaded;
+    REQUIRE(loaded.open(path));
+    CHECK(loaded.history() == doc.history());
+
+    // Replaying it rebuilds the drawing.
+    Document rebuilt;
+    script::setDocument(&rebuilt);
+    script::resetConsole();
+    const script::RunResult r = script::runConsole(doc.history().join('\n'));
+    script::setDocument(nullptr);
+    REQUIRE(r.ok);
+    CHECK(rebuilt.sketch().entities().size() == doc.sketch().entities().size());
+    CHECK(rebuilt.sketch().constraints().size() == doc.sketch().constraints().size());
 }

@@ -1144,7 +1144,15 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
         .def_property_readonly("modified", [](const DocumentH&) { return doc().isModified(); })
         .def("transaction", [](const DocumentH&) { return Transaction{}; },
              "with doc.transaction(): ... groups changes into one undo step")
-        .def("to_json", [](const DocumentH&) { return core::toJson(sketch()); });
+        .def("to_json", [](const DocumentH&) { return core::toJson(sketch()); })
+        .def_property_readonly("history", [](const DocumentH&) {
+            py::list out;
+            for (const QString& entry : doc().history()) {
+                out.append(entry.toStdString());
+            }
+            return out;
+        }, "The Python commands that built the sketch, one per edit (saved with it; undo takes "
+           "commands off). Run them in a new document to rebuild it.");
 
     m.def("document", []() {
         doc();  // raises if there is none

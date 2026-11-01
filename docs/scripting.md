@@ -179,6 +179,8 @@ e.fully_constrained
 ### Document and window
 ```python
 doc.save(path)  doc.open(path)  doc.new()  doc.undo()  doc.redo()  doc.path  doc.modified
+doc.history      # the commands that built the sketch, one per edit (saved in the .dsk; undo
+                 # takes commands off); run them in a new sketch to rebuild it
 doc.to_json()
 app.fit()  app.selection = [l, c]  app.tool = "line"  app.message("hi")   # needs the UI
 ```

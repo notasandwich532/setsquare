@@ -3,6 +3,7 @@
 #include "Sketch.h"
 
 #include <string>
+#include <vector>
 
 // Sketch <-> JSON (.dsk files). The format is versioned; ids are kept so that files diff well
 // and scripts can refer to things by id.
@@ -19,9 +20,11 @@ namespace core
 
 inline constexpr int kFileVersion = 1;
 
-std::string toJson(const Sketch& sketch, bool compact = false);  // compact: one line
+// `history`, if given, is stored too: the commands (Python) that built the sketch.
+std::string toJson(const Sketch& sketch, bool compact = false, const std::vector<std::string>* history = nullptr);
 
-// Throws SketchError with a readable message for malformed or unsupported files.
-Sketch fromJson(const std::string& text);
+// Throws SketchError with a readable message for malformed or unsupported files. The stored
+// command history, if any, goes to *history.
+Sketch fromJson(const std::string& text, std::vector<std::string>* history = nullptr);
 
 }  // namespace core

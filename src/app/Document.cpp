@@ -344,15 +344,16 @@ void Document::undo()
     if (m_undo.empty() || isDragging() || inTransaction()) {
         return;
     }
-    m_redo.push_back({std::move(m_sketch), m_revision});
+    m_redo.push_back({std::move(m_sketch), m_revision, std::move(m_history)});
     m_sketch = std::move(m_undo.back().sketch);
     m_revision = m_undo.back().revision;
+    m_history = std::move(m_undo.back().history);  // the undone commands come off the history
     m_undo.pop_back();
     resolve();
     emit changed();
     emit undoStateChanged();
     emit fileStateChanged();
-    record(QStringLiteral("doc.undo()"));
+    announce(QStringLiteral("doc.undo()"));
 }
 
 void Document::redo()
@@ -360,21 +361,23 @@ void Document::redo()
     if (m_redo.empty() || isDragging() || inTransaction()) {
         return;
     }
-    m_undo.push_back({std::move(m_sketch), m_revision});
+    m_undo.push_back({std::move(m_sketch), m_revision, std::move(m_history)});
     m_sketch = std::move(m_redo.back().sketch);
     m_revision = m_redo.back().revision;
+    m_history = std::move(m_redo.back().history);
     m_redo.pop_back();
     resolve();
     emit changed();
     emit undoStateChanged();
     emit fileStateChanged();
-    record(QStringLiteral("doc.redo()"));
+    announce(QStringLiteral("doc.redo()"));
 }
 
 void Document::beginTransaction()
 {
     if (m_transactionDepth++ == 0) {
         m_beforeTransaction = m_sketch;
+        m_historyBeforeTransaction = m_history;
         m_revisionBeforeTransaction = m_revision;
         m_transactionChanged = false;
     }
@@ -387,9 +390,10 @@ void Document::endTransaction()
     }
     if (m_transactionChanged) {
         m_revision = m_revisionBeforeTransaction;  // undo returns to the pre-transaction state
-        pushUndo(std::move(m_beforeTransaction));  // the whole transaction is one step
+        pushUndo(std::move(m_beforeTransaction), std::move(m_historyBeforeTransaction));  // one step
     }
     m_beforeTransaction = {};
+    m_historyBeforeTransaction = {};
     m_transactionChanged = false;
 }
 
@@ -401,12 +405,12 @@ void Document::commit(core::Sketch next)
         m_transactionChanged = true;
         return;
     }
-    pushUndo(std::move(before));
+    pushUndo(std::move(before), m_history);  // (the edit's own commands are recorded after this)
 }
 
-void Document::pushUndo(core::Sketch snapshot)
+void Document::pushUndo(core::Sketch snapshot, QStringList history)
 {
-    m_undo.push_back({std::move(snapshot), m_revision});
+    m_undo.push_back({std::move(snapshot), m_revision, std::move(history)});
     if (m_undo.size() > kMaxUndo) {
         m_undo.erase(m_undo.begin());
     }
@@ -421,12 +425,14 @@ void Document::reset(core::Sketch sketch)
     m_dragSolver.reset();
     m_sketch = std::move(sketch);
     m_sketch.ensureOrigin();
+    m_history.clear();
     m_undo.clear();
     m_redo.clear();
     m_revision = m_savedRevision = m_nextRevision++;
     if (inTransaction()) {
         // A script opened a file / started over: the transaction continues from the new sketch.
         m_beforeTransaction = m_sketch;
+        m_historyBeforeTransaction = m_history;
         m_revisionBeforeTransaction = m_revision;
         m_transactionChanged = false;
     }
@@ -443,11 +449,22 @@ void Document::resolve()
 
 void Document::record(const QString& python)
 {
-    if (m_silence == 0 && !python.isEmpty()) {
+    if (python.isEmpty()) {
+        return;
+    }
+    // Calls made from Python are kept too (in the same form): it's what built the sketch.
+    m_history << python;
+    if (m_silence == 0) {
         emit recorded(python);
     }
 }
 
+void Document::announce(const QString& python)
+{
+    if (m_silence == 0 && !python.isEmpty()) {
+        emit recorded(python);
+    }
+}
 // ---------------------------------------------------------------------------------------------
 // Files
 // ---------------------------------------------------------------------------------------------
@@ -455,7 +472,11 @@ void Document::record(const QString& python)
 bool Document::save(const QString& path, QString* error)
 {
     QSaveFile file(path);  // writes to a temp file and renames, so a failed save can't truncate
-    const std::string json = core::toJson(m_sketch);
+    std::vector<std::string> history;
+    for (const QString& entry : m_history) {
+        history.push_back(entry.toStdString());
+    }
+    const std::string json = core::toJson(m_sketch, false, &history);
     if (!file.open(QIODevice::WriteOnly) || file.write(json.data(), qint64(json.size())) != qint64(json.size())
         || !file.commit()) {
         if (error) {
@@ -466,7 +487,7 @@ bool Document::save(const QString& path, QString* error)
     m_filePath = path;
     m_savedRevision = m_revision;
     emit fileStateChanged();
-    record(QStringLiteral("doc.save(%1)").arg(pyString(path)));
+    announce(QStringLiteral("doc.save(%1)").arg(pyString(path)));
     return true;
 }
 
@@ -480,8 +501,9 @@ bool Document::open(const QString& path, QString* error)
         return false;
     }
     core::Sketch loaded;
+    std::vector<std::string> history;
     try {
-        loaded = core::fromJson(file.readAll().toStdString());
+        loaded = core::fromJson(file.readAll().toStdString(), &history);
     }
     catch (const core::SketchError& e) {
         if (error) {
@@ -490,9 +512,15 @@ bool Document::open(const QString& path, QString* error)
         return false;
     }
     reset(std::move(loaded));
+    for (const std::string& entry : history) {
+        m_history << QString::fromStdString(entry);
+    }
+    if (inTransaction()) {
+        m_historyBeforeTransaction = m_history;
+    }
     m_filePath = path;
     emit fileStateChanged();
-    record(QStringLiteral("doc.open(%1)").arg(pyString(path)));
+    announce(QStringLiteral("doc.open(%1)").arg(pyString(path)));
     return true;
 }
 
@@ -501,5 +529,5 @@ void Document::newSketch()
     reset();
     m_filePath.clear();
     emit fileStateChanged();
-    record(QStringLiteral("doc.new()"));
+    announce(QStringLiteral("doc.new()"));
 }
