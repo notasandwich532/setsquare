@@ -647,6 +647,219 @@ def icon_arc_slot_3point():
     return finish("arc_slot_3point")
 
 
+# --- modify tools -----------------------------------------------------------------------------
+# What's there is GREY; what the tool changes or makes is RED. A thin dashed GREY line is how it
+# was (a removed corner, the original of a moved shape).
+
+
+def ghost(curves):
+    """Show construction curves (e.g. the originals a fillet leaves) as thin dashed lines."""
+    for c in curves:
+        c.construction = False
+    return stroke(curves, GREY, width=THIN, dash="dashed")
+
+
+def cross(boundary_dash="solid"):
+    """A vertical boundary at x = 10 and a level line crossing it; returns (boundary, left, right)."""
+    width = W if boundary_dash == "solid" else 2
+    boundary = line((10, 3), (10, 21), GREY, width=width, dash=boundary_dash)
+    s.vertical(boundary)
+    pin(boundary.p1, 10, 3)
+    s.distance(boundary, value=18)
+    left = line((3, 12), (10, 12), GREY)
+    s.horizontal(left)
+    pin(left.p1, 3, 12)
+    s.coincident(left.p2, boundary)
+    return boundary, left
+
+
+def icon_trim(name="trim", boundary_dash="solid"):
+    """The piece past the boundary, going (dashed red)."""
+    start()
+    boundary, left = cross(boundary_dash)
+    cut = line(left.p2, (21, 12), RED, width=2.5, dash="dotted")
+    s.horizontal(cut)
+    s.distance(cut, value=11)
+    return finish(name)
+
+
+def icon_trim_construction():
+    return icon_trim("trim_construction", boundary_dash="dashed")
+
+
+def icon_extend():
+    """A line grown (red) up to a boundary."""
+    start()
+    boundary = line((19, 3), (19, 21), GREY)
+    s.vertical(boundary)
+    pin(boundary.p1, 19, 3)
+    s.distance(boundary, value=18)
+    stub = line((3, 12), (10, 12), GREY)
+    s.horizontal(stub)
+    pin(stub.p1, 3, 12)
+    s.distance(stub, value=7)
+    grown = line(stub.p2, (19, 12), RED)
+    s.horizontal(grown)
+    s.coincident(grown.p2, boundary)
+    return finish("extend")
+
+
+def icon_break():
+    """A line split in two (red) where another crosses it."""
+    start()
+    upright = line((12, 3), (12, 21), GREY, width=THIN)  # thin, so the gap shows
+    s.vertical(upright)
+    pin(upright.p1, 12, 3)
+    s.distance(upright, value=18)
+    left = line((3, 12), (9.5, 12), RED)
+    right = line((14.5, 12), (21, 12), RED)
+    for piece, x in ((left, 3), (right, 21)):
+        s.horizontal(piece)
+        s.distance(piece, value=6.5)
+    pin(left.p1, 3, 12)
+    pin(right.p2, 21, 12)
+    return finish("break")
+
+
+def corner():
+    """Two grey lines meeting at the top right: (top, side)."""
+    top = s.line((3, 19), (21, 19))
+    side = s.line(top.p2, (21, 3))
+    s.horizontal(top)
+    s.vertical(side)
+    pin(top.p1, 3, 19)
+    pin(side.p2, 21, 3)
+    return top, side
+
+
+def kept_lines():
+    return [l for l in s.lines if not l.construction]
+
+
+def icon_fillet():
+    """A corner rounded (red), the old corner dashed."""
+    start()
+    top, side = corner()
+    arc = s.fillet(top, side, 8)
+    ghost([top, side])
+    stroke(kept_lines()[-2:], GREY)
+    stroke(arc, RED)
+    return finish("fillet")
+
+
+def icon_chamfer(name="chamfer", **kind):
+    start()
+    top, side = corner()
+    cut = s.chamfer(top, side, 8, **kind)
+    ghost([top, side])
+    stroke([l for l in kept_lines()[-3:] if l != cut], GREY)
+    stroke(cut, RED)
+    return cut, top
+
+
+def icon_chamfer_equal():
+    icon_chamfer()
+    return finish("chamfer")
+
+
+def icon_chamfer_2distances():
+    icon_chamfer(distance2=13)
+    return finish("chamfer_2distances")
+
+
+def icon_chamfer_angle():
+    """With the angle it makes marked."""
+    cut, top = icon_chamfer(angle=40)
+    # The angle, between the cut and where the corner was.
+    o = cut.p1 if cut.p1.y > cut.p2.y else cut.p2  # on the top line
+    a = math.radians(40)
+    sweep = s.arc(o, (o.x + 8 * math.cos(a), o.y - 8 * math.sin(a)), (o.x + 8, o.y))
+    stroke(sweep, RED, width=2)
+    s.radius(sweep, value=8)
+    s.coincident(sweep.start, cut)
+    s.coincident(sweep.end, top)
+    return finish("chamfer_angle")
+
+
+def square(x, y, size, color, **style):
+    sides = stroke(s.rectangle((x, y), (x + size, y + size)), color, **style)
+    pin(sides[0].p1, x, y)
+    s.distance(sides[0], value=size)
+    s.distance(sides[1], value=size)
+    return sides
+
+
+def icon_move():
+    """A square moved up and right: where it was dashed, an arrow along the way."""
+    start()
+    square(3, 3, 9, GREY, width=THIN, dash="dashed")
+    square(12, 12, 9, RED)
+    return finish("move")
+
+
+def icon_scale():
+    """A small square grown (red) from its corner."""
+    start()
+    square(3, 3, 18, RED)
+    square(3, 3, 8, GREY)
+    diagonal = line((11, 11), (17, 17), RED, width=2)
+    pin(diagonal.p1, 11, 11)
+    pin(diagonal.p2, 17, 17)
+    return finish("scale")
+
+
+def icon_mirror():
+    """A grey triangle and its red mirror image across a dashed line."""
+    start()
+    axis = guide((12, 1.5), (12, 22.5))
+    s.vertical(axis)
+    pin(axis.p1, 12, 1.5)
+    s.distance(axis, value=21)
+    a, b, c = s.point(9.5, 4), s.point(9.5, 20), s.point(2.5, 4)
+    for p, (x, y) in ((a, (9.5, 4)), (b, (9.5, 20)), (c, (2.5, 4))):
+        pin(p, x, y)
+    tri = [line(a, b, GREY), line(b, c, GREY), line(c, a, GREY)]
+    stroke(s.mirror(tri, axis), RED)
+    return finish("mirror")
+
+
+def icon_rectangular_pattern():
+    """A grey square copied (red) into a 3 x 3 grid."""
+    start()
+    original = square(3, 3, 4, GREY)
+    pattern = s.rectangular_pattern(original, count=3, spacing=7, count2=3, spacing2=7)
+    for copy in pattern.copies:
+        stroke(copy, RED)
+    return finish("rectangular_pattern")
+
+
+def icon_circular_pattern():
+    """A grey circle copied (red) round a centre."""
+    start()
+    centre = s.point(12, 12)
+    pin(centre, 12, 12)
+    original = stroke(s.circle((12, 19), 2.5), GREY)
+    s.radius(original, value=2.5)
+    spoke = s.line(centre, original.center)
+    spoke.construction = True
+    s.vertical(spoke)
+    s.distance(spoke, value=7)
+    pattern = s.circular_pattern([original], centre, count=6)
+    for copy in pattern.copies:
+        stroke(copy, RED)
+    return finish("circular_pattern")
+
+
+def icon_offset():
+    """A grey shape with a red outline offset outside it."""
+    start()
+    inner = square(7.5, 7.5, 9, GREY)
+    before = set(s.entities)
+    s.offset(inner, 3.5, toward=(1, 1))
+    stroke([e for e in s.entities if e not in before and (e in s.lines or e in s.arcs)], RED)
+    return finish("offset")
+
+
 ICONS = {
     f.__name__: f
     for f in [horizontal_vertical, coincident, tangent, equal, parallel, perpendicular, fix, midpoint, concentric,
@@ -657,7 +870,10 @@ ICONS.update({
     for f in [icon_select, icon_line, icon_point, icon_rectangle, icon_rectangle_3point, icon_rectangle_center, icon_circle,
               icon_circle_2point, icon_circle_3point, icon_circle_tangent2, icon_circle_tangent3, icon_arc, icon_arc3,
               icon_arc_tangent, icon_polygon_inscribed, icon_polygon_circumscribed, icon_polygon_edge, icon_slot,
-              icon_slot_overall, icon_slot_center_point, icon_arc_slot, icon_arc_slot_3point]
+              icon_slot_overall, icon_slot_center_point, icon_arc_slot, icon_arc_slot_3point, icon_trim,
+              icon_trim_construction, icon_extend, icon_break, icon_fillet, icon_chamfer_equal, icon_chamfer_2distances,
+              icon_chamfer_angle, icon_move, icon_scale, icon_mirror, icon_rectangular_pattern, icon_circular_pattern,
+              icon_offset]
 })
 
 wanted = sys.argv[1:] or list(ICONS)

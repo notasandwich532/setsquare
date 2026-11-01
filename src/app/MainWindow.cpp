@@ -696,7 +696,8 @@ void MainWindow::createActions()
     auto* modifyBar = addToolBar(tr("Modify"));
     modifyBar->setObjectName("ModifyToolbar");
     modifyBar->setMovable(false);
-    modifyBar->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    modifyBar->setToolButtonStyle(Qt::ToolButtonIconOnly);  // names in the tooltips
+    modifyBar->setIconSize(QSize(26, 26));
     addTools(modifyBar, {{ToolKind::Fillet, tr("Fillet"), {}}});
     addDropdown(modifyBar, tr("Chamfer"),
                 {

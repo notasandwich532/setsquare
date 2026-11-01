@@ -1,0 +1,497 @@
+{
+  "axes": [
+    3,
+    5
+  ],
+  "constraints": [
+    {
+      "id": 13,
+      "refs": [
+        9
+      ],
+      "type": "horizontal"
+    },
+    {
+      "id": 14,
+      "refs": [
+        10
+      ],
+      "type": "vertical"
+    },
+    {
+      "id": 15,
+      "refs": [
+        11
+      ],
+      "type": "horizontal"
+    },
+    {
+      "id": 16,
+      "refs": [
+        12
+      ],
+      "type": "vertical"
+    },
+    {
+      "id": 17,
+      "refs": [
+        9
+      ],
+      "type": "distance",
+      "value": 24.0
+    },
+    {
+      "id": 18,
+      "refs": [
+        12
+      ],
+      "type": "distance",
+      "value": 24.0
+    },
+    {
+      "id": 27,
+      "refs": [
+        23
+      ],
+      "type": "horizontal"
+    },
+    {
+      "id": 28,
+      "refs": [
+        24
+      ],
+      "type": "vertical"
+    },
+    {
+      "id": 29,
+      "refs": [
+        25
+      ],
+      "type": "horizontal"
+    },
+    {
+      "id": 30,
+      "refs": [
+        26
+      ],
+      "type": "vertical"
+    },
+    {
+      "id": 31,
+      "refs": [
+        1,
+        19
+      ],
+      "type": "horizontalDistance",
+      "value": 3.0
+    },
+    {
+      "id": 32,
+      "refs": [
+        1,
+        19
+      ],
+      "type": "verticalDistance",
+      "value": 3.0
+    },
+    {
+      "id": 33,
+      "refs": [
+        23
+      ],
+      "type": "distance",
+      "value": 18.0
+    },
+    {
+      "id": 34,
+      "refs": [
+        24
+      ],
+      "type": "distance",
+      "value": 18.0
+    },
+    {
+      "id": 43,
+      "refs": [
+        39
+      ],
+      "type": "horizontal"
+    },
+    {
+      "id": 44,
+      "refs": [
+        40
+      ],
+      "type": "vertical"
+    },
+    {
+      "id": 45,
+      "refs": [
+        41
+      ],
+      "type": "horizontal"
+    },
+    {
+      "id": 46,
+      "refs": [
+        42
+      ],
+      "type": "vertical"
+    },
+    {
+      "id": 47,
+      "refs": [
+        1,
+        35
+      ],
+      "type": "horizontalDistance",
+      "value": 3.0
+    },
+    {
+      "id": 48,
+      "refs": [
+        1,
+        35
+      ],
+      "type": "verticalDistance",
+      "value": 3.0
+    },
+    {
+      "id": 49,
+      "refs": [
+        39
+      ],
+      "type": "distance",
+      "value": 8.0
+    },
+    {
+      "id": 50,
+      "refs": [
+        40
+      ],
+      "type": "distance",
+      "value": 8.0
+    },
+    {
+      "id": 54,
+      "refs": [
+        1,
+        51
+      ],
+      "type": "horizontalDistance",
+      "value": 11.0
+    },
+    {
+      "id": 55,
+      "refs": [
+        1,
+        51
+      ],
+      "type": "verticalDistance",
+      "value": 11.0
+    },
+    {
+      "id": 56,
+      "refs": [
+        1,
+        52
+      ],
+      "type": "horizontalDistance",
+      "value": 17.0
+    },
+    {
+      "id": 57,
+      "refs": [
+        1,
+        52
+      ],
+      "type": "verticalDistance",
+      "value": 17.0
+    }
+  ],
+  "entities": [
+    {
+      "fixed": true,
+      "id": 1,
+      "type": "point",
+      "x": 0.0,
+      "y": 0.0
+    },
+    {
+      "fixed": true,
+      "id": 2,
+      "type": "point",
+      "x": 1.0,
+      "y": 0.0
+    },
+    {
+      "construction": true,
+      "fixed": true,
+      "id": 3,
+      "p1": 1,
+      "p2": 2,
+      "type": "line"
+    },
+    {
+      "fixed": true,
+      "id": 4,
+      "type": "point",
+      "x": 0.0,
+      "y": 1.0
+    },
+    {
+      "construction": true,
+      "fixed": true,
+      "id": 5,
+      "p1": 1,
+      "p2": 4,
+      "type": "line"
+    },
+    {
+      "id": 6,
+      "type": "point",
+      "x": 24.0,
+      "y": 24.0
+    },
+    {
+      "id": 7,
+      "type": "point",
+      "x": 24.0,
+      "y": 0.0
+    },
+    {
+      "id": 8,
+      "type": "point",
+      "x": 0.0,
+      "y": 24.0
+    },
+    {
+      "construction": true,
+      "id": 9,
+      "p1": 1,
+      "p2": 7,
+      "type": "line"
+    },
+    {
+      "construction": true,
+      "id": 10,
+      "p1": 7,
+      "p2": 6,
+      "type": "line"
+    },
+    {
+      "construction": true,
+      "id": 11,
+      "p1": 6,
+      "p2": 8,
+      "type": "line"
+    },
+    {
+      "construction": true,
+      "id": 12,
+      "p1": 8,
+      "p2": 1,
+      "type": "line"
+    },
+    {
+      "id": 19,
+      "type": "point",
+      "x": 3.0,
+      "y": 3.0
+    },
+    {
+      "id": 20,
+      "type": "point",
+      "x": 21.0,
+      "y": 21.0
+    },
+    {
+      "id": 21,
+      "type": "point",
+      "x": 21.0,
+      "y": 3.0
+    },
+    {
+      "id": 22,
+      "type": "point",
+      "x": 3.0,
+      "y": 21.0
+    },
+    {
+      "id": 23,
+      "p1": 19,
+      "p2": 21,
+      "type": "line"
+    },
+    {
+      "id": 24,
+      "p1": 21,
+      "p2": 20,
+      "type": "line"
+    },
+    {
+      "id": 25,
+      "p1": 20,
+      "p2": 22,
+      "type": "line"
+    },
+    {
+      "id": 26,
+      "p1": 22,
+      "p2": 19,
+      "type": "line"
+    },
+    {
+      "id": 35,
+      "type": "point",
+      "x": 3.0,
+      "y": 3.0
+    },
+    {
+      "id": 36,
+      "type": "point",
+      "x": 11.0,
+      "y": 11.0
+    },
+    {
+      "id": 37,
+      "type": "point",
+      "x": 11.0,
+      "y": 3.0
+    },
+    {
+      "id": 38,
+      "type": "point",
+      "x": 3.0,
+      "y": 11.0
+    },
+    {
+      "id": 39,
+      "p1": 35,
+      "p2": 37,
+      "type": "line"
+    },
+    {
+      "id": 40,
+      "p1": 37,
+      "p2": 36,
+      "type": "line"
+    },
+    {
+      "id": 41,
+      "p1": 36,
+      "p2": 38,
+      "type": "line"
+    },
+    {
+      "id": 42,
+      "p1": 38,
+      "p2": 35,
+      "type": "line"
+    },
+    {
+      "id": 51,
+      "type": "point",
+      "x": 11.0,
+      "y": 11.0
+    },
+    {
+      "id": 52,
+      "type": "point",
+      "x": 17.0,
+      "y": 17.0
+    },
+    {
+      "id": 53,
+      "p1": 51,
+      "p2": 52,
+      "type": "line"
+    }
+  ],
+  "format": "drawing_app.sketch",
+  "history": [
+    "p6 = s.point(24, 24)\ns.rectangle(s.origin, p6)",
+    "l9.construction = True",
+    "l10.construction = True",
+    "l11.construction = True",
+    "l12.construction = True",
+    "d17 = s.distance(l9, value=24)",
+    "d18 = s.distance(l12, value=24)",
+    "p19 = s.point(3, 3)\np20 = s.point(21, 21)\ns.rectangle(p19, p20)",
+    "s.stroke([l23, l24, l25, l26], color=\"#e8615c\", width=2.5, dash=\"solid\")",
+    "d31 = s.horizontal_distance(s.origin, p19, value=3)",
+    "d32 = s.vertical_distance(s.origin, p19, value=3)",
+    "d33 = s.distance(l23, value=18)",
+    "d34 = s.distance(l24, value=18)",
+    "p35 = s.point(3, 3)\np36 = s.point(11, 11)\ns.rectangle(p35, p36)",
+    "s.stroke([l39, l40, l41, l42], color=\"#d5d9de\", width=2.5, dash=\"solid\")",
+    "d47 = s.horizontal_distance(s.origin, p35, value=3)",
+    "d48 = s.vertical_distance(s.origin, p35, value=3)",
+    "d49 = s.distance(l39, value=8)",
+    "d50 = s.distance(l40, value=8)",
+    "p51 = s.point(11, 11)\np52 = s.point(17, 17)\nl53 = s.line(p51, p52)",
+    "s.stroke([l53], color=\"#e8615c\", width=2, dash=\"solid\")",
+    "d54 = s.horizontal_distance(s.origin, p51, value=11)",
+    "d55 = s.vertical_distance(s.origin, p51, value=11)",
+    "d56 = s.horizontal_distance(s.origin, p52, value=17)",
+    "d57 = s.vertical_distance(s.origin, p52, value=17)"
+  ],
+  "origin": 1,
+  "strokes": [
+    {
+      "color": "#e8615c",
+      "curve": 23,
+      "dash": "solid",
+      "width": 2.5
+    },
+    {
+      "color": "#e8615c",
+      "curve": 24,
+      "dash": "solid",
+      "width": 2.5
+    },
+    {
+      "color": "#e8615c",
+      "curve": 25,
+      "dash": "solid",
+      "width": 2.5
+    },
+    {
+      "color": "#e8615c",
+      "curve": 26,
+      "dash": "solid",
+      "width": 2.5
+    },
+    {
+      "color": "#d5d9de",
+      "curve": 39,
+      "dash": "solid",
+      "width": 2.5
+    },
+    {
+      "color": "#d5d9de",
+      "curve": 40,
+      "dash": "solid",
+      "width": 2.5
+    },
+    {
+      "color": "#d5d9de",
+      "curve": 41,
+      "dash": "solid",
+      "width": 2.5
+    },
+    {
+      "color": "#d5d9de",
+      "curve": 42,
+      "dash": "solid",
+      "width": 2.5
+    },
+    {
+      "color": "#e8615c",
+      "curve": 53,
+      "dash": "solid",
+      "width": 2.0
+    }
+  ],
+  "version": 1
+}

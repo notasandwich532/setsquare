@@ -23,7 +23,13 @@ const ToolKind kCreateTools[] = {
     ToolKind::CircleTangent2, ToolKind::CircleTangent3, ToolKind::ArcCenter,           ToolKind::Arc3Point,
     ToolKind::ArcTangent,     ToolKind::PolygonInscribed, ToolKind::PolygonCircumscribed, ToolKind::PolygonEdge,
     ToolKind::SlotCenterToCenter, ToolKind::SlotOverall, ToolKind::SlotCenterPoint,    ToolKind::SlotArc3Point,
-    ToolKind::SlotArcCenter};
+    ToolKind::SlotArcCenter, ToolKind::Select};
+
+const ToolKind kModifyTools[] = {
+    ToolKind::Trim,         ToolKind::TrimToConstruction, ToolKind::Extend,        ToolKind::Break,
+    ToolKind::Fillet,       ToolKind::ChamferEqual,       ToolKind::ChamferTwoDistances, ToolKind::ChamferDistanceAngle,
+    ToolKind::Move,         ToolKind::Scale,              ToolKind::Mirror,        ToolKind::RectangularPattern,
+    ToolKind::CircularPattern, ToolKind::Offset};
 
 QImage render(const QByteArray& svg, int size, const QColor& background)
 {
@@ -105,4 +111,9 @@ TEST_CASE("Icon contact sheet", "[icons][snapshot]")
     }
     painter.end();
     CHECK(sheet.save(QDir(dir).filePath(QStringLiteral("icons.png"))));
+}
+
+TEST_CASE("Every modify tool has an icon that renders", "[icons]")
+{
+    checkIcons(QList<ToolKind>(std::begin(kModifyTools), std::end(kModifyTools)));
 }
