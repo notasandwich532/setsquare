@@ -31,6 +31,8 @@ const ToolKind kModifyTools[] = {
     ToolKind::Move,         ToolKind::Scale,              ToolKind::Mirror,        ToolKind::RectangularPattern,
     ToolKind::CircularPattern, ToolKind::Offset};
 
+const ToolKind kAppearanceTools[] = {ToolKind::StrokeBrush, ToolKind::Fill};
+
 QImage render(const QByteArray& svg, int size, const QColor& background)
 {
     QImage image(size, size, QImage::Format_ARGB32);
@@ -65,7 +67,7 @@ void checkIcons(const QList<ToolKind>& kinds)
         CHECK_FALSE(icons::forName(name).isNull());
         // Active: all white.
         const QByteArray on = icons::svg(name, QIcon::On);
-        for (const char* colour : {"#e8615c", "#d5d9de", "#4da3ff", "#5cc97b"}) {
+        for (const char* colour : {"#e8615c", "#d5d9de", "#4da3ff", "#5cc97b", "#f2b33d"}) {
             CHECK(!on.contains(colour));
         }
     }
@@ -116,4 +118,12 @@ TEST_CASE("Icon contact sheet", "[icons][snapshot]")
 TEST_CASE("Every modify tool has an icon that renders", "[icons]")
 {
     checkIcons(QList<ToolKind>(std::begin(kModifyTools), std::end(kModifyTools)));
+}
+TEST_CASE("The appearance tools and presentation view have icons that render", "[icons]")
+{
+    checkIcons(QList<ToolKind>(std::begin(kAppearanceTools), std::end(kAppearanceTools)));
+    const QByteArray svg = icons::svg(QStringLiteral("presentation"));
+    REQUIRE(!svg.isEmpty());
+    CHECK(QSvgRenderer(svg).isValid());
+    CHECK(!icons::svg(QStringLiteral("presentation"), QIcon::On).contains("#f2b33d"));
 }

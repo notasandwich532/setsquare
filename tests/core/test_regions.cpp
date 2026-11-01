@@ -117,6 +117,24 @@ TEST_CASE("Open outlines enclose nothing and show their loose ends", "[regions]"
     CHECK(a.looseEnds().size() == 2);
 }
 
+TEST_CASE("Lines ending where they touch a circle close an area (a drop shape)", "[regions]")
+{
+    // Tangent lines from a point down to a circle: each touches it at a double root.
+    Sketch s;
+    const double r = 5, d = 11;
+    const double angle = std::acos(r / d);  // from straight up to each touching point
+    s.addCircle(0, 0, r);
+    for (double side : {-1.0, 1.0}) {
+        s.addLine(0, d, side * r * std::sin(angle), r * std::cos(angle));
+    }
+    const Arrangement a(s);
+    CHECK(a.looseEnds().empty());
+    const auto tip = a.regionAt({0, 7});
+    REQUIRE(tip);
+    CHECK(tip->boundary.size() == 3);  // the two lines and the circle
+    CHECK(a.regionAt({0, 0}));
+}
+
 TEST_CASE("Arcs bound areas too", "[regions]")
 {
     Sketch s;

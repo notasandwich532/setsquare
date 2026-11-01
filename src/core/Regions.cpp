@@ -216,6 +216,25 @@ Arrangement::Arrangement(const Sketch& s, double arcStep)
     }
     const double tol = 1e-6 * extent;  // positions closer than this are one vertex
 
+    // An end lying on another curve cuts it too. Intersections usually find these, but not a
+    // line ending where it just touches a circle: a double root, which rounding can lose.
+    for (size_t i = 0; i < curves.size(); ++i) {
+        const Curve& c = curves[i];
+        if (c.kind == Curve::Kind::Circle) {
+            continue;
+        }
+        for (const Vec2 end : {c.at(0.0), c.at(c.kind == Curve::Kind::Line ? 1.0 : c.sweep)}) {
+            for (size_t j = 0; j < curves.size(); ++j) {
+                if (j != i) {
+                    const double t = curves[j].param(end);
+                    if (norm(sub(curves[j].at(t), end)) <= tol) {
+                        cuts[j].push_back(t);
+                    }
+                }
+            }
+        }
+    }
+
     // Vertices (merged by position) and the pieces between cuts, as half-edges.
     std::vector<Vec2> vertices;
     auto vertexAt = [&](Vec2 p) {

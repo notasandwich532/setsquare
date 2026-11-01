@@ -1,0 +1,485 @@
+{
+  "axes": [
+    3,
+    5
+  ],
+  "constraints": [
+    {
+      "id": 13,
+      "refs": [
+        9
+      ],
+      "type": "horizontal"
+    },
+    {
+      "id": 14,
+      "refs": [
+        10
+      ],
+      "type": "vertical"
+    },
+    {
+      "id": 15,
+      "refs": [
+        11
+      ],
+      "type": "horizontal"
+    },
+    {
+      "id": 16,
+      "refs": [
+        12
+      ],
+      "type": "vertical"
+    },
+    {
+      "id": 17,
+      "refs": [
+        9
+      ],
+      "type": "distance",
+      "value": 24.0
+    },
+    {
+      "id": 18,
+      "refs": [
+        12
+      ],
+      "type": "distance",
+      "value": 24.0
+    },
+    {
+      "id": 22,
+      "refs": [
+        1,
+        19
+      ],
+      "type": "horizontalDistance",
+      "value": 21.5
+    },
+    {
+      "id": 23,
+      "refs": [
+        1,
+        19
+      ],
+      "type": "verticalDistance",
+      "value": 21.5
+    },
+    {
+      "id": 24,
+      "refs": [
+        1,
+        20
+      ],
+      "type": "horizontalDistance",
+      "value": 16.0
+    },
+    {
+      "id": 25,
+      "refs": [
+        1,
+        20
+      ],
+      "type": "verticalDistance",
+      "value": 16.0
+    },
+    {
+      "id": 28,
+      "refs": [
+        1,
+        26
+      ],
+      "type": "horizontalDistance",
+      "value": 13.0
+    },
+    {
+      "id": 29,
+      "refs": [
+        1,
+        26
+      ],
+      "type": "verticalDistance",
+      "value": 13.0
+    },
+    {
+      "id": 33,
+      "refs": [
+        1,
+        30
+      ],
+      "type": "horizontalDistance",
+      "value": 14.944543648263005
+    },
+    {
+      "id": 34,
+      "refs": [
+        1,
+        30
+      ],
+      "type": "verticalDistance",
+      "value": 11.055456351736995
+    },
+    {
+      "id": 35,
+      "refs": [
+        1,
+        31
+      ],
+      "type": "horizontalDistance",
+      "value": 7.0
+    },
+    {
+      "id": 36,
+      "refs": [
+        1,
+        31
+      ],
+      "type": "verticalDistance",
+      "value": 7.0
+    },
+    {
+      "id": 37,
+      "refs": [
+        1,
+        32
+      ],
+      "type": "horizontalDistance",
+      "value": 11.055456351736995
+    },
+    {
+      "id": 38,
+      "refs": [
+        1,
+        32
+      ],
+      "type": "verticalDistance",
+      "value": 14.944543648263005
+    },
+    {
+      "id": 44,
+      "refs": [
+        1,
+        43
+      ],
+      "type": "horizontalDistance",
+      "value": 15.5
+    },
+    {
+      "id": 45,
+      "refs": [
+        1,
+        43
+      ],
+      "type": "verticalDistance",
+      "value": 8.5
+    },
+    {
+      "id": 49,
+      "refs": [
+        48
+      ],
+      "type": "radius",
+      "value": 5.5
+    },
+    {
+      "id": 51,
+      "refs": [
+        50
+      ],
+      "type": "horizontal"
+    },
+    {
+      "id": 52,
+      "refs": [
+        50
+      ],
+      "type": "distance",
+      "value": 9.328529057720687
+    }
+  ],
+  "entities": [
+    {
+      "fixed": true,
+      "id": 1,
+      "type": "point",
+      "x": 0.0,
+      "y": 0.0
+    },
+    {
+      "fixed": true,
+      "id": 2,
+      "type": "point",
+      "x": 1.0,
+      "y": 0.0
+    },
+    {
+      "construction": true,
+      "fixed": true,
+      "id": 3,
+      "p1": 1,
+      "p2": 2,
+      "type": "line"
+    },
+    {
+      "fixed": true,
+      "id": 4,
+      "type": "point",
+      "x": 0.0,
+      "y": 1.0
+    },
+    {
+      "construction": true,
+      "fixed": true,
+      "id": 5,
+      "p1": 1,
+      "p2": 4,
+      "type": "line"
+    },
+    {
+      "id": 6,
+      "type": "point",
+      "x": 24.0,
+      "y": 24.0
+    },
+    {
+      "id": 7,
+      "type": "point",
+      "x": 24.0,
+      "y": 0.0
+    },
+    {
+      "id": 8,
+      "type": "point",
+      "x": 0.0,
+      "y": 24.0
+    },
+    {
+      "construction": true,
+      "id": 9,
+      "p1": 1,
+      "p2": 7,
+      "type": "line"
+    },
+    {
+      "construction": true,
+      "id": 10,
+      "p1": 7,
+      "p2": 6,
+      "type": "line"
+    },
+    {
+      "construction": true,
+      "id": 11,
+      "p1": 6,
+      "p2": 8,
+      "type": "line"
+    },
+    {
+      "construction": true,
+      "id": 12,
+      "p1": 8,
+      "p2": 1,
+      "type": "line"
+    },
+    {
+      "id": 19,
+      "type": "point",
+      "x": 21.5,
+      "y": 21.5
+    },
+    {
+      "id": 20,
+      "type": "point",
+      "x": 16.0,
+      "y": 16.0
+    },
+    {
+      "id": 21,
+      "p1": 19,
+      "p2": 20,
+      "type": "line"
+    },
+    {
+      "id": 26,
+      "type": "point",
+      "x": 13.0,
+      "y": 13.0
+    },
+    {
+      "id": 27,
+      "p1": 20,
+      "p2": 26,
+      "type": "line"
+    },
+    {
+      "id": 30,
+      "type": "point",
+      "x": 14.944543648263005,
+      "y": 11.055456351736995
+    },
+    {
+      "id": 31,
+      "type": "point",
+      "x": 7.0,
+      "y": 7.0
+    },
+    {
+      "id": 32,
+      "type": "point",
+      "x": 11.055456351736995,
+      "y": 14.944543648263005
+    },
+    {
+      "id": 39,
+      "p1": 30,
+      "p2": 31,
+      "type": "line"
+    },
+    {
+      "id": 40,
+      "p1": 31,
+      "p2": 32,
+      "type": "line"
+    },
+    {
+      "id": 41,
+      "p1": 32,
+      "p2": 30,
+      "type": "line"
+    },
+    {
+      "id": 43,
+      "type": "point",
+      "x": 15.5,
+      "y": 8.5
+    },
+    {
+      "id": 46,
+      "type": "point",
+      "x": 10.835735471139657,
+      "y": 5.585444046717373
+    },
+    {
+      "id": 47,
+      "type": "point",
+      "x": 20.164264528860343,
+      "y": 5.585444046717373
+    },
+    {
+      "center": 43,
+      "end": 47,
+      "id": 48,
+      "start": 46,
+      "type": "arc"
+    },
+    {
+      "construction": true,
+      "id": 50,
+      "p1": 46,
+      "p2": 47,
+      "type": "line"
+    }
+  ],
+  "fills": [
+    {
+      "boundary": [
+        39,
+        40,
+        41
+      ],
+      "color": "#f2b33d",
+      "id": 42,
+      "seed": [
+        11.0,
+        11.0
+      ]
+    }
+  ],
+  "format": "drawing_app.sketch",
+  "history": [
+    "p6 = s.point(24, 24)\ns.rectangle(s.origin, p6)",
+    "l9.construction = True",
+    "l10.construction = True",
+    "l11.construction = True",
+    "l12.construction = True",
+    "d17 = s.distance(l9, value=24)",
+    "d18 = s.distance(l12, value=24)",
+    "p19 = s.point(21.5, 21.5)\np20 = s.point(16, 16)\nl21 = s.line(p19, p20)",
+    "s.stroke([l21], color=\"#d5d9de\", width=3, dash=\"solid\")",
+    "d22 = s.horizontal_distance(s.origin, p19, value=21.5)",
+    "d23 = s.vertical_distance(s.origin, p19, value=21.5)",
+    "d24 = s.horizontal_distance(s.origin, p20, value=16)",
+    "d25 = s.vertical_distance(s.origin, p20, value=16)",
+    "p26 = s.point(13, 13)\nl27 = s.line(p20, p26)",
+    "s.stroke([l27], color=\"#d5d9de\", width=5.5, dash=\"solid\")",
+    "d28 = s.horizontal_distance(s.origin, p26, value=13)",
+    "d29 = s.vertical_distance(s.origin, p26, value=13)",
+    "p30 = s.point(14.944543648263005, 11.055456351736995)",
+    "p31 = s.point(7, 7)",
+    "p32 = s.point(11.055456351736995, 14.944543648263005)",
+    "d33 = s.horizontal_distance(s.origin, p30, value=14.944543648263005)",
+    "d34 = s.vertical_distance(s.origin, p30, value=11.055456351736995)",
+    "d35 = s.horizontal_distance(s.origin, p31, value=7)",
+    "d36 = s.vertical_distance(s.origin, p31, value=7)",
+    "d37 = s.horizontal_distance(s.origin, p32, value=11.055456351736995)",
+    "d38 = s.vertical_distance(s.origin, p32, value=14.944543648263005)",
+    "l39 = s.line(p30, p31)",
+    "s.stroke([l39], color=\"#f2b33d\", width=1.5, dash=\"solid\")",
+    "l40 = s.line(p31, p32)",
+    "s.stroke([l40], color=\"#f2b33d\", width=1.5, dash=\"solid\")",
+    "l41 = s.line(p32, p30)",
+    "s.stroke([l41], color=\"#f2b33d\", width=1.5, dash=\"solid\")",
+    "f42 = s.fill(at=(11, 11), color=\"#f2b33d\")",
+    "p43 = s.point(15.5, 8.5)",
+    "d44 = s.horizontal_distance(s.origin, p43, value=15.5)",
+    "d45 = s.vertical_distance(s.origin, p43, value=8.5)",
+    "p46 = s.point(10.835735471139657, 5.585444046717373)\np47 = s.point(20.164264528860343, 5.585444046717373)\na48 = s.arc(p43, p46, p47)",
+    "s.stroke([a48], color=\"#f2b33d\", width=2.5, dash=\"solid\")",
+    "d49 = s.radius(a48, value=5.5)",
+    "l50 = s.line(p46, p47)",
+    "l50.construction = True",
+    "k51 = s.horizontal(l50)",
+    "d52 = s.distance(l50, value=9.328529057720687)"
+  ],
+  "origin": 1,
+  "strokes": [
+    {
+      "color": "#d5d9de",
+      "curve": 21,
+      "dash": "solid",
+      "width": 3.0
+    },
+    {
+      "color": "#d5d9de",
+      "curve": 27,
+      "dash": "solid",
+      "width": 5.5
+    },
+    {
+      "color": "#f2b33d",
+      "curve": 39,
+      "dash": "solid",
+      "width": 1.5
+    },
+    {
+      "color": "#f2b33d",
+      "curve": 40,
+      "dash": "solid",
+      "width": 1.5
+    },
+    {
+      "color": "#f2b33d",
+      "curve": 41,
+      "dash": "solid",
+      "width": 1.5
+    },
+    {
+      "color": "#f2b33d",
+      "curve": 48,
+      "dash": "solid",
+      "width": 2.5
+    }
+  ],
+  "version": 1
+}

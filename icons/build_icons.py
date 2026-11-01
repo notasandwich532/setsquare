@@ -6,8 +6,9 @@
 #
 # Style (after Fusion's, simplified, with thicker lines so they read when small): what the tool
 # acts on is RED, what it acts against is GREY; for create tools, the shape is GREY and where you
-# click (or what you pick) is BLUE; modify tools use GREEN where the others use RED. The app swaps
-# these colours for other states (e.g. white on the green "active" button), so keep to these four.
+# click (or what you pick) is BLUE; modify tools use GREEN where the others use RED, and appearance
+# tools AMBER for paint. The app swaps these colours for other states (e.g. white on the green
+# "active" button), so keep to these five.
 import math
 import os
 import sys
@@ -17,6 +18,7 @@ RED = "#e8615c"
 GREY = "#d5d9de"
 BLUE = "#4da3ff"  # create tools: where you click, and curves you pick
 GREEN = "#5cc97b"  # modify tools: what they change or make
+AMBER = "#f2b33d"  # appearance tools: the paint
 W = 2.5  # line width, in grid units (thick, so they read at 16 px)
 
 
@@ -861,6 +863,101 @@ def icon_offset():
     return finish("offset")
 
 
+# --- appearance -------------------------------------------------------------------------------
+# After MS Paint's: the tool in GREY, the paint in AMBER (the appearance tools' accent).
+
+
+def polygon_through(corners, color, width=W):
+    """A closed outline through pinned corners; returns its sides."""
+    points = [s.point(x, y) for x, y in corners]
+    for p, (x, y) in zip(points, corners):
+        pin(p, x, y)
+    return [line(a, b, color, width=width) for a, b in zip(points, points[1:] + points[:1])]
+
+
+def smile(cx, cy, r, half_angle, color, width=W):
+    """An arc under a centre, symmetric about the upright through it."""
+    a = math.radians(half_angle)
+    centre = s.point(cx, cy)
+    pin(centre, cx, cy)
+    start = (cx - r * math.sin(a), cy - r * math.cos(a))
+    end = (cx + r * math.sin(a), cy - r * math.cos(a))
+    arc = stroke(s.arc(centre, start, end), color, width=width)
+    s.radius(arc, value=r)
+    chord = s.line(arc.start, arc.end)
+    chord.construction = True
+    s.horizontal(chord)
+    s.distance(chord, value=2 * r * math.sin(a))
+    return arc
+
+
+def icon_stroke_brush():
+    """A paintbrush, its bristles loaded with paint, over the stroke it's made."""
+    start()
+    handle = line((21.5, 21.5), (16, 16), GREY, width=3)
+    pin(handle.p1, 21.5, 21.5)
+    pin(handle.p2, 16, 16)
+    ferrule = line(handle.p2, (13, 13), GREY, width=5.5)
+    pin(ferrule.p2, 13, 13)
+    # Bristles: from the ferrule's width down to a point.
+    h = 2.75 / math.sqrt(2)
+    polygon_through([(13 + h, 13 - h), (7, 7), (13 - h, 13 + h)], AMBER, width=1.5)
+    s.fill(at=(11, 11), color=AMBER)
+    smile(15.5, 8.5, 5.5, 58, AMBER)  # the stroke it has made
+    return finish("stroke_brush")
+
+
+def icon_fill():
+    """A tipped paint bucket and a drop of paint falling from its lip."""
+    start()
+    # The bucket, tipped over: its bottom at the upper left, its open side down to the right.
+    a = s.point(2.5, 14)
+    pin(a, 2.5, 14)
+    sides = stroke(s.rectangle_3point(a, (8.86, 20.36), (15.23, 14)), GREY)
+    s.angle(sides[0], s.x_axis, value=45)
+    s.distance(sides[0], value=9)
+    s.distance(sides[1], value=9)
+    # The paint, run down to the open side.
+    level = line((5.68, 10.82), (12.05, 17.18), AMBER, width=1)
+    s.midpoint(level.p1, sides[3])
+    s.midpoint(level.p2, sides[1])
+    s.solve()
+    s.fill(at=(11, 11), color=AMBER)
+    # The drop: a round bottom drawn to a point.
+    drop = stroke(s.circle((19.5, 5), 2.5), AMBER, width=1)  # below the lip
+    pin(drop.center, 19.5, 5)
+    s.radius(drop, value=2.5)
+    tip = s.point(19.5, 10.5)
+    pin(tip, 19.5, 10.5)
+    for side in (-1, 1):
+        q = s.point(19.5 + side * 2.2, 6.2)
+        s.coincident(q, drop)
+        edge = line(tip, q, AMBER, width=1)
+        s.tangent(edge, drop)
+    s.solve()  # so the edges meet the circle before finding the areas
+    s.fill(at=(19.5, 5), color=AMBER)
+    s.fill(at=(19.5, 8.5), color=AMBER)
+    return finish("fill")
+
+
+def icon_presentation():
+    """An eye: the drawing as it will be seen."""
+    start()
+    left, right = s.point(2.5, 12), s.point(21.5, 12)
+    pin(left, 2.5, 12)
+    pin(right, 21.5, 12)
+    r = 13
+    top = stroke(s.arc((12, 12 - math.sqrt(r * r - 9.5 * 9.5)), right, left), GREY)
+    bottom = stroke(s.arc((12, 12 + math.sqrt(r * r - 9.5 * 9.5)), left, right), GREY)
+    s.radius(top, value=r)
+    s.radius(bottom, value=r)
+    iris = stroke(s.circle((12, 12), 3.25), AMBER, width=1)
+    pin(iris.center, 12, 12)
+    s.radius(iris, value=3.25)
+    s.fill(at=(12, 12), color=AMBER)
+    return finish("presentation")
+
+
 ICONS = {
     f.__name__: f
     for f in [horizontal_vertical, coincident, tangent, equal, parallel, perpendicular, fix, midpoint, concentric,
@@ -874,7 +971,7 @@ ICONS.update({
               icon_slot_overall, icon_slot_center_point, icon_arc_slot, icon_arc_slot_3point, icon_trim,
               icon_trim_construction, icon_extend, icon_break, icon_fillet, icon_chamfer_equal, icon_chamfer_2distances,
               icon_chamfer_angle, icon_move, icon_scale, icon_mirror, icon_rectangular_pattern, icon_circular_pattern,
-              icon_offset]
+              icon_offset, icon_stroke_brush, icon_fill, icon_presentation]
 })
 
 wanted = sys.argv[1:] or list(ICONS)

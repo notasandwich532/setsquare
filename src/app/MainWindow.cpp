@@ -734,10 +734,12 @@ void MainWindow::createActions()
     auto* appearanceBar = addToolBar(tr("Appearance"));
     appearanceBar->setObjectName("AppearanceToolbar");
     appearanceBar->setMovable(false);
-    appearanceBar->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    appearanceBar->setToolButtonStyle(Qt::ToolButtonIconOnly);  // names in the tooltips
+    appearanceBar->setIconSize(QSize(26, 26));
     auto* presentation = new QAction(tr("Presentation"), this);
     presentation->setObjectName(QStringLiteral("presentationAction"));
     presentation->setCheckable(true);
+    presentation->setIcon(icons::forName(QStringLiteral("presentation")));
     presentation->setShortcut(Qt::Key_V);
     presentation->setToolTip(tr("Presentation view: the drawing as it will look (V)"));
     connect(presentation, &QAction::toggled, m_view, &SketchView::setPresentation);

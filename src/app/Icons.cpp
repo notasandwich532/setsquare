@@ -16,10 +16,11 @@ const QByteArray kRed = "#e8615c";
 const QByteArray kGrey = "#d5d9de";
 const QByteArray kBlue = "#4da3ff";
 const QByteArray kGreen = "#5cc97b";
+const QByteArray kAmber = "#f2b33d";
 
 QByteArray whitened(QByteArray svg)
 {
-    for (const QByteArray& colour : {kRed, kGrey, kBlue, kGreen}) {
+    for (const QByteArray& colour : {kRed, kGrey, kBlue, kGreen, kAmber}) {
         svg.replace(colour, "#ffffff");
     }
     return svg;
