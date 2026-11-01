@@ -821,6 +821,7 @@ void MainWindow::createActions()
     m_consoleDock->setWidget(m_console);
     addDockWidget(Qt::BottomDockWidgetArea, m_consoleDock);
     resizeDocks({m_consoleDock}, {180}, Qt::Vertical);
+    m_consoleDock->hide();  // out of the way until wanted: View > Python, or running a script
 
     // --- Macros ---
     auto* macroMenu = menuBar()->addMenu(tr("&Macros"));
