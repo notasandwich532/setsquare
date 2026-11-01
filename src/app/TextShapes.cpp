@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <set>
 
 namespace textshapes
 {
@@ -47,13 +48,7 @@ QPainterPath silhouette(const QPainterPath& merged)
     return out.simplified();
 }
 
-// --- minimum thickness, on a fine grid ---
-//
-// The narrow parts of a shape are what a disc as wide as the minimum can't reach rolling round
-// inside it (the shape less its morphological opening). Each is widened by the full minimum, so
-// it ends up at least that thick, and the rest is left alone. Done with exact distance fields on
-// a grid (path booleans are far too slow and fragile for this), then traced back into smooth
-// outlines.
+// --- minimum thickness, on a fine grid (see thicken; path booleans are far too slow for it) ---
 
 constexpr double kFar = 1e20;
 
@@ -208,43 +203,6 @@ std::vector<QPolygonF> traceZero(const std::vector<float>& field, int w, int h)
     return loops;
 }
 
-// The largest value within `radius` pixels (a square window), for every pixel; constant time per
-// pixel whatever the radius (van Herk / Gil-Werman).
-std::vector<float> maxFilter(const std::vector<float>& in, int w, int h, int radius)
-{
-    std::vector<float> out = in;
-    const int window = 2 * radius + 1;
-    auto run = [&](int count, auto get, auto set) {
-        std::vector<float> line(static_cast<size_t>(count)), forward(line.size()), backward(line.size());
-        for (int i = 0; i < count; ++i) {
-            line[static_cast<size_t>(i)] = get(i);
-        }
-        for (int i = 0; i < count; ++i) {
-            const size_t k = static_cast<size_t>(i);
-            forward[k] = i % window == 0 ? line[k] : std::max(forward[k - 1], line[k]);
-        }
-        for (int i = count - 1; i >= 0; --i) {
-            const size_t k = static_cast<size_t>(i);
-            backward[k] = (i == count - 1 || (i + 1) % window == 0) ? line[k] : std::max(backward[k + 1], line[k]);
-        }
-        for (int i = 0; i < count; ++i) {
-            const int lo = std::max(0, i - radius), hi = std::min(count - 1, i + radius);
-            set(i, std::max(backward[static_cast<size_t>(lo)], forward[static_cast<size_t>(hi)]));
-        }
-    };
-    const size_t W = static_cast<size_t>(w);
-    for (int y = 0; y < h; ++y) {
-        const size_t row = static_cast<size_t>(y) * W;
-        run(w, [&](int x) { return out[row + static_cast<size_t>(x)]; },
-            [&](int x, float v) { out[row + static_cast<size_t>(x)] = v; });
-    }
-    std::vector<float> column = out;
-    for (int x = 0; x < w; ++x) {
-        run(h, [&](int y) { return column[static_cast<size_t>(y) * W + static_cast<size_t>(x)]; },
-            [&](int y, float v) { out[static_cast<size_t>(y) * W + static_cast<size_t>(x)] = v; });
-    }
-    return out;
-}
 // Fewer points, staying within `tolerance` of the original (Douglas-Peucker, closed loop).
 QPolygonF simplify(const QPolygonF& loop, double tolerance)
 {
@@ -286,31 +244,299 @@ QPolygonF simplify(const QPolygonF& loop, double tolerance)
     return out;
 }
 
+// Fewer points on an open polyline, staying within `tolerance` of it (Douglas-Peucker).
+QPolygonF simplifyOpen(const QPolygonF& line, double tolerance)
+{
+    const int n = static_cast<int>(line.size());
+    if (n < 3) {
+        return line;
+    }
+    std::vector<bool> keep(static_cast<size_t>(n), false);
+    keep.front() = keep.back() = true;
+    std::function<void(int, int)> run = [&](int a, int b) {
+        const QPointF p = line[a], d = line[b] - line[a];
+        const double len = std::hypot(d.x(), d.y());
+        double worst = -1;
+        int at = -1;
+        for (int i = a + 1; i < b; ++i) {
+            const QPointF r = line[i] - p;
+            const double dist = len > 0 ? std::abs(d.x() * r.y() - d.y() * r.x()) / len : std::hypot(r.x(), r.y());
+            if (dist > worst) {
+                worst = dist;
+                at = i;
+            }
+        }
+        if (worst > tolerance && at > a) {
+            keep[static_cast<size_t>(at)] = true;
+            run(a, at);
+            run(at, b);
+        }
+    };
+    run(0, n - 1);
+    QPolygonF out;
+    for (int i = 0; i < n; ++i) {
+        if (keep[static_cast<size_t>(i)]) {
+            out << line[i];
+        }
+    }
+    return out;
+}
+
+// Thins a binary shape to its 1-pixel skeleton, keeping it connected (Zhang-Suen). Only pixels
+// on the current edge are looked at each pass, so it costs about the shape's area overall.
+void thin(std::vector<std::uint8_t>& img, int w, int h)
+{
+    const int dx[8] = {0, 1, 1, 1, 0, -1, -1, -1};  // N, NE, E, SE, S, SW, W, NW (y down)
+    const int dy[8] = {-1, -1, 0, 1, 1, 1, 0, -1};
+    auto at = [&](int x, int y) -> int {
+        return x < 0 || y < 0 || x >= w || y >= h ? 0 : img[static_cast<size_t>(y) * w + x];
+    };
+    auto onEdge = [&](int x, int y) {
+        for (int k = 0; k < 8; k += 2) {
+            if (!at(x + dx[k], y + dy[k])) {
+                return true;
+            }
+        }
+        return false;
+    };
+    std::vector<int> edge;
+    std::vector<std::uint8_t> queued(img.size(), 0);
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            if (at(x, y) && onEdge(x, y)) {
+                edge.push_back(y * w + x);
+                queued[static_cast<size_t>(y) * w + x] = 1;
+            }
+        }
+    }
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (int step = 0; step < 2; ++step) {
+            std::vector<int> doomed;
+            for (int i : edge) {
+                const int x = i % w, y = i / w;
+                if (!img[static_cast<size_t>(i)]) {
+                    continue;
+                }
+                int p[8];
+                int b = 0;
+                for (int k = 0; k < 8; ++k) {
+                    p[k] = at(x + dx[k], y + dy[k]);
+                    b += p[k];
+                }
+                int a = 0;
+                for (int k = 0; k < 8; ++k) {
+                    a += !p[k] && p[(k + 1) % 8];
+                }
+                if (b < 2 || b > 6 || a != 1) {
+                    continue;
+                }
+                const bool ok = step == 0 ? (!(p[0] && p[2] && p[4]) && !(p[2] && p[4] && p[6]))
+                                          : (!(p[0] && p[2] && p[6]) && !(p[0] && p[4] && p[6]));
+                if (ok) {
+                    doomed.push_back(i);
+                }
+            }
+            if (doomed.empty()) {
+                continue;
+            }
+            changed = true;
+            for (int i : doomed) {
+                img[static_cast<size_t>(i)] = 0;
+            }
+            // The new edge: what's left of the old one, and the neighbours of what went.
+            std::vector<int> next;
+            for (int i : edge) {
+                queued[static_cast<size_t>(i)] = 0;
+            }
+            auto consider = [&](int i) {
+                if (img[static_cast<size_t>(i)] && !queued[static_cast<size_t>(i)]) {
+                    queued[static_cast<size_t>(i)] = 1;
+                    next.push_back(i);
+                }
+            };
+            for (int i : edge) {
+                consider(i);
+            }
+            for (int i : doomed) {
+                const int x = i % w, y = i / w;
+                for (int k = 0; k < 8; ++k) {
+                    const int nx = x + dx[k], ny = y + dy[k];
+                    if (nx >= 0 && ny >= 0 && nx < w && ny < h) {
+                        consider(ny * w + nx);
+                    }
+                }
+            }
+            edge = std::move(next);
+        }
+    }
+}
+
+// Thinning leaves 2-pixel staircases on diagonals, whose corner pixels have three neighbours and
+// would look like forks. Removes every pixel that has three or more neighbours all connected to
+// each other (8-connected: its Yokoi connectivity number is 1); real forks and ends stay.
+void tidySkeleton(std::vector<std::uint8_t>& skel, int w, int h)
+{
+    // Ring from east, anticlockwise on screen: E, NE, N, NW, W, SW, S, SE (y down).
+    const int dx[8] = {1, 1, 0, -1, -1, -1, 0, 1};
+    const int dy[8] = {0, -1, -1, -1, 0, 1, 1, 1};
+    auto at = [&](int x, int y) -> int {
+        return x < 0 || y < 0 || x >= w || y >= h ? 0 : skel[static_cast<size_t>(y) * w + x];
+    };
+    for (bool changed = true; changed;) {
+        changed = false;
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                if (!at(x, y)) {
+                    continue;
+                }
+                int v[9];
+                int count = 0;
+                for (int k = 0; k < 8; ++k) {
+                    v[k] = at(x + dx[k], y + dy[k]);
+                    count += v[k];
+                }
+                v[8] = v[0];
+                if (count < 3) {
+                    continue;
+                }
+                int pieces = 0;  // Yokoi (8-connectivity): sum over E, N, W, S of !a - !a !b !c
+                for (int k = 0; k < 8; k += 2) {
+                    const int a = !v[k], b = !v[k + 1], c = !v[(k + 2) % 8];
+                    pieces += a - a * b * c;
+                }
+                if (pieces == 1) {
+                    skel[static_cast<size_t>(y) * w + x] = 0;
+                    changed = true;
+                }
+            }
+        }
+    }
+}
+// A skeleton as branches: chains of pixels between ends and forks (and loops with neither).
+struct Branch
+{
+    std::vector<int> pixels;  // in order
+    int ends[2] = {-1, -1};   // the end and fork pixels it runs between (-1 for a loop)
+};
+
+std::vector<Branch> branchesOf(const std::vector<std::uint8_t>& skel, int w, int h, std::vector<int>& degree)
+{
+    const int dx[8] = {0, 1, 1, 1, 0, -1, -1, -1};
+    const int dy[8] = {-1, -1, 0, 1, 1, 1, 0, -1};
+    auto on = [&](int x, int y) { return x >= 0 && y >= 0 && x < w && y < h && skel[static_cast<size_t>(y) * w + x]; };
+    auto neighbours = [&](int i) {
+        std::vector<int> out;
+        const int x = i % w, y = i / w;
+        for (int k = 0; k < 8; ++k) {
+            if (on(x + dx[k], y + dy[k])) {
+                out.push_back((y + dy[k]) * w + x + dx[k]);
+            }
+        }
+        return out;
+    };
+    degree.assign(skel.size(), 0);
+    std::vector<int> nodes;
+    for (int i = 0; i < w * h; ++i) {
+        if (skel[static_cast<size_t>(i)]) {
+            degree[static_cast<size_t>(i)] = static_cast<int>(neighbours(i).size());
+            if (degree[static_cast<size_t>(i)] != 2) {
+                nodes.push_back(i);
+            }
+        }
+    }
+    auto isNode = [&](int i) { return degree[static_cast<size_t>(i)] != 2; };
+    std::vector<std::uint8_t> used(skel.size(), 0);  // pixels inside a branch already taken
+    std::set<std::pair<int, int>> started;           // (node, first step) already walked
+    std::vector<Branch> out;
+    auto walk = [&](int from, int first) {
+        Branch b;
+        b.ends[0] = from;
+        b.pixels = {from};
+        int prev = from, cur = first;
+        while (true) {
+            b.pixels.push_back(cur);
+            if (isNode(cur) || cur == from) {
+                b.ends[1] = cur;
+                break;
+            }
+            used[static_cast<size_t>(cur)] = 1;
+            int next = -1;
+            for (int n : neighbours(cur)) {
+                if (n != prev && (isNode(n) || !used[static_cast<size_t>(n)])) {
+                    next = n;
+                    if (isNode(n)) {
+                        break;  // prefer arriving at the fork
+                    }
+                }
+            }
+            if (next < 0) {
+                b.ends[1] = cur;
+                break;
+            }
+            prev = cur;
+            cur = next;
+        }
+        return b;
+    };
+    for (int node : nodes) {
+        for (int n : neighbours(node)) {
+            if ((isNode(n) && n < node) || used[static_cast<size_t>(n)] || !started.insert({node, n}).second) {
+                continue;
+            }
+            Branch b = walk(node, n);
+            if (isNode(b.ends[1])) {
+                started.insert({b.ends[1], b.pixels[b.pixels.size() - 2]});  // (not walked back)
+            }
+            out.push_back(std::move(b));
+        }
+    }
+    // Loops with no ends or forks (an "o"'s ring).
+    for (int i = 0; i < w * h; ++i) {
+        if (skel[static_cast<size_t>(i)] && !used[static_cast<size_t>(i)] && !isNode(i)) {
+            const std::vector<int> n = neighbours(i);
+            used[static_cast<size_t>(i)] = 1;
+            Branch b = walk(i, n.front());
+            b.ends[0] = b.ends[1] = -1;
+            out.push_back(std::move(b));
+        }
+    }
+    return out;
+}
+
+// Thickens the parts narrower than `width` to it, leaving the rest as it is: a stroke `width`
+// wide runs along the centre line (skeleton) wherever the shape is thinner than that. Spurs of
+// the skeleton running into the corners of thick strokes are pruned first, or their strokes would
+// show as lumps; free ends are carried on to the tip, and branches meeting at a fork are joined
+// with a round. The shape and strokes are drawn together on a fine grid and traced back into
+// smooth outlines.
 QPainterPath thicken(const QPainterPath& shape, double width)
 {
     const QRectF box = shape.boundingRect();
     if (box.isEmpty() || !(width > 0)) {
         return shape;
     }
-    // Fine enough to resolve the minimum well (and the letters), within a pixel budget.
-    double k = std::max(4.0, 12.0 / width);  // grid pixels per path unit
+    // Fine enough for smooth letters (capital height ~350 px) and a well-resolved minimum, within a
+    // pixel budget.
+    double k = std::max(350.0 / (kPixelSize * 0.7), 8.0 / width);  // grid pixels per path unit
     const double margin = width + 2;
     const double area = (box.width() + 2 * margin) * (box.height() + 2 * margin);
     k = std::min(k, std::sqrt(6.0e6 / std::max(area, 1.0)));
     const int w = static_cast<int>(std::ceil((box.width() + 2 * margin) * k)) + 2;
     const int h = static_cast<int>(std::ceil((box.height() + 2 * margin) * k)) + 2;
     const QPointF origin = box.topLeft() - QPointF(margin, margin);
+    const QTransform toGrid = QTransform::fromScale(k, k).translate(-origin.x(), -origin.y());
 
-    // The shape, sampled at pixel centres (anti-aliased, then cut at half).
     QImage image(w, h, QImage::Format_Grayscale8);
     image.fill(0);
-    {
-        QPainter painter(&image);
-        painter.setRenderHint(QPainter::Antialiasing);
-        painter.scale(k, k);
-        painter.translate(-origin);
-        painter.fillPath(shape, Qt::white);
-    }
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(Qt::white);
+    painter.setTransform(toGrid);
+    painter.drawPath(shape);
+
     std::vector<std::uint8_t> inside(static_cast<size_t>(w) * h), outside(inside.size());
     for (int y = 0; y < h; ++y) {
         const uchar* row = image.constScanLine(y);
@@ -319,87 +545,205 @@ QPainterPath thicken(const QPainterPath& shape, double width)
             outside[static_cast<size_t>(y) * w + x] = row[x] < 128;
         }
     }
+    // How deep each pixel is (half the local thickness, on the centre line).
+    std::vector<float> depth = distanceSquared(outside, w, h);
+    for (float& d : depth) {
+        d = std::sqrt(d);
+    }
     const float r = float(width * k / 2);
-    auto distances = [&](const std::vector<std::uint8_t>& set) {
-        std::vector<float> d = distanceSquared(set, w, h);
-        for (float& v : d) {
-            v = std::sqrt(v);
-        }
-        return d;
-    };
-    const std::vector<float> toOutside = distances(outside);  // inside: how deep
-    const std::vector<float> toInside = distances(inside);
-    // Opening: shrink by r (what's deeper than r), then grow that back by r.
-    std::vector<std::uint8_t> core(inside.size()), opened(inside.size()), narrow(inside.size());
-    for (size_t i = 0; i < inside.size(); ++i) {
-        core[i] = inside[i] && toOutside[i] > r;
-    }
-    const std::vector<float> toCore = distances(core);
-    for (size_t i = 0; i < inside.size(); ++i) {
-        opened[i] = inside[i] && toCore[i] <= r;
-    }
-    // What's left is narrow; but a thick part's sharp-ish corners are left too, right next to the
-    // opening. Only narrow parts reaching beyond r / 2 from the opening count (a thin stroke
-    // does; a 90 degree corner's tip is 0.41 r away).
-    const std::vector<float> toOpened = distances(opened);
-    for (size_t i = 0; i < inside.size(); ++i) {
-        narrow[i] = inside[i] && !opened[i] && toOpened[i] > r / 2;
-    }
-    // The narrow parts' centre lines: the ridge of depth (a pixel at least as deep as its
-    // neighbours either side, and deeper than one, in some direction). A disc as wide as the minimum along each makes
-    // it exactly that thick, and reaches over the r / 2 left out next to the thick parts.
-    std::vector<std::uint8_t> ridge(inside.size(), 0);
-    bool any = false;
-    auto depth = [&](int x, int y) {
-        return x < 0 || y < 0 || x >= w || y >= h ? 0.0f : toOutside[static_cast<size_t>(y) * w + x];
-    };
-    for (int y = 0; y < h; ++y) {
-        for (int x = 0; x < w; ++x) {
-            const size_t i = static_cast<size_t>(y) * w + x;
-            if (!narrow[i]) {
-                continue;
+
+    std::vector<std::uint8_t> skel = inside;
+    thin(skel, w, h);
+    tidySkeleton(skel, w, h);
+    std::vector<int> degree;
+    std::vector<Branch> branches = branchesOf(skel, w, h, degree);
+    auto depthAt = [&](int i) { return depth[static_cast<size_t>(i)]; };
+
+    // Prune spurs: branches from a fork to a dead end that run into a corner rather than along a
+    // stroke. Going into a corner, the depth falls away steadily to nothing (about half the fork's
+    // depth on average), and the spur is short for that depth even at an acute corner; along a
+    // stroke it stays about as deep. Again until none go, as pruning can leave new ones.
+    for (int pass = 0; pass < 4; ++pass) {
+        // Which branches are spurs, judged all together: at a stroke's end the centre line can
+        // fork into both corners of the cut, and both spurs go (pruning one at a time, the other
+        // would no longer look like a spur and leave a stub).
+        auto isSpur = [&](const Branch& b, int& forkOut) {
+            for (int side = 0; side < 2; ++side) {
+                const int fork = b.ends[side], end = b.ends[1 - side];
+                if (fork < 0 || end < 0 || degree[static_cast<size_t>(fork)] < 3
+                    || degree[static_cast<size_t>(end)] != 1) {
+                    continue;
+                }
+                const double forkDepth = depthAt(fork);
+                double mean = 0;
+                for (int p : b.pixels) {
+                    mean += depthAt(p);
+                }
+                mean /= double(b.pixels.size());
+                const double length = double(b.pixels.size());
+                if (length < 2.0 * forkDepth + 2.0 || (mean < 0.6 * forkDepth && length < 4.0 * forkDepth + 2.0)) {
+                    forkOut = fork;
+                    return true;
+                }
             }
-            const float d = toOutside[i];
-            const int dirs[4][2] = {{1, 0}, {0, 1}, {1, 1}, {1, -1}};
-            for (const auto& dir : dirs) {
-                const float a = depth(x + dir[0], y + dir[1]), b = depth(x - dir[0], y - dir[1]);
-                if (d >= a && d >= b && (d > a || d > b)) {  // (not along the stroke, where it's flat)
-                    ridge[i] = 1;
-                    any = true;
-                    break;
+            return false;
+        };
+        std::map<int, int> keepers;  // fork -> branches there that aren't spurs
+        std::vector<int> spurFork(branches.size(), -1);
+        for (size_t i = 0; i < branches.size(); ++i) {
+            int fork = -1;
+            if (isSpur(branches[i], fork)) {
+                spurFork[i] = fork;
+            }
+            for (int e : branches[i].ends) {
+                if (e >= 0 && spurFork[i] != e) {
+                    ++keepers[e];
                 }
             }
         }
+        std::vector<Branch> kept;
+        for (size_t i = 0; i < branches.size(); ++i) {
+            // A spur goes if a real stroke leaves its fork (not all of an "x" in one go).
+            if (spurFork[i] >= 0 && keepers[spurFork[i]] >= 1) {
+                continue;
+            }
+            kept.push_back(std::move(branches[i]));
+        }
+        const bool pruned = kept.size() != branches.size();
+        branches = std::move(kept);
+        if (!pruned) {
+            break;
+        }
+        // Forks left with fewer branches are ends or bends now.
+        std::map<int, int> count;
+        for (const Branch& br : branches) {
+            for (int e : br.ends) {
+                if (e >= 0) {
+                    ++count[e];
+                }
+            }
+        }
+        for (const auto& [node, c] : count) {
+            if (degree[static_cast<size_t>(node)] >= 3) {
+                degree[static_cast<size_t>(node)] = c;
+            }
+        }
+    }    // Forks still joining branches after pruning (where a round joint goes).
+    std::map<int, int> joins;
+    for (const Branch& b : branches) {
+        for (int e : b.ends) {
+            if (e >= 0) {
+                ++joins[e];
+            }
+        }
     }
-    if (!any) {
+
+    // The narrow stretches of each branch, as polylines on the grid.
+    QPainterPath strokes;
+    std::vector<QPointF> rounds;
+    auto pointOf = [&](int i) { return QPointF(i % w + 0.5, i / w + 0.5); };
+    for (const Branch& b : branches) {
+        const size_t n = b.pixels.size();
+        size_t i = 0;
+        while (i < n) {
+            if (depthAt(b.pixels[i]) >= r) {
+                ++i;
+                continue;
+            }
+            size_t j = i;
+            while (j + 1 < n && depthAt(b.pixels[j + 1]) < r) {
+                ++j;
+            }
+            QPolygonF run;
+            for (size_t q = i; q <= j; ++q) {
+                run << pointOf(b.pixels[q]);
+            }
+            // Smooth out the pixel staircase (a wide stroke shows every step), ends kept.
+            {
+                const int m = std::max(2, static_cast<int>(std::lround(r / 3)));
+                QPolygonF smooth = run;
+                for (int q = 1; q + 1 < run.size(); ++q) {
+                    const int lo = std::max(0, q - m), hi = std::min(static_cast<int>(run.size()) - 1, q + m);
+                    const int reach = std::min(q - lo, hi - q);  // symmetric, so ends don't drift
+                    QPointF sum(0, 0);
+                    for (int s = q - reach; s <= q + reach; ++s) {
+                        sum += run[s];
+                    }
+                    smooth[q] = sum / double(2 * reach + 1);
+                }
+                run = smooth;
+            }
+            run = simplifyOpen(run, 0.5);
+            // Where a run ends at the branch's end: a free end goes on to the tip (as far as it's
+            // deep there), and a fork gets a round joint.
+            auto extend = [&](bool atStart) {
+                const size_t at = atStart ? i : j;
+                const int end = atStart ? b.ends[0] : b.ends[1];
+                if ((atStart && i != 0) || (!atStart && j != n - 1) || end < 0) {
+                    return;
+                }
+                if (joins[end] >= 2) {
+                    rounds.push_back(pointOf(b.pixels[at]));
+                    return;
+                }
+                if (run.size() < 2) {
+                    return;
+                }
+                const QPointF tip = atStart ? run.first() : run.last();
+                const QPointF from = atStart ? run[std::min<qsizetype>(3, run.size() - 1)]
+                                             : run[std::max<qsizetype>(0, run.size() - 4)];
+                QPointF d = tip - from;
+                const double len = std::hypot(d.x(), d.y());
+                if (len <= 0) {
+                    return;
+                }
+                const QPointF further = tip + d / len * double(depthAt(b.pixels[at]) + 1.0);
+                if (atStart) {
+                    run.prepend(further);
+                }
+                else {
+                    run.append(further);
+                }
+            };
+            extend(true);
+            extend(false);
+            if (run.size() >= 2) {
+                strokes.addPolygon(run);
+            }
+            else {
+                rounds.push_back(run.first());
+            }
+            i = j + 1;
+        }
+    }
+    if (strokes.isEmpty() && rounds.empty()) {
         return shape;
     }
-    // Where a stroke ends, its centre line forks into the corners, getting shallower; discs there
-    // would give it dog-bone ends. Keep only ridge nearly as deep as the deepest ridge within a
-    // disc's width (a hairline thin all along keeps all of its centre line).
-    {
-        std::vector<float> ridgeDepth(inside.size(), 0.0f);
-        for (size_t i = 0; i < inside.size(); ++i) {
-            ridgeDepth[i] = ridge[i] ? toOutside[i] : 0.0f;
-        }
-        const std::vector<float> deepestNear = maxFilter(ridgeDepth, w, h, static_cast<int>(std::ceil(r)));
-        for (size_t i = 0; i < inside.size(); ++i) {
-            ridge[i] = ridge[i] && toOutside[i] >= 0.75f * deepestNear[i];
-        }
+
+    // Draw the strokes over the shape, then trace the whole.
+    painter.resetTransform();
+    painter.setBrush(Qt::NoBrush);
+    painter.setPen(QPen(Qt::white, 2 * double(r), Qt::SolidLine, Qt::FlatCap, Qt::RoundJoin));
+    painter.drawPath(strokes);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(Qt::white);
+    for (const QPointF& c : rounds) {
+        painter.drawEllipse(c, double(r), double(r));
     }
-    const std::vector<float> toRidge = distances(ridge);
-    // The result as a field (negative inside): the shape, and those discs.
+    painter.end();
+
     std::vector<float> field(inside.size());
-    for (size_t i = 0; i < inside.size(); ++i) {
-        const float shapeField = inside[i] ? 0.5f - toOutside[i] : toInside[i] - 0.5f;
-        field[i] = std::min(shapeField, toRidge[i] - r);
+    for (int y = 0; y < h; ++y) {
+        const uchar* row = image.constScanLine(y);
+        for (int x = 0; x < w; ++x) {
+            field[static_cast<size_t>(y) * w + x] = 127.5f - float(row[x]);  // negative inside
+        }
     }
     QPainterPath out;
     out.setFillRule(Qt::WindingFill);
-    const QTransform back = QTransform::fromTranslate(origin.x(), origin.y()).scale(1 / k, 1 / k);
+    const QTransform back = toGrid.inverted();
     for (const QPolygonF& loop : traceZero(field, w, h)) {
-        QPolygonF simple = simplify(loop, 0.3);
-        out.addPolygon(back.map(simple));
+        out.addPolygon(back.map(simplify(loop, 0.25)));
         out.closeSubpath();
     }
     return out;
