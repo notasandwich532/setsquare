@@ -605,11 +605,39 @@ void requireCornerCurves(const Sketch& s, Id a, Id b, bool linesOnly, const char
     }
 }
 
-// The new solid piece of `curve` from the point `t` (where the fillet/chamfer meets it) along
-// the curve in the direction `away` (away from the corner), and the point at `t`. Throws if
-// the curve doesn't reach past `t` that way, i.e. the fillet/chamfer is too big for it. The
-// original curve is left alone (the caller makes it construction).
-std::pair<Id, Id> keptPiece(Sketch& s, Id curve, Vec2 t, Vec2 away, const char* what)
+// A construction line that `line` lies along and that also ends at `end`: the original that
+// `line` was cut from by an earlier fillet/chamfer (which kept its corner end), if any.
+Id originalOf(const Sketch& s, Id line, Id end)
+{
+    const Line l = s.line(line);
+    const Vec2 d = unit(sub(pos(s, l.p2), pos(s, l.p1)));
+    for (const auto& [id, e] : s.entities()) {
+        const auto* other = std::get_if<Line>(&e.geom);
+        if (!other || id == line || !e.construction || s.isReference(id) || (other->p1 != end && other->p2 != end)) {
+            continue;
+        }
+        const Vec2 od = unit(sub(pos(s, other->p2), pos(s, other->p1)));
+        if (std::abs(cross(d, od)) < 1e-9) {
+            return id;
+        }
+    }
+    return kNoId;
+}
+
+// The solid piece of `curve` from the point `t` (where the fillet/chamfer meets it) along the
+// curve in the direction `away` (away from the corner), and the point at `t`. Throws if the
+// curve doesn't reach past `t` that way, i.e. the fillet/chamfer is too big for it.
+// Normally the piece is new and the original is left alone (the caller makes it construction).
+// But a line that's already such a piece (from a fillet/chamfer at its other end) is just
+// shortened: `reused` is then true, and it stays solid.
+struct Kept
+{
+    Id piece = kNoId;
+    Id point = kNoId;
+    bool reused = false;
+};
+
+Kept keptPiece(Sketch& s, Id curve, Vec2 t, Vec2 away, const char* what)
 {
     const Geo g = geoOf(s, curve);
     if (g.kind == Geo::Kind::Line) {
@@ -622,9 +650,15 @@ std::pair<Id, Id> keptPiece(Sketch& s, Id curve, Vec2 t, Vec2 away, const char* 
         if (dot(sub(pos(s, keep), t), dir) <= 10 * kPosEps) {
             throw SketchError(std::string(what) + ": too big for these lines");
         }
+        const Id cut = keep == l.p1 ? l.p2 : l.p1;  // the corner end, going away
         const Id tp = s.addPoint(t.x, t.y);
+        if (const Id original = originalOf(s, curve, cut); original != kNoId && !s.entity(curve).construction) {
+            s.addConstraint(CT::Coincident, {tp, original});  // on the line it was cut from
+            s.rebindPoint(curve, cut, tp);
+            return {curve, tp, true};
+        }
         s.addConstraint(CT::Coincident, {tp, curve});  // stays on the original line
-        return {s.addLine(keep, tp), tp};
+        return {s.addLine(keep, tp), tp, false};
     }
     // Arcs run counter-clockwise; carry on that way if that heads away from the corner.
     const Arc a = s.arc(curve);
@@ -633,12 +667,24 @@ std::pair<Id, Id> keptPiece(Sketch& s, Id curve, Vec2 t, Vec2 away, const char* 
     const Id tp = s.addPoint(t.x, t.y);
     // The piece shares the original's centre and far end, so it stays on the same circle.
     if (ccw && uT < g.sweep - kParamEps) {
-        return {s.addArc(a.center, tp, a.end), tp};
+        return {s.addArc(a.center, tp, a.end), tp, false};
     }
     if (!ccw && uT > kParamEps && uT <= g.sweep + kParamEps) {
-        return {s.addArc(a.center, a.start, tp), tp};
+        return {s.addArc(a.center, a.start, tp), tp, false};
     }
     throw SketchError(std::string(what) + ": too big for this arc");
+}
+
+// After keptPiece: the originals become construction (the pieces carry the solid outline now,
+// in the originals' style). A reused piece is that already.
+void finishPieces(Sketch& s, Id a, const Kept& keptA, Id b, const Kept& keptB)
+{
+    for (const auto& [original, kept] : {std::pair{a, &keptA}, std::pair{b, &keptB}}) {
+        if (!kept->reused) {
+            s.entity(original).construction = true;
+            s.copyStroke(original, kept->piece);
+        }
+    }
 }
 }  // namespace
 
@@ -672,12 +718,10 @@ Corner fillet(Sketch& s, Id a, Vec2 nearA, Id b, Vec2 nearB, double radius)
     // Each curve is kept leading away from the arc (away from the other touching point).
     Corner out;
     const Vec2 touchA = touch(ga, *centre), touchB = touch(gb, *centre);
-    const auto [pieceA, ta] = keptPiece(s, a, touchA, sub(touchA, touchB), "fillet");
-    const auto [pieceB, tb] = keptPiece(s, b, touchB, sub(touchB, touchA), "fillet");
-    s.entity(a).construction = true;
-    s.entity(b).construction = true;
-    s.copyStroke(a, pieceA);  // the solid outline keeps its look
-    s.copyStroke(b, pieceB);
+    const Kept keptA = keptPiece(s, a, touchA, sub(touchA, touchB), "fillet");
+    const Kept keptB = keptPiece(s, b, touchB, sub(touchB, touchA), "fillet");
+    const Id pieceA = keptA.piece, pieceB = keptB.piece, ta = keptA.point, tb = keptB.point;
+    finishPieces(s, a, keptA, b, keptB);
     out.pieces = {pieceA, pieceB};
 
     // The short way round between the touching points.
@@ -743,12 +787,10 @@ Corner chamfer(Sketch& s, Id a, Vec2 nearA, Id b, Vec2 nearB, ChamferKind kind, 
     }
 
     Corner out;
-    const auto [pieceA, c1] = keptPiece(s, a, add(x, mul(u1, d1)), u1, "chamfer");
-    const auto [pieceB, c2] = keptPiece(s, b, add(x, mul(u2, d2)), u2, "chamfer");
-    s.entity(a).construction = true;
-    s.entity(b).construction = true;
-    s.copyStroke(a, pieceA);  // the solid outline keeps its look
-    s.copyStroke(b, pieceB);
+    const Kept keptA = keptPiece(s, a, add(x, mul(u1, d1)), u1, "chamfer");
+    const Kept keptB = keptPiece(s, b, add(x, mul(u2, d2)), u2, "chamfer");
+    const Id pieceA = keptA.piece, pieceB = keptB.piece, c1 = keptA.point, c2 = keptB.point;
+    finishPieces(s, a, keptA, b, keptB);
     out.pieces = {pieceA, pieceB};
     out.joint = s.addLine(c1, c2);
     s.copyStroke(pieceA, out.joint);

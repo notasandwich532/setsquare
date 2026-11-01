@@ -257,3 +257,25 @@ TEST_CASE("Replaying recorded modify tools reproduces the sketch", "[modify][rec
         }
     }
 }
+
+TEST_CASE("Filleting next to a fillet uses the solid piece, not the construction original", "[modify][fillet]")
+{
+    // After a fillet, each side's solid piece lies on top of its original (now construction).
+    // Clicking that side again must take the piece; taking the original left an extra solid
+    // line behind (seen filleting all the corners of a star).
+    Fixture f;
+    f.rectangle();  // 10,10 .. 50,40
+    f.view.setTool(ToolKind::Fillet);
+    for (const auto& [a, b] : {std::pair{Vec2{30, 10}, Vec2{50, 25}}, std::pair{Vec2{50, 25}, Vec2{30, 40}},
+                               std::pair{Vec2{30, 40}, Vec2{10, 25}}, std::pair{Vec2{10, 25}, Vec2{30, 10}}}) {
+        f.click(a.x, a.y);
+        f.click(b.x, b.y);
+        QTest::keyClick(f.editor(), Qt::Key_Escape);
+    }
+    CHECK(f.count(EntityKind::Arc) == 4);
+    CHECK(f.count(EntityKind::Line) == 4);        // one solid piece per side, between two arcs
+    CHECK(f.count(EntityKind::Line, true) == 4);  // the four originals, as construction
+    const SolveResult& r = f.doc.solveResult();
+    CHECK(r.ok);
+    CHECK(r.redundant.empty());
+}

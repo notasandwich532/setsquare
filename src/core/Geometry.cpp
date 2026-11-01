@@ -181,6 +181,9 @@ Id pick(const Sketch& sketch, Vec2 p, const PickOptions& options)
 {
     Id bestPoint = kNoId, bestCurve = kNoId;
     double pointDist = options.tolerance, curveDist = options.tolerance;
+    // Curves lying on top of each other (a fillet's solid piece over its now-construction
+    // original) are equally near: then the solid one is meant.
+    const double same = 1e-9 + 1e-6 * options.tolerance;
     for (const auto& [id, e] : sketch.entities()) {
         if (options.exclude.contains(id) || sketch.isHiddenReference(id) || sketch.isAxis(id)) {
             continue;
@@ -194,8 +197,15 @@ Id pick(const Sketch& sketch, Vec2 p, const PickOptions& options)
             pointDist = d;
             bestPoint = id;
         }
-        else if (!isPoint && d <= curveDist) {
-            curveDist = d;
+        else if (!isPoint && d <= curveDist + same) {
+            const bool tie = bestCurve != kNoId && std::abs(d - curveDist) <= same;
+            if (tie && e.construction && !sketch.entity(bestCurve).construction) {
+                continue;  // keep the solid one
+            }
+            if (!tie && d > curveDist) {
+                continue;  // (only within `same` beyond the best so far: not nearer)
+            }
+            curveDist = std::min(d, curveDist);
             bestCurve = id;
         }
     }

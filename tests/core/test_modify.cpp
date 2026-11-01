@@ -317,3 +317,36 @@ TEST_CASE("Fillet/chamfer refuse what can't fit", "[modify]")
     const Id p = s.addLine(0, 5, 10, 5);
     CHECK_THROWS_AS(mod::chamfer(s, a, {5, 0}, p, {5, 5}, mod::ChamferKind::EqualDistance, 1.0), SketchError);
 }
+
+TEST_CASE("Filleting every corner of a polygon leaves one solid piece per side", "[modify][fillet]")
+{
+    Sketch s;
+    const auto poly = build::polygon(s, s.addPoint(0, 0), {0, 50}, 5, build::PolygonKind::Inscribed);
+    const int dof = solve(s).dof;
+    for (int corner = 0; corner < 5; ++corner) {
+        // Each corner point where two solid sides (or pieces of them) meet.
+        Id point = kNoId, a = kNoId, b = kNoId;
+        Vec2 na, nb;
+        for (const auto& [id, e] : s.entities()) {
+            if (e.kind() == EntityKind::Point && modify::cornerAt(s, id, a, na, b, nb)) {
+                point = id;
+                break;
+            }
+        }
+        REQUIRE(point != kNoId);
+        modify::fillet(s, a, na, b, nb, 4);
+        REQUIRE(solve(s).ok);
+    }
+    size_t solid = 0, construction = 0;
+    for (const auto& [id, e] : s.entities()) {
+        if (e.kind() == EntityKind::Line && !s.isReference(id)) {
+            ++(e.construction ? construction : solid);
+        }
+    }
+    CHECK(solid == 5);
+    CHECK(construction == 5);  // the original sides, once each
+    const SolveResult r = solve(s);
+    CHECK(r.redundant.empty());
+    CHECK(r.dof == dof);
+    (void)poly;
+}
