@@ -527,6 +527,32 @@ bool Document::open(const QString& path, QString* error)
     return true;
 }
 
+bool Document::exportSvg(const QString& path, const core::exporter::SvgOptions& o, QString* error)
+{
+    std::string svg;
+    try {
+        svg = core::exporter::toSvg(m_sketch, o);
+    }
+    catch (const core::SketchError& e) {
+        if (error) {
+            *error = tr("Couldn't export: %1").arg(errorText(e));
+        }
+        return false;
+    }
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly) || file.write(svg.data(), qint64(svg.size())) != qint64(svg.size())
+        || !file.commit()) {
+        if (error) {
+            *error = tr("Couldn't write %1: %2").arg(path, file.errorString());
+        }
+        return false;
+    }
+    const auto flag = [](bool b) { return b ? QStringLiteral("True") : QStringLiteral("False"); };
+    announce(QStringLiteral("doc.export_svg(%1, fills=%2, undecorated=%3, construction=%4, margin=%5)")
+                 .arg(pyString(path), flag(o.fills), flag(o.undecorated), flag(o.construction), Editor::number(o.margin)));
+    return true;
+}
+
 void Document::newSketch()
 {
     reset();

@@ -10,6 +10,7 @@
 #include "Editor.h"
 
 #include <core/Dimensions.h>
+#include <core/Export.h>
 #include <core/Features.h>
 #include <core/Regions.h>
 #include <core/Modify.h>
@@ -1224,6 +1225,36 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
         .def("transaction", [](const DocumentH&) { return Transaction{}; },
              "with doc.transaction(): ... groups changes into one undo step")
         .def("to_json", [](const DocumentH&) { return core::toJson(sketch()); })
+        .def("export_svg", [](const DocumentH&, const std::string& path, bool fills, bool undecorated,
+                              bool construction, double margin) {
+            core::exporter::SvgOptions o;
+            o.fills = fills;
+            o.undecorated = undecorated;
+            o.construction = construction;
+            o.margin = margin;
+            Document::SilentRecording quiet(doc());
+            QString error;
+            if (!doc().exportSvg(QString::fromStdString(path), o, &error)) {
+                throw std::runtime_error(error.toStdString());
+            }
+        }, py::arg("path"), py::arg("fills") = true, py::arg("undecorated") = true, py::arg("construction") = false,
+           py::arg("margin") = 2.0,
+           "Write the drawing as SVG, in millimetres: fills, strokes, and (undecorated=True) curves without a "
+           "stroke in thin black; construction only if asked.")
+        .def("to_svg", [](const DocumentH&, bool fills, bool undecorated, bool construction, double margin) {
+            core::exporter::SvgOptions o;
+            o.fills = fills;
+            o.undecorated = undecorated;
+            o.construction = construction;
+            o.margin = margin;
+            try {
+                return core::exporter::toSvg(sketch(), o);
+            }
+            catch (const core::SketchError& e) {
+                throw py::value_error(e.what());
+            }
+        }, py::arg("fills") = true, py::arg("undecorated") = true, py::arg("construction") = false,
+           py::arg("margin") = 2.0, "The SVG export as a string.")
         .def_property_readonly("history", [](const DocumentH&) {
             py::list out;
             for (const QString& entry : doc().history()) {

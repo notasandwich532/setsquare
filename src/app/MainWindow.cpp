@@ -14,8 +14,11 @@
 
 #include <QClipboard>
 #include <QCursor>
+#include <QCheckBox>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDoubleSpinBox>
+#include <QFormLayout>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QVBoxLayout>
@@ -299,6 +302,62 @@ namespace
 const QString kSketchMime = QStringLiteral("application/x-drawapp-sketch");
 }
 
+void MainWindow::exportSvg()
+{
+    QDialog dialog(this);
+    dialog.setObjectName(QStringLiteral("exportSvgDialog"));
+    dialog.setWindowTitle(tr("Export SVG"));
+    auto* form = new QFormLayout(&dialog);
+    auto* note = new QLabel(tr("The drawing as presentation view shows it, in millimetres."), &dialog);
+    note->setWordWrap(true);
+    form->addRow(note);
+    auto* fills = new QCheckBox(tr("Fills"), &dialog);
+    fills->setChecked(m_svgOptions.fills);
+    auto* plain = new QCheckBox(tr("Curves without a stroke (thin black)"), &dialog);
+    plain->setChecked(m_svgOptions.undecorated);
+    auto* construction = new QCheckBox(tr("Construction geometry (grey, dashed)"), &dialog);
+    construction->setChecked(m_svgOptions.construction);
+    auto* margin = new QDoubleSpinBox(&dialog);
+    margin->setRange(0.0, 1000.0);
+    margin->setDecimals(2);
+    margin->setSuffix(QStringLiteral(" mm"));
+    margin->setValue(m_svgOptions.margin);
+    form->addRow(fills);
+    form->addRow(plain);
+    form->addRow(construction);
+    form->addRow(tr("Margin"), margin);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    buttons->button(QDialogButtonBox::Ok)->setText(tr("Export..."));
+    form->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    m_svgOptions.fills = fills->isChecked();
+    m_svgOptions.undecorated = plain->isChecked();
+    m_svgOptions.construction = construction->isChecked();
+    m_svgOptions.margin = margin->value();
+
+    const QFileInfo current(m_doc->filePath());
+    const QString start = m_doc->filePath().isEmpty()
+        ? QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + QStringLiteral("/drawing.svg")
+        : current.absolutePath() + QLatin1Char('/') + current.completeBaseName() + QStringLiteral(".svg");
+    QString path = QFileDialog::getSaveFileName(this, tr("Export SVG"), start, tr("SVG drawings (*.svg)"));
+    if (path.isEmpty()) {
+        return;
+    }
+    if (QFileInfo(path).suffix().isEmpty()) {
+        path += QStringLiteral(".svg");
+    }
+    QString error;
+    if (!m_doc->exportSvg(path, m_svgOptions, &error)) {
+        QMessageBox::critical(this, tr("Export failed"), error);
+        return;
+    }
+    statusBar()->showMessage(tr("Exported %1").arg(QDir::toNativeSeparators(path)), 4000);
+}
+
 void MainWindow::showHistory()
 {
     QDialog dialog(this);
@@ -421,6 +480,10 @@ void MainWindow::createActions()
     saveAs->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S));
     connect(saveAs, &QAction::triggered, this, &MainWindow::saveAs);
     fileMenu->addSeparator();
+    QMenu* exportMenu = fileMenu->addMenu(tr("&Export"));
+    auto* exportSvgAction = exportMenu->addAction(tr("&SVG..."));
+    exportSvgAction->setToolTip(tr("The drawing as it looks in presentation view, at true size"));
+    connect(exportSvgAction, &QAction::triggered, this, &MainWindow::exportSvg);
     auto* historyAction = fileMenu->addAction(tr("Command &History..."));
     historyAction->setToolTip(tr("The commands that built this drawing (saved with it)"));
     connect(historyAction, &QAction::triggered, this, &MainWindow::showHistory);

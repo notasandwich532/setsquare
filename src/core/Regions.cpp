@@ -158,7 +158,7 @@ Vec2 Region::interiorPoint() const
 
 // ---------------------------------------------------------------------------------------------
 
-Arrangement::Arrangement(const Sketch& s)
+Arrangement::Arrangement(const Sketch& s, double arcStep)
 {
     std::vector<Curve> curves;
     for (const auto& [id, e] : s.entities()) {
@@ -271,7 +271,7 @@ Arrangement::Arrangement(const Sketch& s)
             std::vector<Vec2> pts;
             const int n = c.kind == Curve::Kind::Line
                 ? 1
-                : std::max(2, static_cast<int>(std::ceil((t1 - t0) / (std::numbers::pi / 48))));
+                : std::max(2, static_cast<int>(std::ceil((t1 - t0) / arcStep)));
             for (int k = 0; k <= n; ++k) {
                 pts.push_back(c.at(t0 + (t1 - t0) * k / n));
             }

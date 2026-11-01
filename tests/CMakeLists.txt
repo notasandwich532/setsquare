@@ -1,5 +1,5 @@
 find_package(Catch2 3 CONFIG REQUIRED)
-find_package(Qt6 REQUIRED COMPONENTS Test)
+find_package(Qt6 REQUIRED COMPONENTS Test Svg)
 include(Catch)
 
 # Where Qt's DLLs live, so tests can run on Windows without deploying Qt next to them.
@@ -9,6 +9,7 @@ set(QT_BIN_DIR "${QT6_INSTALL_PREFIX}/${QT6_INSTALL_BINS}")
 add_executable(core_tests
     core/test_builders.cpp
     core/test_dimensions.cpp
+    core/test_export.cpp
     core/test_features.cpp
     core/test_geometry.cpp
     core/test_modify.cpp
@@ -29,6 +30,7 @@ add_executable(app_tests
     app/main.cpp
     app/test_constraint_tools.cpp
     app/test_document.cpp
+    app/test_export.cpp
     app/test_mainwindow.cpp
     app/test_modify_tools.cpp
     app/test_scripting.cpp
@@ -37,7 +39,7 @@ add_executable(app_tests
     app/test_tools.cpp
     app/test_transform_tools.cpp
 )
-target_link_libraries(app_tests PRIVATE drawapp_lib Qt6::Test Catch2::Catch2)
+target_link_libraries(app_tests PRIVATE drawapp_lib Qt6::Test Qt6::Svg Catch2::Catch2)
 drawapp_warnings(app_tests)
 drawapp_embeds_python(app_tests)
 add_dependencies(app_tests python_runtime)

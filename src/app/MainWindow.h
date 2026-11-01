@@ -2,6 +2,8 @@
 
 #include "tools/Tool.h"
 
+#include <core/Export.h>
+
 #include <QMainWindow>
 
 #include <map>
@@ -45,6 +47,7 @@ private:
 
     // Clipboard: the selection (and the constraints among it) as a sketch fragment.
     void showHistory();  // the document's command history, to read, copy or save as a macro
+    void exportSvg();    // options, then where to
     void copySelection();
     void pasteClipboard();  // starts the Paste tool with the clipboard's fragment
 
@@ -60,4 +63,5 @@ private:
     class ScriptConsole* m_console = nullptr;
     class QDockWidget* m_consoleDock = nullptr;
     class ToolSearch* m_search = nullptr;
+    core::exporter::SvgOptions m_svgOptions;  // as last used
 };

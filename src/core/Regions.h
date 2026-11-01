@@ -28,7 +28,8 @@ struct Region
 class Arrangement
 {
 public:
-    explicit Arrangement(const Sketch& sketch);
+    // Outlines follow arcs in steps of at most `arcStep` radians (finer for export).
+    explicit Arrangement(const Sketch& sketch, double arcStep = 3.141592653589793 / 48);
 
     // The smallest closed area around p, or nothing if p isn't enclosed.
     std::optional<Region> regionAt(Vec2 p) const;

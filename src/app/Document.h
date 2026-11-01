@@ -2,6 +2,7 @@
 
 #include "Editor.h"
 
+#include <core/Export.h>
 #include <core/Sketch.h>
 #include <core/Solver.h>
 
@@ -109,6 +110,8 @@ public:
     bool isModified() const { return m_revision != m_savedRevision; }
     bool save(const QString& path, QString* error = nullptr);
     bool open(const QString& path, QString* error = nullptr);
+    // Writes the drawing as SVG (see core/Export.h). Doesn't change the document.
+    bool exportSvg(const QString& path, const core::exporter::SvgOptions& options, QString* error = nullptr);
     void newSketch();
 
 signals:

@@ -3,6 +3,8 @@ add_library(drawcore STATIC
     Builders.h
     Dimensions.cpp
     Dimensions.h
+    Export.cpp
+    Export.h
     Features.cpp
     Features.h
     Geometry.cpp
