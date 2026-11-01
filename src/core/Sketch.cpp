@@ -166,7 +166,7 @@ void Sketch::checkGeometry(const Entity& e) const
 
 void Sketch::insertEntity(const Entity& e)
 {
-    if (e.id == kNoId || hasEntity(e.id) || hasConstraint(e.id)) {
+    if (e.id == kNoId || hasEntity(e.id) || hasConstraint(e.id) || hasFill(e.id)) {
         throw SketchError("duplicate or invalid id " + std::to_string(e.id));
     }
     checkGeometry(e);
@@ -176,7 +176,7 @@ void Sketch::insertEntity(const Entity& e)
 
 void Sketch::insertConstraint(const Constraint& c)
 {
-    if (c.id == kNoId || hasEntity(c.id) || hasConstraint(c.id)) {
+    if (c.id == kNoId || hasEntity(c.id) || hasConstraint(c.id) || hasFill(c.id)) {
         throw SketchError("duplicate or invalid id " + std::to_string(c.id));
     }
     std::vector<Id> refs = c.refs;
@@ -607,7 +607,7 @@ bool Sketch::referencesPoint(const Entity& e, Id p) const
 
 void Sketch::remove(Id id)
 {
-    if (m_constraints.erase(id) > 0) {
+    if (m_constraints.erase(id) > 0 || m_fills.erase(id) > 0) {
         return;
     }
     if (!hasEntity(id)) {
@@ -719,6 +719,44 @@ void Sketch::copyStroke(Id from, Id to)
     }
 }
 
+Id Sketch::addFill(const Fill& fill)
+{
+    Fill f = fill;
+    f.id = nextId();
+    std::ranges::sort(f.boundary);
+    m_fills.emplace(f.id, std::move(f));
+    return m_nextId - 1;
+}
+
+void Sketch::setFill(const Fill& fill)
+{
+    auto it = m_fills.find(fill.id);
+    if (it == m_fills.end()) {
+        throw SketchError("unknown fill " + std::to_string(fill.id));
+    }
+    it->second = fill;
+    std::ranges::sort(it->second.boundary);
+}
+
+void Sketch::insertFill(const Fill& fill)
+{
+    if (fill.id == kNoId || hasEntity(fill.id) || hasConstraint(fill.id) || hasFill(fill.id)) {
+        throw SketchError("duplicate or invalid id " + std::to_string(fill.id));
+    }
+    m_fills.emplace(fill.id, fill);
+    std::ranges::sort(m_fills.at(fill.id).boundary);
+    m_nextId = std::max(m_nextId, fill.id + 1);
+}
+
+const Fill& Sketch::fill(Id id) const
+{
+    auto it = m_fills.find(id);
+    if (it == m_fills.end()) {
+        throw SketchError("unknown fill " + std::to_string(id));
+    }
+    return it->second;
+}
+
 bool Sketch::isPointUsed(Id point) const
 {
     return std::ranges::any_of(m_entities, [&](const auto& kv) { return referencesPoint(kv.second, point); });
@@ -752,6 +790,7 @@ void Sketch::clear()
     m_entities.clear();
     m_constraints.clear();
     m_strokes.clear();
+    m_fills.clear();
     m_origin = kNoId;
     m_axes = {kNoId, kNoId};
     m_axisEnds = {kNoId, kNoId};

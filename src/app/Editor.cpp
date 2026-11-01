@@ -1,5 +1,6 @@
 #include "Editor.h"
 
+#include <core/Regions.h>
 #include <core/Serialize.h>
 
 #include <format>
@@ -29,6 +30,9 @@ QString Editor::name(const core::Sketch& s, Id id)
     if (s.hasConstraint(id)) {
         return (core::isDimension(s.constraint(id).type) ? QStringLiteral("d") : QStringLiteral("k"))
             + QString::number(id);
+    }
+    if (s.hasFill(id)) {
+        return QStringLiteral("f%1").arg(id);
     }
     if (s.hasEntity(id)) {
         switch (s.entity(id).kind()) {
@@ -444,6 +448,41 @@ void Editor::clearStroke(const std::vector<Id>& curves)
         m_sketch.clearStroke(c);
     }
     log(QStringLiteral("s.clear_stroke(%1)").arg(list(m_sketch, curves)));
+}
+
+Id Editor::fill(core::Vec2 at, const core::Color& color)
+{
+    const core::regions::Arrangement arrangement(m_sketch);
+    const auto region = arrangement.regionAt(at);
+    if (!region) {
+        const size_t loose = arrangement.looseEnds().size();
+        throw core::SketchError(loose == 0 ? "there's no closed area there"
+                                           : "there's no closed area there (" + std::to_string(loose)
+                                                 + (loose == 1 ? " loose end" : " loose ends") + " in the drawing)");
+    }
+    // The same area already filled: recolour that fill rather than stacking another.
+    Id id = core::kNoId;
+    for (const auto& [fid, f] : m_sketch.fills()) {
+        const auto there = core::regions::resolve(arrangement, f);
+        if (there && there->boundary == region->boundary && there->area == region->area) {
+            id = fid;
+        }
+    }
+    if (id != core::kNoId) {
+        core::Fill f = m_sketch.fill(id);
+        f.color = color;
+        m_sketch.setFill(f);
+    }
+    else {
+        core::Fill f;
+        f.color = color;
+        f.seed = core::Point{at.x, at.y};
+        f.boundary = region->boundary;
+        id = m_sketch.addFill(f);
+    }
+    log(QStringLiteral("%1 = s.fill(at=%2, color=\"%3\")")
+            .arg(name(m_sketch, id), pair(at), QString::fromStdString(color.hex())));
+    return id;
 }
 
 Id Editor::constrain(ConstraintType type, std::vector<Id> refs, double value)

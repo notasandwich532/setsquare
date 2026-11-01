@@ -5,6 +5,9 @@
 
 #include <core/Dimensions.h>
 #include <core/Geometry.h>
+#include <core/Regions.h>
+
+#include <QPainterPath>
 
 #include <QElapsedTimer>
 #include <QPen>
@@ -146,6 +149,8 @@ public:
 
     // How a stroke style is drawn at the current zoom.
     QPen strokePen(const core::StrokeStyle& style) const;
+    // A closed area (with its holes) on screen, for filling.
+    QPainterPath regionPath(const core::regions::Region& region) const;
 
     // Constraint symbols on the canvas (dimensions are always shown).
     bool showConstraints() const { return m_showConstraints; }

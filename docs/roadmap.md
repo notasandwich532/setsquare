@@ -62,9 +62,12 @@ sees them, and per item styles live alongside the sketch (they go into layers la
    - MS Paint-style colour bar: Colour 1 (strokes) / Colour 2 (fills), palette (left/right-click),
      custom colours, Edit colours, width and line style. Changes apply to the selected curves.
    - Strokes carry over to copies, mirrors, patterns, offsets and trimmed/filleted pieces.
-2. **Fills.** Paint-bucket click finds the smallest closed region (construction ignored) from a
-   planar arrangement of the curves; store boundary ids plus the click point, re-find on breakage,
-   flag broken fills. Report loose ends when there's no closed region.
+2. **Fills (done).** Fill tool (G, a paint bucket): click a closed area to fill it with Colour 2
+   (again to recolour; Ctrl+click removes, Alt+click picks up), with a hover preview. Areas come
+   from a planar arrangement of the solid curves (cut where they cross; construction ignored),
+   with islands as holes and stubs ignored. A fill stores its outline's curves and a point inside:
+   found by its outline, else by the point; re-pointed after every edit; kept (broken) while its
+   outline is open. Where nothing is enclosed, the loose ends are marked.
 3. **Spill animation.** Optional animated raster flood fill that shows where a fill escapes through
    a gap, highlights the nearest loose ends and offers to close the gap.
 4. **Layers panel.** Layers, each a sketch with ordered sublayers (show / fade / hide, lock).

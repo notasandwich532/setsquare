@@ -53,6 +53,7 @@ enum class ToolKind
     Paste,
 
     StrokeBrush,
+    Fill,
 
     Dimension,
     Coincident,

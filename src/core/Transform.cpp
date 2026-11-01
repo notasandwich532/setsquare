@@ -167,6 +167,24 @@ std::map<Id, Id> copy(const Sketch& from, Sketch& to, const std::vector<Id>& sel
         }
     }
 
+    // Fills whose whole outline was copied come too.
+    std::vector<Fill> fills;
+    for (const auto& [id, f] : from.fills()) {
+        if (!f.boundary.empty()
+            && std::ranges::all_of(f.boundary, [&](Id c) { return map.contains(c); })) {
+            fills.push_back(f);
+        }
+    }
+    for (Fill f : fills) {
+        const Id was = f.id;
+        for (Id& c : f.boundary) {
+            c = map.at(c);
+        }
+        const Vec2 seed = t.apply({f.seed.x, f.seed.y});
+        f.seed = Point{seed.x, seed.y};
+        map[was] = to.addFill(f);
+    }
+
     if (constraints) {
         const AxisMap axes = axisMap(t);
         std::vector<Constraint> internal;

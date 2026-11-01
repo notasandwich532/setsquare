@@ -206,3 +206,64 @@ TEST_CASE("The stroke brush paints a box of curves; Ctrl takes them off; Reset c
     f.bar.resetSelection();
     CHECK(f.sketch().strokes().size() == 1);
 }
+
+TEST_CASE("The fill tool fills closed areas with Colour 2", "[style][fill]")
+{
+    Fixture f;
+    f.bar.pickColor(Fixture::hex("#ffc90e"), true);  // right-click: Colour 2
+    f.view.setTool(ToolKind::Fill);
+    f.click(20, 20);  // inside the rectangle
+    REQUIRE(f.sketch().fills().size() == 1);
+    const Id fill = f.sketch().fills().begin()->first;
+    CHECK(f.sketch().fill(fill).color == Fixture::hex("#ffc90e"));
+    CHECK(f.sketch().fill(fill).boundary.size() == 4);
+
+    // Again with another colour: recoloured, not stacked.
+    f.bar.pickColor(Fixture::hex("#22b14c"), true);
+    f.click(30, 25);
+    CHECK(f.sketch().fills().size() == 1);
+    CHECK(f.sketch().fill(fill).color == Fixture::hex("#22b14c"));
+
+    // Alt+click picks the colour up; Ctrl+click removes the fill.
+    f.bar.pickColor(Fixture::hex("#000000"), true);
+    f.click(20, 20, Qt::AltModifier);
+    CHECK(f.view.paint().color2 == Fixture::hex("#22b14c"));
+    f.click(20, 20, Qt::ControlModifier);
+    CHECK(f.sketch().fills().empty());
+
+    // Outside anything: nothing filled, and the hint says why.
+    f.click(80, 80);
+    CHECK(f.sketch().fills().empty());
+}
+
+TEST_CASE("An open outline shows its loose ends", "[style][fill]")
+{
+    Fixture f;
+    f.doc.modify("open it", [&](Sketch& s) { s.remove(f.rect.sides[3]); });
+    f.view.setTool(ToolKind::Fill);
+    f.click(20, 20);
+    CHECK(f.sketch().fills().empty());
+    CHECK(f.view.hint().contains("loose ends"));
+}
+
+TEST_CASE("Replaying recorded fills reproduces them", "[style][fill][recorder]")
+{
+    Fixture f;
+    f.recorded.clear();
+    f.recorded << "s.rectangle((10, 10), (40, 30))";
+    f.bar.pickColor(Fixture::hex("#ed1c24"), true);
+    f.view.setTool(ToolKind::Fill);
+    f.click(20, 20);
+    f.bar.pickColor(Fixture::hex("#3f48cc"), true);
+    f.click(25, 15);
+
+    Document replay;
+    script::setDocument(&replay);
+    script::resetConsole();
+    const script::RunResult r = script::runConsole(f.recorded.join('\n'));
+    script::setDocument(nullptr);
+    INFO(f.recorded.join('\n').toStdString());
+    REQUIRE(r.ok);
+    REQUIRE(replay.sketch().fills().size() == 1);
+    CHECK(replay.sketch().fills().begin()->second.color == Fixture::hex("#3f48cc"));
+}

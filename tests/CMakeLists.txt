@@ -13,6 +13,7 @@ add_executable(core_tests
     core/test_geometry.cpp
     core/test_modify.cpp
     core/test_planegcs.cpp
+    core/test_regions.cpp
     core/test_serialize.cpp
     core/test_sketch.cpp
     core/test_solver.cpp

@@ -141,6 +141,14 @@ std::string toJson(const Sketch& sketch, bool compact, const std::vector<std::st
         }
         doc["strokes"] = std::move(strokes);
     }
+    if (!sketch.fills().empty()) {
+        json fills = json::array();
+        for (const auto& [id, f] : sketch.fills()) {
+            fills.push_back(
+                {{"id", id}, {"color", f.color.hex()}, {"seed", {f.seed.x, f.seed.y}}, {"boundary", f.boundary}});
+        }
+        doc["fills"] = std::move(fills);
+    }
     if (history && !history->empty()) {
         doc["history"] = *history;
     }
@@ -197,6 +205,18 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
                 throw SketchError("unknown line style '" + dash + "'");
             }
             sketch.setStroke(j.at("curve").get<Id>(), style);
+        }
+        for (const json& j : doc.value("fills", json::array())) {
+            Fill f;
+            f.id = j.at("id").get<Id>();
+            const std::string color = j.value("color", std::string("#000000"));
+            if (!Color::fromHex(color, f.color)) {
+                throw SketchError("bad fill colour '" + color + "'");
+            }
+            const auto& seed = j.at("seed");
+            f.seed = Point{seed.at(0).get<double>(), seed.at(1).get<double>()};
+            f.boundary = j.value("boundary", std::vector<Id>{});
+            sketch.insertFill(f);
         }
         if (history) {
             *history = doc.value("history", std::vector<std::string>{});

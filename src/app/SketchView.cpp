@@ -113,7 +113,7 @@ void SketchView::setTool(ToolKind kind)
         m_tool->cancel();
         m_tool.reset();  // before the new one starts (a command tidies up as it goes)
     }
-    if (kind != ToolKind::Select && kind != ToolKind::StrokeBrush) {
+    if (kind != ToolKind::Select && kind != ToolKind::StrokeBrush && kind != ToolKind::Fill) {
         setPresentation(false);  // editing geometry: see it (and its constraints) properly
     }
     showOptionsPanel(kind);
@@ -172,6 +172,7 @@ void SketchView::setTool(ToolKind kind)
         case ToolKind::Offset: m_tool = std::make_unique<OffsetTool>(*this); break;
         case ToolKind::Paste: m_tool = std::make_unique<PasteTool>(*this, m_pasteFragment); break;
         case ToolKind::StrokeBrush: m_tool = std::make_unique<StrokeBrushTool>(*this); break;
+        case ToolKind::Fill: m_tool = std::make_unique<FillTool>(*this); break;
         case ToolKind::Dimension: m_tool = std::make_unique<DimensionTool>(*this); break;
         default: m_tool = std::make_unique<ConstraintTool>(*this, kind); break;
     }
@@ -257,6 +258,25 @@ void SketchView::setPaint(const Paint& paint)
     m_paint = paint;
     refreshTool();  // e.g. the stroke brush's preview
     emit paintChanged();
+}
+
+QPainterPath SketchView::regionPath(const core::regions::Region& region) const
+{
+    QPainterPath path;
+    path.setFillRule(Qt::OddEvenFill);  // holes cut out
+    auto loop = [&](const std::vector<core::Vec2>& points) {
+        QPolygonF poly;
+        for (const core::Vec2& p : points) {
+            poly << toScreen(p);
+        }
+        path.addPolygon(poly);
+        path.closeSubpath();
+    };
+    loop(region.outer);
+    for (const auto& hole : region.holes) {
+        loop(hole);
+    }
+    return path;
 }
 
 QPen SketchView::strokePen(const core::StrokeStyle& style) const
@@ -701,6 +721,22 @@ void SketchView::drawSketch(QPainter& painter) const
             case core::EntityKind::Arc: drawArcPath(painter, core::arcShape(sketch, id)); break;
         }
     };
+
+    // Fills, underneath everything: each found afresh from the geometry (see core/Regions.h).
+    if (!sketch.fills().empty()) {
+        const core::regions::Arrangement arrangement(sketch);
+        for (const auto& [id, f] : sketch.fills()) {
+            const auto region = core::regions::resolve(arrangement, f);
+            if (!region) {
+                continue;  // its outline is open: nothing to fill until it's closed again
+            }
+            QColor color(f.color.r, f.color.g, f.color.b, f.color.a);
+            if (!m_presentation) {
+                color.setAlphaF(color.alphaF() * 0.35);
+            }
+            painter.fillPath(regionPath(*region), color);
+        }
+    }
 
     // Strokes: the drawing's look. Faded under the geometry while sketching; in presentation
     // view they replace the geometry they decorate. (Construction geometry is never decorated.)

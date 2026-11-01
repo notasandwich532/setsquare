@@ -162,6 +162,21 @@ app.presentation = True                        # see the drawing as it will look
 Line styles: `solid`, `dashed`, `dotted`, `dash_dot`, `dash_dot_dot`. Widths are millimetres on
 the drawing. Copies, mirrors, patterns, offsets and trimmed or filleted pieces keep their stroke.
 
+### Appearance (fills)
+A fill colours the closed area around a point, like a paint bucket; islands inside it (a hole in
+a plate) stay unfilled, and construction geometry doesn't count as an edge. The area is found
+from the geometry each time, so a fill follows its outline, and one whose outline is opened waits
+(`broken`) until it's closed again.
+
+```python
+f = s.fill(at=(5, 5), color="#ffc90e")   # ValueError if (5, 5) isn't enclosed
+f.color = "#22b14c"                      # (filling the same area again recolours it too)
+f.area, f.boundary, f.broken, f.at
+s.fills                                  # bottom to top
+s.loose_ends()                           # curve ends that meet nothing: where an outline is open
+s.delete(f)
+```
+
 ### Origin and axes
 `s.origin`, `s.x_axis` and `s.y_axis` are fixed and permanent. Use them like any point or line:
 `s.angle(s.x_axis, l, value=30)`, `s.distance(p, s.y_axis, value=5)`, `s.coincident(p, s.x_axis)`.

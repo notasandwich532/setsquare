@@ -9,6 +9,8 @@ add_library(drawcore STATIC
     Geometry.h
     Modify.cpp
     Modify.h
+    Regions.cpp
+    Regions.h
     Serialize.cpp
     Serialize.h
     Sketch.cpp

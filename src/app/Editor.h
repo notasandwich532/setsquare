@@ -83,6 +83,9 @@ public:
     void setStroke(const std::vector<core::Id>& curves, const core::StrokeStyle& style);
     void clearStroke(const std::vector<core::Id>& curves);
     static QString strokeArgs(const core::StrokeStyle& style);  // "color=\"#ff8800\", width=0.5, dash=\"dashed\""
+    // Fills the closed area around `at` (a fill already there is recoloured). Throws
+    // SketchError, saying how many loose ends there are, if `at` isn't enclosed.
+    core::Id fill(core::Vec2 at, const core::Color& color);
 
     // Unchecked (inference while drawing); Document::addConstraint is the checked version.
     core::Id constrain(core::ConstraintType type, std::vector<core::Id> refs, double value = 0.0);

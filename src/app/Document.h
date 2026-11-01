@@ -101,6 +101,9 @@ public:
     // rebuilds this one. Saved in .dsk files.
     const QStringList& history() const { return m_history; }
 
+    // Changes with every committed edit (not while a drag is in progress).
+    quint64 revision() const { return m_revision; }
+
     // --- files ---
     QString filePath() const { return m_filePath; }  // empty until saved or opened
     bool isModified() const { return m_revision != m_savedRevision; }

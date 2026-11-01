@@ -173,6 +173,102 @@ void StrokeBrushTool::doubleClick(const ToolEvent& e)
     }
 }
 
+// =============================================================================================
+// Fill
+// =============================================================================================
+
+QString FillTool::hint() const
+{
+    if (!m_looseEnds.empty()) {
+        return QObject::tr("Fill: that area isn't closed; the red rings are loose ends where the outline is open");
+    }
+    return QObject::tr("Fill: click inside a closed area to fill it with Colour 2 (right-click a palette colour to "
+                       "choose it). Ctrl+click removes a fill, Alt+click picks its colour up");
+}
+
+const core::regions::Arrangement& FillTool::arrangement()
+{
+    // Rebuilt after edits only (cheap to keep while hovering).
+    if (!m_arrangement || m_builtFor != doc().revision()) {
+        m_arrangement = std::make_unique<core::regions::Arrangement>(doc().sketch());
+        m_builtFor = doc().revision();
+    }
+    return *m_arrangement;
+}
+
+Id FillTool::fillAt(core::Vec2 p)
+{
+    Id found = kNoId;
+    for (const auto& [id, f] : doc().sketch().fills()) {  // later ones are on top
+        const auto region = core::regions::resolve(arrangement(), f);
+        if (region && region->contains(p)) {
+            found = id;
+        }
+    }
+    return found;
+}
+
+void FillTool::move(const ToolEvent& e)
+{
+    m_hover = arrangement().regionAt(e.world);
+    if (m_hover) {
+        m_looseEnds.clear();
+    }
+    refresh();
+}
+
+void FillTool::press(const ToolEvent& e)
+{
+    if (e.button != Qt::LeftButton) {
+        return;
+    }
+    if (e.modifiers & (Qt::ControlModifier | Qt::AltModifier)) {
+        const Id fill = fillAt(e.world);
+        if (fill == kNoId) {
+            return;
+        }
+        if (e.modifiers & Qt::AltModifier) {
+            SketchView::Paint paint = view().paint();
+            paint.color2 = doc().sketch().fill(fill).color;  // eyedropper
+            view().setPaint(paint);
+        }
+        else {
+            view().tryEdit(QObject::tr("Remove fill"), [&](Editor& ed) { ed.remove(fill); });
+        }
+        refresh();
+        return;
+    }
+    m_looseEnds.clear();
+    if (!arrangement().regionAt(e.world)) {
+        m_looseEnds = arrangement().looseEnds();
+    }
+    const core::Color color = view().paint().color2;
+    view().tryEdit(QObject::tr("Fill"), [&](Editor& ed) { ed.fill(e.world, color); });
+    refresh();
+}
+
+void FillTool::paintOverlay(QPainter& painter)
+{
+    if (m_hover) {
+        // The area a click would fill, in Colour 2, outlined.
+        const core::Color& c = view().paint().color2;
+        QColor fill(c.r, c.g, c.b, c.a);
+        fill.setAlphaF(fill.alphaF() * 0.6);
+        const QPainterPath path = view().regionPath(*m_hover);
+        painter.fillPath(path, fill);
+        painter.setPen(QPen(QColor(0xff, 0xff, 0xff, 200), 1.5, Qt::DashLine));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawPath(path);
+    }
+    if (!m_looseEnds.empty()) {
+        painter.setPen(QPen(QColor(0xff, 0x45, 0x45), 2.0));
+        painter.setBrush(Qt::NoBrush);
+        for (const core::Vec2& p : m_looseEnds) {
+            painter.drawEllipse(view().toScreen(p), 9.0, 9.0);
+        }
+    }
+}
+
 void StrokeBrushTool::paintOverlay(QPainter& painter)
 {
     if (m_boxing) {

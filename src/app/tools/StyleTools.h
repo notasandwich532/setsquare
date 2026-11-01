@@ -2,7 +2,11 @@
 
 #include "Tool.h"
 
+#include <core/Regions.h>
 #include <core/Sketch.h>
+
+#include <memory>
+#include <optional>
 
 // Stroke brush: click a curve to give it the current stroke (colour 1, width and line style from
 // the colour bar); double-click for its whole chain; drag a box to do every curve in it (left to
@@ -34,4 +38,27 @@ private:
     QPointF m_pressScreen;
     QPointF m_boxEnd;
     Qt::KeyboardModifiers m_pressModifiers;
+};
+
+// Fill (a paint bucket): click inside a closed area to fill it with Colour 2 (clicking a filled
+// area recolours it). Ctrl+click removes the fill there; Alt+click picks its colour up. Hover to
+// see the area first. Where nothing's enclosed, it marks the loose ends: an outline left open.
+class FillTool : public Tool
+{
+public:
+    using Tool::Tool;
+
+    QString hint() const override;
+    void press(const ToolEvent& e) override;
+    void move(const ToolEvent& e) override;
+    void paintOverlay(QPainter& painter) override;
+
+private:
+    const core::regions::Arrangement& arrangement();  // of the sketch as it is now
+    core::Id fillAt(core::Vec2 p);                     // the topmost fill covering p
+
+    std::unique_ptr<core::regions::Arrangement> m_arrangement;
+    quint64 m_builtFor = ~quint64(0);  // document revision the arrangement is of
+    std::optional<core::regions::Region> m_hover;
+    std::vector<core::Vec2> m_looseEnds;  // shown after a click that found no area
 };

@@ -151,6 +151,7 @@ const std::pair<ToolKind, const char*> kToolNames[] = {
     {ToolKind::Offset, "offset"},
     {ToolKind::Paste, "paste"},
     {ToolKind::StrokeBrush, "stroke_brush"},
+    {ToolKind::Fill, "fill"},
     {ToolKind::Dimension, "dimension"},
     {ToolKind::Coincident, "coincident"},
     {ToolKind::HorizontalVertical, "horizontal_vertical"},
@@ -610,7 +611,10 @@ void MainWindow::createActions()
     appearanceBar->addAction(presentation);
     QMenu* appearanceMenu = menuBar()->addMenu(tr("&Appearance"));
     appearanceMenu->addAction(presentation);
-    addTools(appearanceBar, {{ToolKind::StrokeBrush, tr("Stroke Brush"), QKeySequence(Qt::Key_B)}});
+    addTools(appearanceBar, {
+                                {ToolKind::StrokeBrush, tr("Stroke Brush"), QKeySequence(Qt::Key_B)},
+                                {ToolKind::Fill, tr("Fill"), QKeySequence(Qt::Key_G)},
+                            });
     auto* colorBar = new ColorBar(*m_view, appearanceBar);
     appearanceBar->addWidget(colorBar);
     auto* resetStroke = appearanceMenu->addAction(tr("&Reset Stroke"));

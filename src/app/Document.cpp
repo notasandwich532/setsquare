@@ -1,5 +1,6 @@
 #include "Document.h"
 
+#include <core/Regions.h>
 #include <core/Serialize.h>
 
 #include <QDir>
@@ -180,6 +181,7 @@ bool Document::commitChecked(core::Sketch working, QString* error, const std::ve
         }
         return false;
     }
+    core::regions::refreshFills(working);
     commit(std::move(working));
     m_result = std::move(result);
     emit changed();
@@ -445,6 +447,7 @@ void Document::reset(core::Sketch sketch)
 void Document::resolve()
 {
     m_result = core::solve(m_sketch);
+    core::regions::refreshFills(m_sketch);  // fills keep track of their areas as edits go on
 }
 
 void Document::record(const QString& python)

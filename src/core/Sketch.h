@@ -137,6 +137,18 @@ struct Constraint
     std::vector<double> params;
 };
 
+// A colour filling a closed area of the drawing, as a paint bucket would. The area isn't stored:
+// it's found from the geometry (see core/Regions.h), first as the one outlined by `boundary`,
+// else the one around `seed`. So a fill follows its outline when the geometry moves, and comes
+// back if its outline is broken and then mended.
+struct Fill
+{
+    Id id = kNoId;
+    Color color;
+    Point seed;                // a point inside the area
+    std::vector<Id> boundary;  // the curves around it when it was last found (sorted)
+};
+
 // ---------------------------------------------------------------------------------------------
 // Sketch: owns geometry and constraints. Solving lives in Solver.
 // ---------------------------------------------------------------------------------------------
@@ -190,6 +202,15 @@ public:
     const StrokeStyle* stroke(Id curve) const;  // nullptr if it has none
     const std::map<Id, StrokeStyle>& strokes() const { return m_strokes; }
     void copyStroke(Id from, Id to);  // gives `to` the stroke of `from` (if it has one)
+
+    // Fills share the id space with entities and constraints; later ones draw on top. Deleting
+    // curves doesn't delete fills (they wait to be found again); remove() deletes a fill.
+    Id addFill(const Fill& fill);  // fill.id is ignored; returns the new id
+    void setFill(const Fill& fill);  // replaces an existing fill (by id)
+    void insertFill(const Fill& fill);  // with its id (loading)
+    bool hasFill(Id id) const { return m_fills.contains(id); }
+    const Fill& fill(Id id) const;
+    const std::map<Id, Fill>& fills() const { return m_fills; }
 
     // --- origin and axes ---
     // A fixed point at (0, 0) plus fixed X and Y axis lines through it, which geometry can snap
@@ -261,6 +282,7 @@ private:
     std::map<Id, Entity> m_entities;
     std::map<Id, Constraint> m_constraints;
     std::map<Id, StrokeStyle> m_strokes;
+    std::map<Id, Fill> m_fills;
     Id m_nextId = 1;
     Id m_origin = kNoId;
     std::array<Id, 2> m_axes{kNoId, kNoId};

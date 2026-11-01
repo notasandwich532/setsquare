@@ -11,6 +11,7 @@
 
 #include <core/Dimensions.h>
 #include <core/Features.h>
+#include <core/Regions.h>
 #include <core/Modify.h>
 #include <core/Serialize.h>
 #include <core/Solver.h>
@@ -104,6 +105,8 @@ struct ArcH : Item
 {};
 struct ConstraintH : Item
 {};
+struct FillH : Item
+{};
 
 const core::Entity& entity(Id id)
 {
@@ -126,6 +129,9 @@ py::object wrap(Id id)
     const core::Sketch& s = sketch();
     if (s.hasConstraint(id)) {
         return py::cast(ConstraintH{{id}});
+    }
+    if (s.hasFill(id)) {
+        return py::cast(FillH{{id}});
     }
     switch (entity(id).kind()) {
         case EntityKind::Point: return py::cast(PointH{{id}});
@@ -405,7 +411,7 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
         .def_property_readonly("name", [](const Item& i) { return itemName(i.id); },
                                "The name used in recorded scripts, e.g. 'l7'.")
         .def_property_readonly("exists", [](const Item& i) {
-            return sketch().hasEntity(i.id) || sketch().hasConstraint(i.id);
+            return sketch().hasEntity(i.id) || sketch().hasConstraint(i.id) || sketch().hasFill(i.id);
         })
         .def("__eq__", [](const Item& a, py::handle b) { return py::isinstance<Item>(b) && a.id == b.cast<Item&>().id; })
         .def("__hash__", [](const Item& i) { return py::hash(py::int_(i.id)); });
@@ -587,6 +593,58 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
             return "<" + Editor::constraintCall(sketch(), c.id).section(QStringLiteral(" = "), 1).toStdString() + ">";
         });
 
+    auto fillOf = [](Id id) -> const core::Fill& {
+        if (!sketch().hasFill(id)) {
+            throw py::value_error("fill " + std::to_string(id) + " no longer exists");
+        }
+        return sketch().fill(id);
+    };
+    py::class_<FillH, Item>(m, "Fill", "A colour filling a closed area (see Sketch.fill).")
+        .def_property(
+            "color", [fillOf](const FillH& f) { return fillOf(f.id).color.hex(); },
+            [fillOf](const FillH& f, py::handle color) {
+                const core::Fill& current = fillOf(f.id);
+                const core::Point seed = current.seed;
+                const core::Color c = colorArg(color);
+                editReturningId("Fill", [&](Editor& ed) { return ed.fill({seed.x, seed.y}, c); });
+            },
+            "'#rrggbb' (or '#rrggbbaa'); set it to recolour.")
+        .def_property_readonly("at", [fillOf](const FillH& f) {
+            const core::Fill& fill = fillOf(f.id);
+            return py::make_tuple(fill.seed.x, fill.seed.y);
+        }, "A point inside the area.")
+        .def_property_readonly("boundary", [fillOf](const FillH& f) {
+            const core::regions::Arrangement arrangement(sketch());
+            const auto region = core::regions::resolve(arrangement, fillOf(f.id));
+            return wrapAll(region ? region->boundary : std::vector<Id>{});
+        }, "The curves around the area now (empty if its outline is open).")
+        .def_property_readonly("broken", [fillOf](const FillH& f) {
+            const core::regions::Arrangement arrangement(sketch());
+            return !core::regions::resolve(arrangement, fillOf(f.id)).has_value();
+        }, "True while its outline is open (it shows again once the outline is closed).")
+        .def_property_readonly("area", [fillOf](const FillH& f) {
+            const core::regions::Arrangement arrangement(sketch());
+            const auto region = core::regions::resolve(arrangement, fillOf(f.id));
+            if (!region) {
+                return 0.0;
+            }
+            double a = region->area;
+            for (const auto& hole : region->holes) {
+                double h = 0.0;  // (holes run clockwise)
+                for (size_t i = 0, j = hole.size() - 1; i < hole.size(); j = i++) {
+                    h += hole[j].x * hole[i].y - hole[i].x * hole[j].y;
+                }
+                a -= std::abs(h) / 2.0;
+            }
+            return a;
+        }, "The filled area (holes taken off).")
+        .def("__repr__", [](const FillH& f) {
+            if (!sketch().hasFill(f.id)) {
+                return "<Fill " + std::to_string(f.id) + " (deleted)>";
+            }
+            return "<Fill f" + std::to_string(f.id) + " " + sketch().fill(f.id).color.hex() + ">";
+        });
+
     // --- solve status ------------------------------------------------------------------------
 
     py::class_<core::SolveResult>(m, "SolveResult")
@@ -631,14 +689,14 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
                                "The fixed X axis (a line), for constraints and dimensions.")
         .def_property_readonly("y_axis", [](const SketchH&) { return wrap(sketch().yAxis()); })
         .def("__getitem__", [](const SketchH&, Id id) {
-            if (!sketch().hasEntity(id) && !sketch().hasConstraint(id)) {
+            if (!sketch().hasEntity(id) && !sketch().hasConstraint(id) && !sketch().hasFill(id)) {
                 throw py::key_error("no item " + std::to_string(id));
             }
             return wrap(id);
         })
         .def("__contains__", [](const SketchH&, py::handle h) {
             const Id id = idOf(h);
-            return sketch().hasEntity(id) || sketch().hasConstraint(id);
+            return sketch().hasEntity(id) || sketch().hasConstraint(id) || sketch().hasFill(id);
         })
         .def_property_readonly("entities", listOf(std::nullopt))
         .def_property_readonly("points", listOf(EntityKind::Point))
@@ -827,7 +885,7 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
             Call call;
             call.target().edit(QStringLiteral("Delete"), [&](Editor& ed) {
                 for (Id id : ids) {
-                    if (ed.sketch().hasEntity(id) || ed.sketch().hasConstraint(id)) {
+                    if (ed.sketch().hasEntity(id) || ed.sketch().hasConstraint(id) || ed.sketch().hasFill(id)) {
                         ed.remove(id);
                     }
                 }
@@ -956,6 +1014,27 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
            py::arg("dash") = py::none(),
            "Give curves a stroke: color as '#rrggbb' (or '#rrggbbaa', or an (r, g, b[, a]) tuple), width in mm "
            "(0 = hairline), dash 'solid', 'dashed', 'dotted', 'dash_dot' or 'dash_dot_dot'.")
+        .def("fill", [](const SketchH&, py::handle at, py::handle color) {
+            const core::Vec2 where = vecArg(at);
+            const core::Color c = colorArg(color);
+            return wrap(editReturningId("Fill", [&](Editor& ed) { return ed.fill(where, c); }));
+        }, py::arg("at"), py::arg("color") = "#c3c3c3",
+           "Fill the closed area around `at` (as a paint bucket would; a fill already there is recoloured). "
+           "Raises ValueError if `at` isn't enclosed: see loose_ends().")
+        .def_property_readonly("fills", [](const SketchH&) {
+            std::vector<Id> ids;
+            for (const auto& [id, f] : sketch().fills()) {
+                ids.push_back(id);
+            }
+            return wrapAll(ids);
+        }, "Fills, bottom to top.")
+        .def("loose_ends", [](const SketchH&) {
+            py::list out;
+            for (const core::Vec2& p : core::regions::Arrangement(sketch()).looseEnds()) {
+                out.append(py::make_tuple(p.x, p.y));
+            }
+            return out;
+        }, "Ends of solid curves that meet nothing: where an outline may be open.")
         .def("clear_stroke", [](const SketchH&, py::handle curves) {
             const std::vector<Id> ids = itemsOf(curves);
             editReturningId("Remove stroke", [&](Editor& ed) {
@@ -1307,7 +1386,7 @@ def run_file(path, argv):
         sys.argv, sys.path[:] = old_argv, old_path
 
 
-_NAME = re.compile(r"^([plcakd])(\d+)$")
+_NAME = re.compile(r"^([plcakdf])(\d+)$")
 
 
 class ConsoleNamespace(dict):
