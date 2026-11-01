@@ -883,33 +883,39 @@ def icon_offset():
 
 
 def icon_divide():
-    """A centre finder: a square V resting on a circle, its blade marked off by a divide (the
-    middle mark is the centre)."""
+    """A spacing divider: a sideways scissor linkage whose three points stay evenly spaced as it
+    opens. The middle point sits on a divide of the line between the outer two."""
     start()
-    c = stroke(s.circle((14, 14), 6), GREY)
-    pin(c.center, 14, 14)
-    s.radius(c, value=6)
-    apex = s.point(8, 8)
-    floor = line(apex, (21, 8), GREEN, width=3)
-    wall = line(apex, (8, 21), GREEN, width=3)
-    s.horizontal(floor)
-    s.vertical(wall)
-    s.tangent(floor, c)
-    s.tangent(wall, c)
-    s.distance(floor, value=13)
-    s.distance(wall, value=13)
-    blade = line(apex, (20, 20), GREEN, width=1.5)
-    s.coincident(c.center, blade)
-    s.distance(blade, value=12 * math.sqrt(2))
-    marks = s.divide(blade, count=3)
-    for p in marks.copies[0]:
+    base = line((3.5, 3), (20.5, 3), GREY, width=THIN)
+    s.horizontal(base)
+    pin(base.p1, 3.5, 3)
+    s.distance(base, value=17)
+    middle = s.divide(base, count=1).copies[0][0]
+    # A needle up from each point, then the linkage's pivots: low ones on the needles, high
+    # ones above them.
+    lows, highs = [], []
+    for tip in (base.p1, middle, base.p2):
+        x, _ = tip.pos
+        needle = line(tip, (x, 7), GREEN, width=2)
+        s.vertical(needle)
+        s.distance(needle, value=4)
+        high = s.point(x, 19)
+        s.vertical(needle.p2, high)
+        s.vertical_distance(needle.p2, high, value=12)
+        lows.append(needle.p2)
+        highs.append(high)
+    # The crossed links: each low pivot to the next high one, and each high one to the next low.
+    for i in range(2):
+        line(lows[i], highs[i + 1], GREEN, width=2.5)
+        line(highs[i], lows[i + 1], GREEN, width=2.5)
+    # The pivots, as dots.
+    for p in lows + highs:
         x, y = p.pos
-        sq = stroke(s.rectangle_center(p, (x + 1, y + 1)), GREEN, width=1.5)
-        s.distance(sq[0], value=2)
-        s.distance(sq[1], value=2)
+        dot = s.circle(p, 1.1)
+        stroke(dot, GREEN, width=1)
+        s.radius(dot, value=1.1)
         s.fill(at=(x, y), color=GREEN)
     return finish("divide")
-
 
 # --- appearance -------------------------------------------------------------------------------
 # After MS Paint's: the tool in GREY, the paint in AMBER (the appearance tools' accent).
