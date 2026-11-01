@@ -1,0 +1,89 @@
+// Tool icons: every one is there, renders, and recolours for the active state.
+
+#include "Icons.h"
+#include "MainWindow.h"
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <QDir>
+#include <QImage>
+#include <QPainter>
+#include <QSvgRenderer>
+
+namespace
+{
+const ToolKind kConstraintTools[] = {ToolKind::Dimension,     ToolKind::Coincident, ToolKind::HorizontalVertical,
+                                     ToolKind::Parallel,      ToolKind::Perpendicular, ToolKind::Tangent,
+                                     ToolKind::Equal,         ToolKind::Midpoint,   ToolKind::Concentric,
+                                     ToolKind::Symmetric,     ToolKind::Collinear,  ToolKind::Fix};
+
+QImage render(const QByteArray& svg, int size, const QColor& background)
+{
+    QImage image(size, size, QImage::Format_ARGB32);
+    image.fill(background);
+    QSvgRenderer renderer(svg);
+    QPainter painter(&image);
+    renderer.render(&painter, QRectF(0, 0, size, size));
+    return image;
+}
+
+int inkPixels(const QImage& image, const QColor& background)
+{
+    int n = 0;
+    for (int y = 0; y < image.height(); ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            n += image.pixelColor(x, y) != background;
+        }
+    }
+    return n;
+}
+}  // namespace
+
+TEST_CASE("Every constraint tool has an icon that renders", "[icons]")
+{
+    const QColor dark(0x2b, 0x2f, 0x36);
+    for (ToolKind kind : kConstraintTools) {
+        const QString name = MainWindow::toolName(kind);
+        INFO(name.toStdString());
+        const QByteArray svg = icons::svg(name);
+        REQUIRE(!svg.isEmpty());
+        REQUIRE(QSvgRenderer(svg).isValid());
+        CHECK(inkPixels(render(svg, 24, dark), dark) > 24);  // something visible at toolbar size
+        CHECK_FALSE(icons::forName(name).isNull());
+        // Active: all white.
+        const QByteArray on = icons::svg(name, QIcon::On);
+        CHECK(!on.contains("#e8615c"));
+        CHECK(!on.contains("#d5d9de"));
+    }
+}
+
+TEST_CASE("Icon contact sheet", "[icons][snapshot]")
+{
+    // With DRAWAPP_SNAPSHOT_DIR set, writes every icon at 16, 24 and 48 px on the dark theme, and
+    // the active version on the green button, for checking by eye.
+    const QString dir = qEnvironmentVariable("DRAWAPP_SNAPSHOT_DIR");
+    const QStringList names = QDir(QStringLiteral(":/icons")).entryList({QStringLiteral("*.svg")}, QDir::Files, QDir::Name);
+    REQUIRE(!names.isEmpty());
+    if (dir.isEmpty()) {
+        return;
+    }
+    const int row = 64;
+    QImage sheet(16 + 4 * 72 + 200, int(names.size()) * row, QImage::Format_ARGB32);
+    sheet.fill(QColor(0x2b, 0x2f, 0x36));
+    QPainter painter(&sheet);
+    painter.setPen(QColor(0xd5, 0xd9, 0xde));
+    for (int i = 0; i < names.size(); ++i) {
+        const QString name = QFileInfo(names[i]).completeBaseName();
+        const int y = i * row;
+        int x = 16;
+        for (int size : {16, 24, 48}) {
+            painter.drawImage(x, y + (row - size) / 2, render(icons::svg(name), size, QColor(0x2b, 0x2f, 0x36)));
+            x += 72;
+        }
+        painter.fillRect(x - 4, y + 16, 32, 32, QColor(0x2e, 0x7d, 0x32));
+        painter.drawImage(x, y + 20, render(icons::svg(name, QIcon::On), 24, QColor(0x2e, 0x7d, 0x32)));
+        painter.drawText(x + 48, y + row / 2 + 5, name);
+    }
+    painter.end();
+    CHECK(sheet.save(QDir(dir).filePath(QStringLiteral("icons.png"))));
+}

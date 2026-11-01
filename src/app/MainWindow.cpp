@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 
 #include "ColorBar.h"
+#include "Icons.h"
 #include "ConstraintPanel.h"
 #include "Document.h"
 #include "PythonHost.h"
@@ -595,9 +596,13 @@ void MainWindow::createActions()
     auto makeTool = [&](const ToolDef& t, QMenu* menu) {
         auto* action = new QAction(t.text, this);
         action->setCheckable(true);
+        action->setToolTip(t.text);
         if (!t.key.isEmpty()) {
             action->setShortcut(t.key);
             action->setToolTip(QStringLiteral("%1 (%2)").arg(t.text, t.key.toString(QKeySequence::NativeText)));
+        }
+        if (const QIcon icon = icons::forName(toolName(t.kind)); !icon.isNull()) {
+            action->setIcon(icon);
         }
         group->addAction(action);
         menu->addAction(action);
@@ -738,7 +743,8 @@ void MainWindow::createActions()
     auto* constraintBar = addToolBar(tr("Constraints"));
     constraintBar->setObjectName("ConstraintToolbar");
     constraintBar->setMovable(false);
-    constraintBar->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    constraintBar->setToolButtonStyle(Qt::ToolButtonIconOnly);  // names in the tooltips
+    constraintBar->setIconSize(QSize(26, 26));
     addTools(constraintBar, {
                                 {ToolKind::Dimension, tr("Dimension"), QKeySequence(Qt::Key_D)},
                                 {ToolKind::Coincident, tr("Coincident"), QKeySequence(Qt::Key_O)},

@@ -1226,21 +1226,25 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
              "with doc.transaction(): ... groups changes into one undo step")
         .def("to_json", [](const DocumentH&) { return core::toJson(sketch()); })
         .def("export_svg", [](const DocumentH&, const std::string& path, bool fills, bool undecorated,
-                              bool construction, double margin) {
+                              bool construction, double margin, py::object canvas) {
             core::exporter::SvgOptions o;
             o.fills = fills;
             o.undecorated = undecorated;
             o.construction = construction;
             o.margin = margin;
+            if (!canvas.is_none()) {
+                o.canvas = canvas.cast<std::array<double, 4>>();
+            }
             Document::SilentRecording quiet(doc());
             QString error;
             if (!doc().exportSvg(QString::fromStdString(path), o, &error)) {
                 throw std::runtime_error(error.toStdString());
             }
         }, py::arg("path"), py::arg("fills") = true, py::arg("undecorated") = true, py::arg("construction") = false,
-           py::arg("margin") = 2.0,
+           py::arg("margin") = 2.0, py::arg("canvas") = py::none(),
            "Write the drawing as SVG, in millimetres: fills, strokes, and (undecorated=True) curves without a "
-           "stroke in thin black; construction only if asked.")
+           "stroke in thin black; construction only if asked. canvas=(x0, y0, x1, y1) frames a fixed area in "
+           "its own units instead (for icons).")
         .def("to_svg", [](const DocumentH&, bool fills, bool undecorated, bool construction, double margin) {
             core::exporter::SvgOptions o;
             o.fills = fills;

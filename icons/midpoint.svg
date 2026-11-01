@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" version="1.1"
+     width="24" height="24" viewBox="0 0 24 24">
+  <!-- Drawing App icon -->
+  <g id="strokes" inkscape:groupmode="layer" inkscape:label="Strokes">
+    <line x1="12" y1="3.75" x2="2.9067" y2="19.5" fill="none" stroke="#e8615c" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="2.9067" y1="19.5" x2="21.0933" y2="19.5" fill="none" stroke="#e8615c" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="21.0933" y1="19.5" x2="12" y2="3.75" fill="none" stroke="#e8615c" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

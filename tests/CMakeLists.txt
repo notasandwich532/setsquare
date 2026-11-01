@@ -31,6 +31,7 @@ add_executable(app_tests
     app/test_constraint_tools.cpp
     app/test_document.cpp
     app/test_export.cpp
+    app/test_icons.cpp
     app/test_mainwindow.cpp
     app/test_modify_tools.cpp
     app/test_scripting.cpp

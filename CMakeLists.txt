@@ -30,7 +30,7 @@ function(drawapp_embeds_python target)
     endif()
 endfunction()
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets Svg)
 qt_standard_project_setup()
 
 add_subdirectory(third_party/planegcs)

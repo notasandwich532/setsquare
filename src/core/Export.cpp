@@ -123,19 +123,28 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
             include(p, 0.0);
         }
     }
-    const double m = std::max(0.0, o.margin);
+    double m = std::max(0.0, o.margin);
+    if (o.canvas) {
+        // A fixed frame, in its own units.
+        m = 0.0;
+        x0 = (*o.canvas)[0];
+        y0 = (*o.canvas)[1];
+        x1 = (*o.canvas)[2];
+        y1 = (*o.canvas)[3];
+    }
     const double width = x1 - x0 + 2 * m, height = y1 - y0 + 2 * m;
     // Sketch y points up, SVG's down.
     auto X = [&](double x) { return num(x - x0 + m); };
     auto Y = [&](double y) { return num(y1 - y + m); };
 
     std::ostringstream out;
+    const std::string unit = o.canvas ? "" : "mm";
     out << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
         << "<svg xmlns=\"http://www.w3.org/2000/svg\" "
            "xmlns:inkscape=\"http://www.inkscape.org/namespaces/inkscape\" version=\"1.1\"\n"
-        << "     width=\"" << num(width) << "mm\" height=\"" << num(height) << "mm\" viewBox=\"0 0 "
+        << "     width=\"" << num(width) << unit << "\" height=\"" << num(height) << unit << "\" viewBox=\"0 0 "
         << num(width) << ' ' << num(height) << "\">\n"
-        << "  <!-- Drawing App export: 1 unit = 1 mm -->\n";
+        << (o.canvas ? "  <!-- Drawing App icon -->\n" : "  <!-- Drawing App export: 1 unit = 1 mm -->\n");
 
     auto layer = [&](const char* id, const char* label) {
         out << "  <g id=\"" << id << "\" inkscape:groupmode=\"layer\" inkscape:label=\"" << label << "\">\n";

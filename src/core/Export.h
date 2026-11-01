@@ -2,6 +2,8 @@
 
 #include "Sketch.h"
 
+#include <array>
+#include <optional>
 #include <string>
 
 // Writing drawings out for other programs.
@@ -16,6 +18,10 @@ struct SvgOptions
     bool construction = false;  // construction geometry, dashed grey
     StrokeStyle plain{{0, 0, 0, 255}, 0.25, Dash::Solid};
     double margin = 2.0;        // mm around the drawing
+
+    // For icons: a fixed canvas (sketch x0, y0, x1, y1) instead of fitting the drawing. The SVG
+    // is then in canvas units (no mm, no margin), e.g. a 24 x 24 icon grid.
+    std::optional<std::array<double, 4>> canvas;
 };
 
 // SVG of the drawing as Presentation view shows it: fills (with their holes) under strokes, in

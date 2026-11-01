@@ -20,6 +20,8 @@ add_library(drawapp_lib STATIC
     ConstraintPanel.h
     FrameClock.cpp
     FrameClock.h
+    Icons.cpp
+    Icons.h
     MainWindow.cpp
     MainWindow.h
     ScriptConsole.cpp
@@ -50,7 +52,11 @@ add_library(drawapp_lib STATIC
     tools/TransformTools.h
 )
 target_include_directories(drawapp_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(drawapp_lib PUBLIC drawdoc drawscript Qt6::Widgets)
+target_link_libraries(drawapp_lib PUBLIC drawdoc drawscript Qt6::Widgets Qt6::Svg)
+
+# Tool icons (made by icons/build_icons.py), compiled in as :/icons/<name>.svg.
+file(GLOB tool_icons CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/icons/*.svg")
+qt_add_resources(drawapp_lib "tool_icons" PREFIX "/icons" BASE "${PROJECT_SOURCE_DIR}/icons" FILES ${tool_icons})
 if(WIN32)
     target_link_libraries(drawapp_lib PRIVATE dxgi dwmapi)  # vblank pacing (FrameClock)
 endif()

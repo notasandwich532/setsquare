@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" version="1.1"
+     width="24" height="24" viewBox="0 0 24 24">
+  <!-- Drawing App icon -->
+  <g id="fills" inkscape:groupmode="layer" inkscape:label="Fills">
+    <path d="M2.5,21.5 L7.5,21.5 L7.5,19 L7.5,16.5 L5,16.5 L2.5,16.5 Z" fill="#e8615c" fill-rule="evenodd" stroke="none"/>
+  </g>
+  <g id="strokes" inkscape:groupmode="layer" inkscape:label="Strokes">
+    <line x1="2.5" y1="21.5" x2="7.5" y2="21.5" fill="none" stroke="#e8615c" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="7.5" y1="21.5" x2="7.5" y2="16.5" fill="none" stroke="#e8615c" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="7.5" y1="16.5" x2="2.5" y2="16.5" fill="none" stroke="#e8615c" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="2.5" y1="16.5" x2="2.5" y2="21.5" fill="none" stroke="#e8615c" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="5" y1="16.5" x2="5" y2="2.5" fill="none" stroke="#e8615c" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="7.5" y1="19" x2="21.5" y2="19" fill="none" stroke="#d5d9de" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

@@ -103,7 +103,7 @@ void ToolSearch::refill()
         if (const QKeySequence key = e->action->shortcut(); !key.isEmpty()) {
             text += QStringLiteral("    ") + key.toString(QKeySequence::NativeText);
         }
-        auto* item = new QListWidgetItem(text, m_list);
+        auto* item = new QListWidgetItem(e->action->icon(), text, m_list);
         item->setToolTip(e->context);
         item->setData(Qt::UserRole, QVariant::fromValue(static_cast<void*>(e->action)));
     }
