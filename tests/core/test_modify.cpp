@@ -261,6 +261,24 @@ TEST_CASE("Fillet two crossing lines in the clicked quadrant", "[modify][fillet]
     CHECK(arc.center.y == Approx(4.0).margin(1e-6));
 }
 
+TEST_CASE("Fillet a sharp corner picked close in, nearer than the arc will touch", "[modify][fillet]")
+{
+    // A 45 degree corner: a 5 mm fillet touches 12 mm from it. Picked 6 mm out, the wide angle
+    // next to it has an arc touching nearer the picks (though past the corner on one line);
+    // the fillet must still go in the corner picked.
+    Sketch s;
+    const Id base = s.addLine(0, 0, 30, 0);
+    const Id slope = s.addLine(30, 0, 0, 30);
+    s.entity(s.line(base).p1).fixed = true;
+    const double k = 6.0 / std::sqrt(2.0);
+    const mod::Corner f = mod::fillet(s, base, {24, 0}, slope, {30 - k, k}, 5.0);
+    const ArcShape arc = arcShape(s, f.joint);
+    const double reach = 5.0 / std::tan(std::numbers::pi / 8);  // corner to touching point
+    CHECK(arc.center.x == Approx(30 - reach).margin(1e-6));
+    CHECK(arc.center.y == Approx(5.0).margin(1e-6));
+    CHECK(arc.sweep == Approx(3 * std::numbers::pi / 4).margin(1e-6));
+}
+
 TEST_CASE("Fillet a line and an arc", "[modify][fillet]")
 {
     Sketch s;

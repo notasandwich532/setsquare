@@ -696,14 +696,23 @@ Corner fillet(Sketch& s, Id a, Vec2 nearA, Id b, Vec2 nearB, double radius)
     }
     const Geo ga = geoOf(s, a), gb = geoOf(s, b);
 
-    // Centres at distance `radius` from both curves; take the one whose touching points are
-    // nearest where the curves were picked (i.e. in the corner meant).
+    // Centres at distance `radius` from both curves: one in each angle the curves make. Take one
+    // in the angle the picked parts bound, i.e. on the same side of each curve as the other
+    // curve's pick; then the one whose touching points are nearest the picks. (Nearness alone
+    // isn't enough: picked close to a sharp corner, an arc in the wide angle next to it touches
+    // nearer, though past the corner on one curve.)
+    auto side = [](const Geo& g, Vec2 p) {
+        const double v = g.kind == Geo::Kind::Line ? cross(sub(g.b, g.a), sub(p, g.a)) : dist(p, g.c) - g.r;
+        return v > 0 ? 1 : (v < 0 ? -1 : 0);
+    };
+    const int sideOfA = side(ga, nearB), sideOfB = side(gb, nearA);
     std::optional<Vec2> centre;
     double bestScore = 0;
     for (const Geo& oa : offsets(ga, radius)) {
         for (const Geo& ob : offsets(gb, radius)) {
             for (const Vec2& c : rawIntersect(oa, ob)) {
-                const double score = dist(touch(ga, c), nearA) + dist(touch(gb, c), nearB);
+                const bool inAngle = (sideOfA == 0 || side(ga, c) == sideOfA) && (sideOfB == 0 || side(gb, c) == sideOfB);
+                const double score = dist(touch(ga, c), nearA) + dist(touch(gb, c), nearB) + (inAngle ? 0.0 : 1e12);
                 if (!centre || score < bestScore) {
                     centre = c;
                     bestScore = score;
