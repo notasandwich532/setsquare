@@ -1,6 +1,7 @@
 // SketchView: constraint symbols, dimensions and the inline dimension editor.
 
 #include "Document.h"
+#include "Icons.h"
 #include "SketchView.h"
 #include "Theme.h"
 
@@ -22,6 +23,7 @@
 
 using core::ConstraintType;
 using core::Id;
+using core::kNoId;
 using core::Vec2;
 
 namespace
@@ -283,25 +285,53 @@ std::vector<SketchView::Annotation> SketchView::layoutAnnotations() const
             continue;
         }
 
-        if (!m_showConstraints || core::isFeature(c.type)) {
-            continue;  // features are listed in the constraints panel, not drawn
+        if (!m_showConstraints) {
+            continue;
         }
-        const QString symbol = symbolFor(c.type);
-        auto glyphAt = [&](QPointF at) {
-            Annotation a{id, false, {}, symbol, {}};
+        auto glyphAt = [&](QPointF at, const QString& symbol, const QString& icon = {}) {
+            Annotation a{id, false, {}, symbol, {}, icon};
             a.rect = QRectF(at - QPointF(kGlyphSize / 2, kGlyphSize / 2), QSizeF(kGlyphSize, kGlyphSize));
             out.push_back(std::move(a));
         };
+        if (core::isFeature(c.type)) {
+            // One symbol, its tool's icon, on what it made (a divide: on its line).
+            Id on = kNoId;
+            QString icon;
+            switch (c.type) {
+                case ConstraintType::Offset:
+                    on = core::feature::offsetRefs(c).offsets.front();
+                    icon = QStringLiteral("offset");
+                    break;
+                case ConstraintType::LinearPattern:
+                case ConstraintType::CircularPattern: {
+                    const auto p = core::feature::pattern(c);
+                    on = p.copies.empty() ? p.sources.front() : p.copies.front().front();
+                    icon = c.type == ConstraintType::LinearPattern ? QStringLiteral("rectangular_pattern")
+                                                                   : QStringLiteral("circular_pattern");
+                    break;
+                }
+                case ConstraintType::Divide:
+                    on = c.refs.front();
+                    icon = QStringLiteral("divide");
+                    break;
+                default: break;
+            }
+            if (on != kNoId && s.hasEntity(on)) {
+                glyphAt(symbolPos(on), {}, icon);
+            }
+            continue;
+        }
+        const QString symbol = symbolFor(c.type);
         const bool pointPair = (c.type == ConstraintType::Horizontal || c.type == ConstraintType::Vertical)
             && c.refs.size() == 2;
         if (pointPair) {
-            glyphAt((pos(c.refs[0]) + pos(c.refs[1])) / 2 + QPointF(0, -kGlyphOffset));
+            glyphAt((pos(c.refs[0]) + pos(c.refs[1])) / 2 + QPointF(0, -kGlyphOffset), symbol);
             continue;
         }
         if (c.type == ConstraintType::Tangent) {
             // One symbol, at the point where the curves touch.
             if (const auto touch = tangentContact(s, c)) {
-                glyphAt(toScreen(*touch) + QPointF(kGlyphOffset * 0.8, -kGlyphOffset * 0.8));
+                glyphAt(toScreen(*touch) + QPointF(kGlyphOffset * 0.8, -kGlyphOffset * 0.8), symbol);
                 continue;
             }
         }
@@ -310,7 +340,18 @@ std::vector<SketchView::Annotation> SketchView::layoutAnnotations() const
             if (!shownOn.insert({target, symbol}).second) {
                 continue;
             }
-            glyphAt(symbolPos(target));
+            glyphAt(symbolPos(target), symbol);
+        }
+    }
+
+    // Fixed items: a padlock each (selecting it selects the item; F unfixes it).
+    if (m_showConstraints) {
+        for (const auto& [id, e] : s.entities()) {
+            if (e.fixed && !s.isReference(id)) {
+                Annotation a{id, false, {}, {}, {}, QStringLiteral("fix")};
+                a.rect = QRectF(symbolPos(id) - QPointF(kGlyphSize / 2, kGlyphSize / 2), QSizeF(kGlyphSize, kGlyphSize));
+                out.push_back(std::move(a));
+            }
         }
     }
     return out;
@@ -347,6 +388,10 @@ void SketchView::drawAnnotations(QPainter& painter) const
         painter.setBrush(kGlyphBackground);
         painter.drawRoundedRect(a.rect, 3, 3);
         painter.setBrush(Qt::NoBrush);
+        if (!a.icon.isEmpty()) {
+            icons::forName(a.icon).paint(&painter, a.rect.adjusted(1.5, 1.5, -1.5, -1.5).toRect());
+            continue;
+        }
         painter.drawText(a.rect, Qt::AlignCenter, a.text);
     }
 }

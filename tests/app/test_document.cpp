@@ -6,6 +6,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QFile>
+#include <cmath>
+#include <algorithm>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 
@@ -137,4 +139,29 @@ TEST_CASE("The command history follows edits, undo and redo, and is saved", "[do
     REQUIRE(r.ok);
     CHECK(rebuilt.sketch().entities().size() == doc.sketch().entities().size());
     CHECK(rebuilt.sketch().constraints().size() == doc.sketch().constraints().size());
+}
+TEST_CASE("A refused change names what's in its way, fixed geometry included", "[document][blockers]")
+{
+    // A fixed line, and a vertical line up from its end: the far corner can't come closer to
+    // the fixed line's start than 10, because the fixed line can't move.
+    Document doc;
+    Id fixedLine = kNoId, dim = kNoId;
+    doc.modify("draw", [&](Sketch& s) {
+        const Id a = s.addPoint(0, 0), b = s.addPoint(10, 0), c = s.addPoint(10, 10);
+        fixedLine = s.addLine(a, b);
+        s.entity(fixedLine).fixed = true;
+        const Id up = s.addLine(b, c);
+        s.addConstraint(ConstraintType::Vertical, {up});
+        dim = s.addConstraint(ConstraintType::Distance, {a, c}, std::sqrt(200.0));
+    });
+    REQUIRE(doc.solveResult().dof == 0);
+
+    QSignalSpy blocked(&doc, &Document::blocked);
+    QString error;
+    CHECK_FALSE(doc.setDimensionValue(dim, 5.0, &error));
+    INFO(error.toStdString());
+    CHECK(error.contains("fixed l" + QString::number(fixedLine)));
+    REQUIRE(blocked.size() == 1);
+    const auto items = blocked.first().first().value<std::vector<Id>>();
+    CHECK(std::ranges::find(items, fixedLine) != items.end());
 }

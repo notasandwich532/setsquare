@@ -7,6 +7,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <map>
+#include <set>
 #include <QFile>
 #include <QSaveFile>
 
@@ -154,31 +156,128 @@ bool Document::setDimensionValue(core::Id dimension, double value, QString* erro
         }
         return false;
     }
-    if (!commitChecked(std::move(working), error, hold)) {
+    if (!commitChecked(std::move(working), error, hold, {dimension})) {
         return false;
     }
     record(QStringLiteral("%1.value = %2").arg(Editor::name(m_sketch, dimension), Editor::number(value)));
     return true;
 }
 
-bool Document::commitChecked(core::Sketch working, QString* error, const std::vector<core::Id>& hold)
+namespace
+{
+}  // namespace
+
+std::vector<core::Id> Document::blockersOf(const core::Sketch& s, const std::vector<core::Id>& constraints)
+{
+    // The constraints, then the fixed geometry linked to them (through shared points and other
+    // constraints): what holds things still when a change can't be made.
+    std::vector<core::Id> out;
+    auto add = [&](core::Id id) {
+        if (std::ranges::find(out, id) == out.end()) {
+            out.push_back(id);
+        }
+    };
+    for (core::Id k : constraints) {
+        if (s.hasConstraint(k)) {
+            add(k);
+        }
+    }
+    // Which entities each point belongs to, and which constraints reference each entity.
+    std::map<core::Id, std::vector<core::Id>> owners, usedBy;
+    for (const auto& [id, e] : s.entities()) {
+        for (core::Id p : s.definingPoints(id)) {
+            owners[p].push_back(id);
+        }
+    }
+    for (const auto& [id, c] : s.constraints()) {
+        for (core::Id r : c.refs) {
+            usedBy[r].push_back(id);
+        }
+    }
+    std::set<core::Id> seen;
+    std::vector<core::Id> todo;
+    for (core::Id k : constraints) {
+        if (s.hasConstraint(k)) {
+            for (core::Id r : s.constraint(k).refs) {
+                todo.push_back(r);
+            }
+        }
+    }
+    while (!todo.empty()) {
+        const core::Id id = todo.back();
+        todo.pop_back();
+        if (!s.hasEntity(id) || s.isReference(id) || !seen.insert(id).second) {
+            continue;
+        }
+        if (s.entity(id).fixed) {
+            add(id);
+        }
+        for (core::Id p : s.definingPoints(id)) {
+            for (core::Id o : owners[p]) {
+                todo.push_back(o);
+            }
+        }
+        for (core::Id k : usedBy[id]) {
+            for (core::Id r : s.constraint(k).refs) {
+                todo.push_back(r);
+            }
+        }
+    }
+    return out;
+}
+QString Document::describeItem(const core::Sketch& s, core::Id id)
+{
+    if (s.hasConstraint(id)) {
+        return QStringLiteral("%1 %2").arg(QString::fromLatin1(core::toString(s.constraint(id).type)),
+                                           Editor::name(s, id));
+    }
+    if (s.hasEntity(id)) {
+        return tr("fixed %1").arg(Editor::name(s, id));
+    }
+    return Editor::name(s, id);
+}
+
+bool Document::commitChecked(core::Sketch working, QString* error, const std::vector<core::Id>& hold,
+                             const std::vector<core::Id>& edited)
 {
     // Writes back on success.
     core::SolveResult result = hold.empty() ? core::solve(working) : core::solveHolding(working, hold);
     QString problem;
+    std::vector<core::Id> blamed;  // the constraints in the way
+    auto newOnes = [](const std::vector<core::Id>& now, const std::vector<core::Id>& before) {
+        std::vector<core::Id> out;
+        for (core::Id id : now) {
+            if (std::ranges::find(before, id) == before.end()) {
+                out.push_back(id);
+            }
+        }
+        return out;
+    };
     if (result.conflicting.size() > m_result.conflicting.size()) {
         problem = tr("That would conflict with existing constraints");
+        blamed = newOnes(result.conflicting, m_result.conflicting);
     }
     else if (result.redundant.size() > m_result.redundant.size()) {
         problem = tr("That would over-constrain the sketch");
+        blamed = newOnes(result.redundant, m_result.redundant);
     }
     else if (!result.ok) {
         problem = tr("The sketch can't be solved like that");
+        blamed = edited;  // (nothing else to go on: what holds it still is linked to it)
     }
     if (!problem.isEmpty()) {
+        const std::vector<core::Id> blockers = blockersOf(working, blamed);
+        if (!blockers.empty()) {
+            QStringList names;
+            for (core::Id id : blockers) {
+                names << describeItem(working, id);
+            }
+            problem += tr(": %1").arg(names.join(QStringLiteral(", ")));
+        }
         if (error) {
             *error = problem;
         }
+        emit blocked(blockers);
         return false;
     }
     core::regions::refreshFills(working);

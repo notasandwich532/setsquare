@@ -548,3 +548,36 @@ TEST_CASE("Divide: double-clicking it in the list edits it", "[transform][divide
     CHECK(f.sketch().constraint(edited).refs.size() == 5);
     CHECK(f.count(EntityKind::Point) == 4 + 4);  // the rectangle's corners and the new points only
 }
+TEST_CASE("Features and fixed items show a symbol on the canvas that selects them", "[transform][symbols]")
+{
+    Fixture f;
+    Id k = kNoId, divide = kNoId, fixedLine = kNoId;
+    f.doc.modify("features", [&](Sketch& s) {
+        k = feature::offset(s, {f.rect.sides.begin(), f.rect.sides.end()}, 2, {20, 15});
+        fixedLine = s.addLine(s.addPoint(40, 10), s.addPoint(40, 30));
+        s.entity(fixedLine).fixed = true;
+        divide = feature::divide(s, fixedLine, feature::evenly(2));
+    });
+    // Look for each one's symbol near what it's on.
+    auto found = [&](Id want, Vec2 near) {
+        const QPoint c = f.at(near.x, near.y);
+        for (int dy = -45; dy <= 45; dy += 2) {
+            for (int dx = -45; dx <= 45; dx += 2) {
+                if (f.view.pickAt(QPointF(c + QPoint(dx, dy))) == want) {
+                    return c + QPoint(dx, dy);
+                }
+            }
+        }
+        return QPoint(-1, -1);
+    };
+    const QPoint offsetSymbol = found(k, {20, 12});  // the offset's first curve: the bottom, raised
+    CHECK(offsetSymbol != QPoint(-1, -1));
+    CHECK(found(divide, {40, 20}) != QPoint(-1, -1));
+    const QPoint lock = found(fixedLine, {40, 20});
+    CHECK(lock != QPoint(-1, -1));
+
+    // Clicking the offset's symbol selects the offset (so Delete unlinks it).
+    QTest::mouseMove(&f.view, offsetSymbol);
+    QTest::mouseClick(&f.view, Qt::LeftButton, {}, offsetSymbol);
+    CHECK(f.view.selection().contains(k));
+}

@@ -122,6 +122,8 @@ signals:
     void fileStateChanged();  // path or modified flag
     // Python equivalent of a user action that just happened (one or more lines).
     void recorded(const QString& python);
+    // An edit was refused: these constraints, and fixed geometry they act on, are in its way.
+    void blocked(const std::vector<core::Id>& items);
 
 private:
     void pushUndo(core::Sketch snapshot, QStringList history);
@@ -132,7 +134,11 @@ private:
     void announce(const QString& python);    // recorded but not history (undo, save, ...)
     // Commits a solved working copy if it isn't more over-constrained than the current sketch.
     // `hold`: points to keep in place where the sketch leaves a choice.
-    bool commitChecked(core::Sketch working, QString* error, const std::vector<core::Id>& hold = {});
+    // edited: what the change was to (blamed, with what holds it, if the solve just fails).
+    bool commitChecked(core::Sketch working, QString* error, const std::vector<core::Id>& hold = {},
+                       const std::vector<core::Id>& edited = {});
+    static std::vector<core::Id> blockersOf(const core::Sketch& s, const std::vector<core::Id>& constraints);
+    static QString describeItem(const core::Sketch& s, core::Id id);
     core::Id midpointOnLine(const std::vector<core::Id>& refs, QString* error);
     // Writes an export (made by `make`, which may throw SketchError) to `path`.
     bool writeExport(const QString& path, const std::function<std::string()>& make, QString* error);

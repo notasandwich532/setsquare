@@ -231,6 +231,7 @@ private:
         QRectF rect;  // symbol box or dimension text box
         QString text;
         core::DimensionLayout dimension;
+        QString icon;  // symbols drawn as a tool icon (features, fixed items) rather than text
     };
     std::vector<Annotation> layoutAnnotations() const;
     QColor annotationColor(core::Id constraint, const QColor& normal) const;

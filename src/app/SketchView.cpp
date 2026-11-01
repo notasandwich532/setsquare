@@ -60,6 +60,12 @@ SketchView::SketchView(Document& document, QWidget* parent)
     setAttribute(Qt::WA_OpaquePaintEvent);
     setMinimumSize(200, 150);
     connect(&m_doc, &Document::changed, this, &SketchView::onDocumentChanged);
+    // A refused edit: show what's in its way.
+    connect(&m_doc, &Document::blocked, this, [this](const std::vector<core::Id>& items) {
+        if (!items.empty()) {
+            setSelection(std::set<core::Id>(items.begin(), items.end()));
+        }
+    });
     m_clock.start();
 
     m_frameClock = new FrameClock(this);
