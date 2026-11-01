@@ -65,7 +65,7 @@ void checkIcons(const QList<ToolKind>& kinds)
         CHECK_FALSE(icons::forName(name).isNull());
         // Active: all white.
         const QByteArray on = icons::svg(name, QIcon::On);
-        for (const char* colour : {"#e8615c", "#d5d9de", "#4da3ff"}) {
+        for (const char* colour : {"#e8615c", "#d5d9de", "#4da3ff", "#5cc97b"}) {
             CHECK(!on.contains(colour));
         }
     }

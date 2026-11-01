@@ -313,7 +313,7 @@
     "l23.construction = False",
     "s.stroke([l21, l23], color=\"#d5d9de\", width=1.5, dash=\"dashed\")",
     "s.stroke([l32, l35], color=\"#d5d9de\", width=2.5, dash=\"solid\")",
-    "s.stroke([a37], color=\"#e8615c\", width=2.5, dash=\"solid\")"
+    "s.stroke([a37], color=\"#5cc97b\", width=2.5, dash=\"solid\")"
   ],
   "origin": 1,
   "strokes": [
@@ -342,7 +342,7 @@
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 37,
       "dash": "solid",
       "width": 2.5

@@ -297,11 +297,11 @@
     "k26 = s.vertical(l25)",
     "d27 = s.distance(l25, value=7)",
     "k38 = s.circular_pattern([c23], p19, count=6)",
-    "s.stroke([c29], color=\"#e8615c\", width=2.5, dash=\"solid\")",
-    "s.stroke([c31], color=\"#e8615c\", width=2.5, dash=\"solid\")",
-    "s.stroke([c33], color=\"#e8615c\", width=2.5, dash=\"solid\")",
-    "s.stroke([c35], color=\"#e8615c\", width=2.5, dash=\"solid\")",
-    "s.stroke([c37], color=\"#e8615c\", width=2.5, dash=\"solid\")"
+    "s.stroke([c29], color=\"#5cc97b\", width=2.5, dash=\"solid\")",
+    "s.stroke([c31], color=\"#5cc97b\", width=2.5, dash=\"solid\")",
+    "s.stroke([c33], color=\"#5cc97b\", width=2.5, dash=\"solid\")",
+    "s.stroke([c35], color=\"#5cc97b\", width=2.5, dash=\"solid\")",
+    "s.stroke([c37], color=\"#5cc97b\", width=2.5, dash=\"solid\")"
   ],
   "origin": 1,
   "strokes": [
@@ -312,31 +312,31 @@
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 29,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 31,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 33,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 35,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 37,
       "dash": "solid",
       "width": 2.5

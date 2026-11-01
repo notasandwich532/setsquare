@@ -285,7 +285,7 @@
     "d31 = s.vertical_distance(s.origin, p26, value=12)",
     "k32 = s.coincident(p27, l21)",
     "p33 = s.point(21, 12)\nl34 = s.line(p27, p33)",
-    "s.stroke([l34], color=\"#e8615c\", width=2.5, dash=\"dotted\")",
+    "s.stroke([l34], color=\"#5cc97b\", width=2.5, dash=\"dotted\")",
     "k35 = s.horizontal(l34)",
     "d36 = s.distance(l34, value=11)"
   ],
@@ -304,7 +304,7 @@
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 34,
       "dash": "dotted",
       "width": 2.5

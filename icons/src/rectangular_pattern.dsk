@@ -695,14 +695,14 @@
     "d33 = s.distance(l23, value=4)",
     "d34 = s.distance(l24, value=4)",
     "k99 = s.rectangular_pattern([l23, l24, l25, l26], count=3, spacing=7, count2=3, spacing2=7)",
-    "s.stroke([l39, l40, l41, l42], color=\"#e8615c\", width=2.5, dash=\"solid\")",
-    "s.stroke([l47, l48, l49, l50], color=\"#e8615c\", width=2.5, dash=\"solid\")",
-    "s.stroke([l55, l56, l57, l58], color=\"#e8615c\", width=2.5, dash=\"solid\")",
-    "s.stroke([l63, l64, l65, l66], color=\"#e8615c\", width=2.5, dash=\"solid\")",
-    "s.stroke([l71, l72, l73, l74], color=\"#e8615c\", width=2.5, dash=\"solid\")",
-    "s.stroke([l79, l80, l81, l82], color=\"#e8615c\", width=2.5, dash=\"solid\")",
-    "s.stroke([l87, l88, l89, l90], color=\"#e8615c\", width=2.5, dash=\"solid\")",
-    "s.stroke([l95, l96, l97, l98], color=\"#e8615c\", width=2.5, dash=\"solid\")"
+    "s.stroke([l39, l40, l41, l42], color=\"#5cc97b\", width=2.5, dash=\"solid\")",
+    "s.stroke([l47, l48, l49, l50], color=\"#5cc97b\", width=2.5, dash=\"solid\")",
+    "s.stroke([l55, l56, l57, l58], color=\"#5cc97b\", width=2.5, dash=\"solid\")",
+    "s.stroke([l63, l64, l65, l66], color=\"#5cc97b\", width=2.5, dash=\"solid\")",
+    "s.stroke([l71, l72, l73, l74], color=\"#5cc97b\", width=2.5, dash=\"solid\")",
+    "s.stroke([l79, l80, l81, l82], color=\"#5cc97b\", width=2.5, dash=\"solid\")",
+    "s.stroke([l87, l88, l89, l90], color=\"#5cc97b\", width=2.5, dash=\"solid\")",
+    "s.stroke([l95, l96, l97, l98], color=\"#5cc97b\", width=2.5, dash=\"solid\")"
   ],
   "origin": 1,
   "strokes": [
@@ -731,193 +731,193 @@
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 39,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 40,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 41,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 42,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 47,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 48,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 49,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 50,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 55,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 56,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 57,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 58,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 63,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 64,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 65,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 66,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 71,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 72,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 73,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 74,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 79,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 80,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 81,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 82,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 87,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 88,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 89,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 90,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 95,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 96,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 97,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 98,
       "dash": "solid",
       "width": 2.5

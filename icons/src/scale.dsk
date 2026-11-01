@@ -418,7 +418,7 @@
     "d17 = s.distance(l9, value=24)",
     "d18 = s.distance(l12, value=24)",
     "p19 = s.point(3, 3)\np20 = s.point(21, 21)\ns.rectangle(p19, p20)",
-    "s.stroke([l23, l24, l25, l26], color=\"#e8615c\", width=2.5, dash=\"solid\")",
+    "s.stroke([l23, l24, l25, l26], color=\"#5cc97b\", width=2.5, dash=\"solid\")",
     "d31 = s.horizontal_distance(s.origin, p19, value=3)",
     "d32 = s.vertical_distance(s.origin, p19, value=3)",
     "d33 = s.distance(l23, value=18)",
@@ -430,7 +430,7 @@
     "d49 = s.distance(l39, value=8)",
     "d50 = s.distance(l40, value=8)",
     "p51 = s.point(11, 11)\np52 = s.point(17, 17)\nl53 = s.line(p51, p52)",
-    "s.stroke([l53], color=\"#e8615c\", width=2, dash=\"solid\")",
+    "s.stroke([l53], color=\"#5cc97b\", width=2, dash=\"solid\")",
     "d54 = s.horizontal_distance(s.origin, p51, value=11)",
     "d55 = s.vertical_distance(s.origin, p51, value=11)",
     "d56 = s.horizontal_distance(s.origin, p52, value=17)",
@@ -439,25 +439,25 @@
   "origin": 1,
   "strokes": [
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 23,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 24,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 25,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 26,
       "dash": "solid",
       "width": 2.5
@@ -487,7 +487,7 @@
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 53,
       "dash": "solid",
       "width": 2.0

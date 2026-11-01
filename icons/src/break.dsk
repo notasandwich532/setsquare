@@ -303,9 +303,9 @@
     "d24 = s.vertical_distance(s.origin, p19, value=3)",
     "d25 = s.distance(l21, value=18)",
     "p26 = s.point(3, 12)\np27 = s.point(9.5, 12)\nl28 = s.line(p26, p27)",
-    "s.stroke([l28], color=\"#e8615c\", width=2.5, dash=\"solid\")",
+    "s.stroke([l28], color=\"#5cc97b\", width=2.5, dash=\"solid\")",
     "p29 = s.point(14.5, 12)\np30 = s.point(21, 12)\nl31 = s.line(p29, p30)",
-    "s.stroke([l31], color=\"#e8615c\", width=2.5, dash=\"solid\")",
+    "s.stroke([l31], color=\"#5cc97b\", width=2.5, dash=\"solid\")",
     "k32 = s.horizontal(l28)",
     "d33 = s.distance(l28, value=6.5)",
     "k34 = s.horizontal(l31)",
@@ -324,13 +324,13 @@
       "width": 1.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 28,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 31,
       "dash": "solid",
       "width": 2.5

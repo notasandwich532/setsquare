@@ -4,10 +4,10 @@
   <!-- Drawing App icon -->
   <g id="strokes" inkscape:groupmode="layer" inkscape:label="Strokes">
     <circle cx="12" cy="5" r="2.5" fill="none" stroke="#d5d9de" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <circle cx="5.9378" cy="8.5" r="2.5" fill="none" stroke="#e8615c" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <circle cx="5.9378" cy="15.5" r="2.5" fill="none" stroke="#e8615c" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <circle cx="12" cy="19" r="2.5" fill="none" stroke="#e8615c" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <circle cx="18.0622" cy="15.5" r="2.5" fill="none" stroke="#e8615c" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <circle cx="18.0622" cy="8.5" r="2.5" fill="none" stroke="#e8615c" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="5.9378" cy="8.5" r="2.5" fill="none" stroke="#5cc97b" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="5.9378" cy="15.5" r="2.5" fill="none" stroke="#5cc97b" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="12" cy="19" r="2.5" fill="none" stroke="#5cc97b" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="18.0622" cy="15.5" r="2.5" fill="none" stroke="#5cc97b" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="18.0622" cy="8.5" r="2.5" fill="none" stroke="#5cc97b" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
   </g>
 </svg>

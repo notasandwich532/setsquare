@@ -369,7 +369,7 @@
     "l37 = s.line(p28, p26)",
     "s.stroke([l37], color=\"#d5d9de\", width=2.5, dash=\"solid\")",
     "s.mirror([l35, l36, l37], l21)",
-    "s.stroke([l41, l42, l43], color=\"#e8615c\", width=2.5, dash=\"solid\")"
+    "s.stroke([l41, l42, l43], color=\"#5cc97b\", width=2.5, dash=\"solid\")"
   ],
   "origin": 1,
   "strokes": [
@@ -398,19 +398,19 @@
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 41,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 42,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 43,
       "dash": "solid",
       "width": 2.5

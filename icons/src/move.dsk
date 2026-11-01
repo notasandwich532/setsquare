@@ -370,7 +370,7 @@
     "d33 = s.distance(l23, value=9)",
     "d34 = s.distance(l24, value=9)",
     "p35 = s.point(12, 12)\np36 = s.point(21, 21)\ns.rectangle(p35, p36)",
-    "s.stroke([l39, l40, l41, l42], color=\"#e8615c\", width=2.5, dash=\"solid\")",
+    "s.stroke([l39, l40, l41, l42], color=\"#5cc97b\", width=2.5, dash=\"solid\")",
     "d47 = s.horizontal_distance(s.origin, p35, value=12)",
     "d48 = s.vertical_distance(s.origin, p35, value=12)",
     "d49 = s.distance(l39, value=9)",
@@ -403,25 +403,25 @@
       "width": 1.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 39,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 40,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 41,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 42,
       "dash": "solid",
       "width": 2.5

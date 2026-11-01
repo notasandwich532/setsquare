@@ -323,7 +323,7 @@
     "d33 = s.distance(l23, value=9)",
     "d34 = s.distance(l24, value=9)",
     "k43 = s.offset([l23, l24, l25, l26], 3.5, toward=(1, 1))",
-    "s.stroke([l39, l40, l41, l42], color=\"#e8615c\", width=2.5, dash=\"solid\")"
+    "s.stroke([l39, l40, l41, l42], color=\"#5cc97b\", width=2.5, dash=\"solid\")"
   ],
   "origin": 1,
   "strokes": [
@@ -352,25 +352,25 @@
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 39,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 40,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 41,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 42,
       "dash": "solid",
       "width": 2.5

@@ -15,10 +15,14 @@ namespace
 const QByteArray kRed = "#e8615c";
 const QByteArray kGrey = "#d5d9de";
 const QByteArray kBlue = "#4da3ff";
+const QByteArray kGreen = "#5cc97b";
 
 QByteArray whitened(QByteArray svg)
 {
-    return svg.replace(kRed, "#ffffff").replace(kGrey, "#ffffff").replace(kBlue, "#ffffff");
+    for (const QByteArray& colour : {kRed, kGrey, kBlue, kGreen}) {
+        svg.replace(colour, "#ffffff");
+    }
+    return svg;
 }
 
 QByteArray load(const QString& name)

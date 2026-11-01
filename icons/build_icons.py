@@ -6,8 +6,8 @@
 #
 # Style (after Fusion's, simplified, with thicker lines so they read when small): what the tool
 # acts on is RED, what it acts against is GREY; for create tools, the shape is GREY and where you
-# click (or what you pick) is BLUE. The app swaps these colours for other states (e.g. white on the
-# green "active" button), so keep to these three.
+# click (or what you pick) is BLUE; modify tools use GREEN where the others use RED. The app swaps
+# these colours for other states (e.g. white on the green "active" button), so keep to these four.
 import math
 import os
 import sys
@@ -16,6 +16,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 RED = "#e8615c"
 GREY = "#d5d9de"
 BLUE = "#4da3ff"  # create tools: where you click, and curves you pick
+GREEN = "#5cc97b"  # modify tools: what they change or make
 W = 2.5  # line width, in grid units (thick, so they read at 16 px)
 
 
@@ -648,8 +649,8 @@ def icon_arc_slot_3point():
 
 
 # --- modify tools -----------------------------------------------------------------------------
-# What's there is GREY; what the tool changes or makes is RED. A thin dashed GREY line is how it
-# was (a removed corner, the original of a moved shape).
+# What's there is GREY; what the tool changes or makes is GREEN (the modify tools' own accent). A
+# thin dashed GREY line is how it was (a removed corner, the original of a moved shape).
 
 
 def ghost(curves):
@@ -677,7 +678,7 @@ def icon_trim(name="trim", boundary_dash="solid"):
     """The piece past the boundary, going (dashed red)."""
     start()
     boundary, left = cross(boundary_dash)
-    cut = line(left.p2, (21, 12), RED, width=2.5, dash="dotted")
+    cut = line(left.p2, (21, 12), GREEN, width=2.5, dash="dotted")
     s.horizontal(cut)
     s.distance(cut, value=11)
     return finish(name)
@@ -698,7 +699,7 @@ def icon_extend():
     s.horizontal(stub)
     pin(stub.p1, 3, 12)
     s.distance(stub, value=7)
-    grown = line(stub.p2, (19, 12), RED)
+    grown = line(stub.p2, (19, 12), GREEN)
     s.horizontal(grown)
     s.coincident(grown.p2, boundary)
     return finish("extend")
@@ -711,8 +712,8 @@ def icon_break():
     s.vertical(upright)
     pin(upright.p1, 12, 3)
     s.distance(upright, value=18)
-    left = line((3, 12), (9.5, 12), RED)
-    right = line((14.5, 12), (21, 12), RED)
+    left = line((3, 12), (9.5, 12), GREEN)
+    right = line((14.5, 12), (21, 12), GREEN)
     for piece, x in ((left, 3), (right, 21)):
         s.horizontal(piece)
         s.distance(piece, value=6.5)
@@ -743,7 +744,7 @@ def icon_fillet():
     arc = s.fillet(top, side, 8)
     ghost([top, side])
     stroke(kept_lines()[-2:], GREY)
-    stroke(arc, RED)
+    stroke(arc, GREEN)
     return finish("fillet")
 
 
@@ -753,7 +754,7 @@ def icon_chamfer(name="chamfer", **kind):
     cut = s.chamfer(top, side, 8, **kind)
     ghost([top, side])
     stroke([l for l in kept_lines()[-3:] if l != cut], GREY)
-    stroke(cut, RED)
+    stroke(cut, GREEN)
     return cut, top
 
 
@@ -774,7 +775,7 @@ def icon_chamfer_angle():
     o = cut.p1 if cut.p1.y > cut.p2.y else cut.p2  # on the top line
     a = math.radians(40)
     sweep = s.arc(o, (o.x + 8 * math.cos(a), o.y - 8 * math.sin(a)), (o.x + 8, o.y))
-    stroke(sweep, RED, width=2)
+    stroke(sweep, GREEN, width=2)
     s.radius(sweep, value=8)
     s.coincident(sweep.start, cut)
     s.coincident(sweep.end, top)
@@ -793,16 +794,16 @@ def icon_move():
     """A square moved up and right: where it was dashed, an arrow along the way."""
     start()
     square(3, 3, 9, GREY, width=THIN, dash="dashed")
-    square(12, 12, 9, RED)
+    square(12, 12, 9, GREEN)
     return finish("move")
 
 
 def icon_scale():
     """A small square grown (red) from its corner."""
     start()
-    square(3, 3, 18, RED)
+    square(3, 3, 18, GREEN)
     square(3, 3, 8, GREY)
-    diagonal = line((11, 11), (17, 17), RED, width=2)
+    diagonal = line((11, 11), (17, 17), GREEN, width=2)
     pin(diagonal.p1, 11, 11)
     pin(diagonal.p2, 17, 17)
     return finish("scale")
@@ -819,7 +820,7 @@ def icon_mirror():
     for p, (x, y) in ((a, (9.5, 4)), (b, (9.5, 20)), (c, (2.5, 4))):
         pin(p, x, y)
     tri = [line(a, b, GREY), line(b, c, GREY), line(c, a, GREY)]
-    stroke(s.mirror(tri, axis), RED)
+    stroke(s.mirror(tri, axis), GREEN)
     return finish("mirror")
 
 
@@ -829,7 +830,7 @@ def icon_rectangular_pattern():
     original = square(3, 3, 4, GREY)
     pattern = s.rectangular_pattern(original, count=3, spacing=7, count2=3, spacing2=7)
     for copy in pattern.copies:
-        stroke(copy, RED)
+        stroke(copy, GREEN)
     return finish("rectangular_pattern")
 
 
@@ -846,7 +847,7 @@ def icon_circular_pattern():
     s.distance(spoke, value=7)
     pattern = s.circular_pattern([original], centre, count=6)
     for copy in pattern.copies:
-        stroke(copy, RED)
+        stroke(copy, GREEN)
     return finish("circular_pattern")
 
 
@@ -856,7 +857,7 @@ def icon_offset():
     inner = square(7.5, 7.5, 9, GREY)
     before = set(s.entities)
     s.offset(inner, 3.5, toward=(1, 1))
-    stroke([e for e in s.entities if e not in before and (e in s.lines or e in s.arcs)], RED)
+    stroke([e for e in s.entities if e not in before and (e in s.lines or e in s.arcs)], GREEN)
     return finish("offset")
 
 

@@ -343,9 +343,9 @@
     "l23.construction = False",
     "s.stroke([l21, l23], color=\"#d5d9de\", width=1.5, dash=\"dashed\")",
     "s.stroke([l32, l35], color=\"#d5d9de\", width=2.5, dash=\"solid\")",
-    "s.stroke([l36], color=\"#e8615c\", width=2.5, dash=\"solid\")",
+    "s.stroke([l36], color=\"#5cc97b\", width=2.5, dash=\"solid\")",
     "p39 = s.point(19.128355544951823, 13.857699122507686)\np40 = s.point(21, 19)\na41 = s.arc(p30, p39, p40)",
-    "s.stroke([a41], color=\"#e8615c\", width=2, dash=\"solid\")",
+    "s.stroke([a41], color=\"#5cc97b\", width=2, dash=\"solid\")",
     "d42 = s.radius(a41, value=8)",
     "k43 = s.coincident(p39, l36)",
     "k44 = s.coincident(p40, l21)"
@@ -377,13 +377,13 @@
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 36,
       "dash": "solid",
       "width": 2.5
     },
     {
-      "color": "#e8615c",
+      "color": "#5cc97b",
       "curve": 41,
       "dash": "solid",
       "width": 2.0
