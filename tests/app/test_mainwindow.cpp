@@ -7,9 +7,13 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QApplication>
+#include <QDir>
+#include <QPainter>
 #include <QLineEdit>
 #include <QMenu>
 #include <QTest>
+#include <QToolBar>
+#include <QToolButton>
 
 TEST_CASE("Right-click shows the recently used tools", "[mainwindow][tools]")
 {
@@ -74,4 +78,55 @@ TEST_CASE("S opens a search box that finds and runs tools", "[mainwindow][tools]
     QTest::keyClick(input, Qt::Key_Return);
     CHECK(!search->isVisible());
     CHECK(view->toolKind() == ToolKind::RectangularPattern);
+}
+
+TEST_CASE("The sketch toolbar shows one icon per kind of tool, the rest in its menu", "[mainwindow][tools]")
+{
+    MainWindow window;
+    window.show();
+    auto* view = window.findChild<SketchView*>();
+    auto* bar = window.findChild<QToolBar*>(QStringLiteral("SketchToolbar"));
+    REQUIRE(bar != nullptr);
+    CHECK(bar->toolButtonStyle() == Qt::ToolButtonIconOnly);
+    for (QToolButton* b : bar->findChildren<QToolButton*>()) {
+        if (b->defaultAction() || b->menu()) {
+            INFO(b->text().toStdString());
+            CHECK_FALSE(b->icon().isNull());
+        }
+    }
+
+    auto* circles = bar->findChild<QToolButton*>(QStringLiteral("circleButton"));
+    REQUIRE(circles != nullptr);
+    REQUIRE(circles->menu() != nullptr);
+    CHECK(circles->menu()->actions().size() == 5);
+    for (QAction* a : circles->menu()->actions()) {
+        CHECK_FALSE(a->icon().isNull());  // the variants have their icons in the menu
+    }
+
+    // Clicking it starts the centre circle; picking another circle keeps it lit, and the icon.
+    const QImage before = circles->icon().pixmap(24).toImage();
+    QTest::mouseClick(circles, Qt::LeftButton, {}, QPoint(6, circles->height() / 2));
+    CHECK(view->toolKind() == ToolKind::Circle);
+    CHECK(circles->isChecked());
+    circles->menu()->actions().at(2)->trigger();  // 3-point
+    CHECK(view->toolKind() == ToolKind::Circle3Point);
+    CHECK(circles->isChecked());
+    CHECK(circles->icon().pixmap(24).toImage() == before);
+    view->setTool(ToolKind::Line);
+    CHECK_FALSE(circles->isChecked());
+    // Clicking it while its tool is on leaves it on.
+    QTest::mouseClick(circles, Qt::LeftButton, {}, QPoint(6, circles->height() / 2));
+    QTest::mouseClick(circles, Qt::LeftButton, {}, QPoint(6, circles->height() / 2));
+    CHECK(view->toolKind() == ToolKind::Circle);
+    CHECK(circles->isChecked());
+
+    if (const QString dir = qEnvironmentVariable("DRAWAPP_SNAPSHOT_DIR"); !dir.isEmpty()) {
+        circles->menu()->popup(circles->mapToGlobal(QPoint(0, circles->height())));
+        QImage shot = window.grab().toImage();
+        QPainter painter(&shot);
+        painter.drawPixmap(circles->mapTo(&window, QPoint(0, circles->height())), circles->menu()->grab());
+        painter.end();
+        circles->menu()->close();
+        CHECK(shot.save(QDir(dir).filePath(QStringLiteral("toolbar.png"))));
+    }
 }

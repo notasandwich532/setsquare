@@ -584,7 +584,8 @@ void MainWindow::createActions()
     auto* toolbar = addToolBar(tr("Sketch"));
     toolbar->setObjectName("SketchToolbar");
     toolbar->setMovable(false);
-    toolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    toolbar->setToolButtonStyle(Qt::ToolButtonIconOnly);  // names in the tooltips
+    toolbar->setIconSize(QSize(26, 26));
     auto* group = new QActionGroup(this);
 
     struct ToolDef
@@ -619,20 +620,35 @@ void MainWindow::createActions()
             bar->addAction(makeTool(t, sketchMenu));
         }
     };
-    // A Fusion-style split button: click for the last-used variant, or open the arrow menu.
+    // A split button: one per kind of tool, showing its most used variant (the first), which a
+    // click starts; the others are in the arrow menu. It shows as active while any of them is.
     auto addDropdown = [&](QToolBar* bar, const QString& title, std::initializer_list<ToolDef> defs) {
         QMenu* menu = sketchMenu->addMenu(title);
         auto* button = new QToolButton(bar);
+        button->setObjectName(QStringLiteral("%1Button").arg(toolName(defs.begin()->kind)));
         button->setPopupMode(QToolButton::MenuButtonPopup);
-        button->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        button->setToolButtonStyle(bar->toolButtonStyle());
+        button->setIconSize(bar->iconSize());
+        button->setCheckable(true);
         button->setMenu(menu);
+        std::vector<QAction*> actions;
         for (const ToolDef& t : defs) {
-            QAction* action = makeTool(t, menu);
-            connect(action, &QAction::triggered, button, [button, action] { button->setDefaultAction(action); });
-            if (!button->defaultAction()) {
-                button->setDefaultAction(action);
-            }
+            actions.push_back(makeTool(t, menu));
         }
+        QAction* primary = actions.front();
+        button->setText(title);
+        button->setIcon(primary->icon());
+        button->setToolTip(tr("%1 (more in the menu)").arg(primary->toolTip()));
+        auto sync = [button, actions] {
+            button->setChecked(std::ranges::any_of(actions, [](QAction* a) { return a->isChecked(); }));
+        };
+        for (QAction* action : actions) {
+            connect(action, &QAction::toggled, button, sync);
+        }
+        connect(button, &QToolButton::clicked, button, [primary, sync] {
+            primary->trigger();
+            sync();  // a click toggles the button itself; put it back to what's active
+        });
         bar->addWidget(button);
     };
 

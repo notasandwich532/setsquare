@@ -325,6 +325,19 @@ def show_construction_circle(c):
     stroke(c, GREY, width=THIN, dash="dashed")
 
 
+def icon_select():
+    """A mouse pointer."""
+    start()
+    corners = [(6, 21.5), (6, 4.5), (10, 8.5), (12.75, 2.5), (15.5, 3.75), (12.75, 9.75), (18, 9.75)]
+    points = [s.point(x, y) for x, y in corners]
+    for p, (x, y) in zip(points, corners):
+        pin(p, x, y)
+    for a, b in zip(points, points[1:] + points[:1]):
+        line(a, b, GREY, width=1.5)
+    s.fill(at=(8, 12), color=GREY)
+    return finish("select")
+
+
 def icon_line():
     start()
     l = line((4, 5), (20, 19), GREY)
@@ -641,7 +654,7 @@ ICONS = {
 }
 ICONS.update({
     f.__name__.removeprefix("icon_"): f
-    for f in [icon_line, icon_point, icon_rectangle, icon_rectangle_3point, icon_rectangle_center, icon_circle,
+    for f in [icon_select, icon_line, icon_point, icon_rectangle, icon_rectangle_3point, icon_rectangle_center, icon_circle,
               icon_circle_2point, icon_circle_3point, icon_circle_tangent2, icon_circle_tangent3, icon_arc, icon_arc3,
               icon_arc_tangent, icon_polygon_inscribed, icon_polygon_circumscribed, icon_polygon_edge, icon_slot,
               icon_slot_overall, icon_slot_center_point, icon_arc_slot, icon_arc_slot_3point]
