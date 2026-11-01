@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" version="1.1"
+     width="24" height="24" viewBox="0 0 24 24">
+  <!-- Drawing App icon -->
+  <g id="fills" inkscape:groupmode="layer" inkscape:label="Fills">
+    <path d="M19.3511,13.2274 L21.8511,13.2274 L21.8511,10.7274 L19.3511,10.7274 Z" fill="#4da3ff" fill-rule="evenodd" stroke="none"/>
+    <path d="M2.1489,13.2274 L4.6489,13.2274 L4.6489,10.7274 L2.1489,10.7274 Z" fill="#4da3ff" fill-rule="evenodd" stroke="none"/>
+    <path d="M10.75,8.75 L13.25,8.75 L13.25,6.25 L10.75,6.25 Z" fill="#4da3ff" fill-rule="evenodd" stroke="none"/>
+  </g>
+  <g id="strokes" inkscape:groupmode="layer" inkscape:label="Strokes">
+    <path d="M22.8538,10.4001 A13.25,13.25 0 0,0 1.1462,10.4001" fill="none" stroke="#d5d9de" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M18.3484,13.5548 A7.75,7.75 0 0,0 5.6516,13.5548" fill="none" stroke="#d5d9de" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M18.3484,13.5548 A2.75,2.75 0 0,0 22.8538,10.4001" fill="none" stroke="#d5d9de" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M1.1462,10.4001 A2.75,2.75 0 1,0 5.6516,13.5548" fill="none" stroke="#d5d9de" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="19.3511" y1="13.2274" x2="21.8511" y2="13.2274" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="21.8511" y1="13.2274" x2="21.8511" y2="10.7274" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="21.8511" y1="10.7274" x2="19.3511" y2="10.7274" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="19.3511" y1="10.7274" x2="19.3511" y2="13.2274" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="2.1489" y1="13.2274" x2="4.6489" y2="13.2274" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="4.6489" y1="13.2274" x2="4.6489" y2="10.7274" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="4.6489" y1="10.7274" x2="2.1489" y2="10.7274" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="2.1489" y1="10.7274" x2="2.1489" y2="13.2274" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="10.75" y1="8.75" x2="13.25" y2="8.75" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="13.25" y1="8.75" x2="13.25" y2="6.25" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="13.25" y1="6.25" x2="10.75" y2="6.25" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="10.75" y1="6.25" x2="10.75" y2="8.75" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" version="1.1"
+     width="24" height="24" viewBox="0 0 24 24">
+  <!-- Drawing App icon -->
+  <g id="fills" inkscape:groupmode="layer" inkscape:label="Fills">
+    <path d="M10.75,13.25 L13.25,13.25 L13.25,10.75 L10.75,10.75 Z" fill="#4da3ff" fill-rule="evenodd" stroke="none"/>
+    <path d="M12,2.5 L12.0404,2.5001 L12.0809,2.5003 L12.1213,2.5008 L12.1618,2.5014 L12.2022,2.5022 L12.2426,2.5031 L12.283,2.5042 L12.3235,2.5055 L12.3639,2.507 L12.4043,2.5086 L12.4447,2.5104 L12.4851,2.5124 L12.5254,2.5145 L12.5658,2.5169 L12.6062,2.5194 L12.6465,2.522 L12.6869,2.5249 L12.7272,2.5279 L12.7675,2.5311 L12.8078,2.5344 L12.8481,2.5379 L12.8884,2.5416 L12.9286,2.5455 L12.9689,2.5495 L13.0091,2.5537 L13.0493,2.5581 L13.0895,2.5627 L13.1296,2.5674 L13.1698,2.5723 L13.2099,2.5774 L13.25,2.5826 L13.25,1.25 L10.75,1.25 L10.75,2.5826 L10.7901,2.5774 L10.8302,2.5723 L10.8704,2.5674 L10.9105,2.5627 L10.9507,2.5581 L10.9909,2.5537 L11.0311,2.5495 L11.0714,2.5455 L11.1116,2.5416 L11.1519,2.5379 L11.1922,2.5344 L11.2325,2.5311 L11.2728,2.5279 L11.3131,2.5249 L11.3535,2.522 L11.3938,2.5194 L11.4342,2.5169 L11.4746,2.5145 L11.5149,2.5124 L11.5553,2.5104 L11.5957,2.5086 L11.6361,2.507 L11.6765,2.5055 L11.717,2.5042 L11.7574,2.5031 L11.7978,2.5022 L11.8382,2.5014 L11.8787,2.5008 L11.9191,2.5003 L11.9596,2.5001 Z" fill="#4da3ff" fill-rule="evenodd" stroke="none"/>
+  </g>
+  <g id="strokes" inkscape:groupmode="layer" inkscape:label="Strokes">
+    <circle cx="12" cy="12" r="9.5" fill="none" stroke="#d5d9de" stroke-width="1.5" stroke-linecap="butt" stroke-dasharray="7.5,4.5"/>
+    <line x1="12" y1="2.5" x2="3.7728" y2="7.25" fill="none" stroke="#d5d9de" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="3.7728" y1="7.25" x2="3.7728" y2="16.75" fill="none" stroke="#d5d9de" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="3.7728" y1="16.75" x2="12" y2="21.5" fill="none" stroke="#d5d9de" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="12" y1="21.5" x2="20.2272" y2="16.75" fill="none" stroke="#d5d9de" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="20.2272" y1="16.75" x2="20.2272" y2="7.25" fill="none" stroke="#d5d9de" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="20.2272" y1="7.25" x2="12" y2="2.5" fill="none" stroke="#d5d9de" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="10.75" y1="13.25" x2="13.25" y2="13.25" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="13.25" y1="13.25" x2="13.25" y2="10.75" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="13.25" y1="10.75" x2="10.75" y2="10.75" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="10.75" y1="10.75" x2="10.75" y2="13.25" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="10.75" y1="3.75" x2="13.25" y2="3.75" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="13.25" y1="3.75" x2="13.25" y2="1.25" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="13.25" y1="1.25" x2="10.75" y2="1.25" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="10.75" y1="1.25" x2="10.75" y2="3.75" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

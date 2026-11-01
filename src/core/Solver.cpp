@@ -813,6 +813,12 @@ SolveResult Solver::solve()
     result.redundant = toIds(tags);
     sys.getPartiallyRedundant(tags);
     result.partiallyRedundant = toIds(tags);
+    // When everything is pinned down, PlaneGCS reports "over-constrained by n" as negative DOF.
+    // If none of the extra equations is the user's (e.g. an arc slot's five arcs, where any four
+    // of their radius rules imply the fifth), the sketch is just fully constrained.
+    if (result.dof < 0 && result.redundant.empty() && result.conflicting.empty()) {
+        result.dof = 0;
+    }
 
     result.ok = status == GCS::SolveStatus::Success && result.conflicting.empty();
 

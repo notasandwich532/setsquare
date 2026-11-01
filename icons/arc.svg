@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" version="1.1"
+     width="24" height="24" viewBox="0 0 24 24">
+  <!-- Drawing App icon -->
+  <g id="fills" inkscape:groupmode="layer" inkscape:label="Fills">
+    <path d="M13.25,17.9511 L12,19 L10.75,17.9511 L10.75,20.25 L13.25,20.25 Z" fill="#4da3ff" fill-rule="evenodd" stroke="none"/>
+    <path d="M19.9785,10.0365 L20.0167,10.0707 L20.0548,10.1051 L20.0928,10.1396 L20.1306,10.1743 L20.1682,10.2091 L20.2057,10.2441 L20.2431,10.2793 L20.2803,10.3146 L20.3174,10.3501 L20.3543,10.3857 L20.391,10.4215 L20.4276,10.4574 L20.464,10.4935 L20.5003,10.5298 L20.5364,10.5662 L20.5724,10.6028 L20.6082,10.6395 L20.6439,10.6764 L20.6794,10.7134 L20.7147,10.7506 L20.7499,10.7879 L20.7849,10.8254 L20.8198,10.863 L20.8545,10.9008 L20.8891,10.9387 L20.9234,10.9768 L20.9576,11.015 L20.9917,11.0533 L21.0256,11.0919 L21.0593,11.1305 L21.0929,11.1693 L21.1263,11.2082 L21.1595,11.2473 L21.1925,11.2865 L19.9425,12.3354 L19.9425,12.5365 L22.4425,12.5365 L22.4425,10.0365 Z" fill="#4da3ff" fill-rule="evenodd" stroke="none"/>
+    <path d="M2.8075,11.2865 L2.8405,11.2473 L2.8737,11.2082 L2.9071,11.1693 L2.9407,11.1305 L2.9744,11.0919 L3.0083,11.0533 L3.0424,11.015 L3.0766,10.9768 L3.1109,10.9387 L3.1455,10.9008 L3.1802,10.863 L3.2151,10.8254 L3.2501,10.7879 L3.2853,10.7506 L3.3206,10.7134 L3.3561,10.6764 L3.3918,10.6395 L3.4276,10.6028 L3.4636,10.5662 L3.4997,10.5298 L3.536,10.4935 L3.5724,10.4574 L3.609,10.4215 L3.6457,10.3857 L3.6826,10.3501 L3.7197,10.3146 L3.7569,10.2793 L3.7943,10.2441 L3.8318,10.2091 L3.8694,10.1743 L3.9072,10.1396 L3.9452,10.1051 L3.9833,10.0707 L4.0215,10.0365 L1.5575,10.0365 L1.5575,12.5365 L4.0575,12.5365 L4.0575,12.3354 Z" fill="#4da3ff" fill-rule="evenodd" stroke="none"/>
+  </g>
+  <g id="strokes" inkscape:groupmode="layer" inkscape:label="Strokes">
+    <path d="M21.1925,11.2865 A12,12 0 0,0 2.8075,11.2865" fill="none" stroke="#d5d9de" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="12" y1="19" x2="21.1925" y2="11.2865" fill="none" stroke="#d5d9de" stroke-width="1.5" stroke-linecap="butt" stroke-dasharray="7.5,4.5"/>
+    <line x1="12" y1="19" x2="2.8075" y2="11.2865" fill="none" stroke="#d5d9de" stroke-width="1.5" stroke-linecap="butt" stroke-dasharray="7.5,4.5"/>
+    <line x1="10.75" y1="20.25" x2="13.25" y2="20.25" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="13.25" y1="20.25" x2="13.25" y2="17.75" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="13.25" y1="17.75" x2="10.75" y2="17.75" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="10.75" y1="17.75" x2="10.75" y2="20.25" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="19.9425" y1="12.5365" x2="22.4425" y2="12.5365" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="22.4425" y1="12.5365" x2="22.4425" y2="10.0365" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="22.4425" y1="10.0365" x2="19.9425" y2="10.0365" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="19.9425" y1="10.0365" x2="19.9425" y2="12.5365" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="1.5575" y1="12.5365" x2="4.0575" y2="12.5365" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="4.0575" y1="12.5365" x2="4.0575" y2="10.0365" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="4.0575" y1="10.0365" x2="1.5575" y2="10.0365" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="1.5575" y1="10.0365" x2="1.5575" y2="12.5365" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

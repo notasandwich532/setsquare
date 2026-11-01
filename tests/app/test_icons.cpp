@@ -17,6 +17,14 @@ const ToolKind kConstraintTools[] = {ToolKind::Dimension,     ToolKind::Coincide
                                      ToolKind::Equal,         ToolKind::Midpoint,   ToolKind::Concentric,
                                      ToolKind::Symmetric,     ToolKind::Collinear,  ToolKind::Fix};
 
+const ToolKind kCreateTools[] = {
+    ToolKind::Line,           ToolKind::Point,           ToolKind::Rectangle,           ToolKind::Rectangle3Point,
+    ToolKind::RectangleCenter, ToolKind::Circle,         ToolKind::Circle2Point,        ToolKind::Circle3Point,
+    ToolKind::CircleTangent2, ToolKind::CircleTangent3, ToolKind::ArcCenter,           ToolKind::Arc3Point,
+    ToolKind::ArcTangent,     ToolKind::PolygonInscribed, ToolKind::PolygonCircumscribed, ToolKind::PolygonEdge,
+    ToolKind::SlotCenterToCenter, ToolKind::SlotOverall, ToolKind::SlotCenterPoint,    ToolKind::SlotArc3Point,
+    ToolKind::SlotArcCenter};
+
 QImage render(const QByteArray& svg, int size, const QColor& background)
 {
     QImage image(size, size, QImage::Format_ARGB32);
@@ -37,12 +45,11 @@ int inkPixels(const QImage& image, const QColor& background)
     }
     return n;
 }
-}  // namespace
 
-TEST_CASE("Every constraint tool has an icon that renders", "[icons]")
+void checkIcons(const QList<ToolKind>& kinds)
 {
     const QColor dark(0x2b, 0x2f, 0x36);
-    for (ToolKind kind : kConstraintTools) {
+    for (ToolKind kind : kinds) {
         const QString name = MainWindow::toolName(kind);
         INFO(name.toStdString());
         const QByteArray svg = icons::svg(name);
@@ -52,9 +59,21 @@ TEST_CASE("Every constraint tool has an icon that renders", "[icons]")
         CHECK_FALSE(icons::forName(name).isNull());
         // Active: all white.
         const QByteArray on = icons::svg(name, QIcon::On);
-        CHECK(!on.contains("#e8615c"));
-        CHECK(!on.contains("#d5d9de"));
+        for (const char* colour : {"#e8615c", "#d5d9de", "#4da3ff"}) {
+            CHECK(!on.contains(colour));
+        }
     }
+}
+}  // namespace
+
+TEST_CASE("Every constraint tool has an icon that renders", "[icons]")
+{
+    checkIcons(QList<ToolKind>(std::begin(kConstraintTools), std::end(kConstraintTools)));
+}
+
+TEST_CASE("Every create tool has an icon that renders", "[icons]")
+{
+    checkIcons(QList<ToolKind>(std::begin(kCreateTools), std::end(kCreateTools)));
 }
 
 TEST_CASE("Icon contact sheet", "[icons][snapshot]")

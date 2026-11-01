@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" version="1.1"
+     width="24" height="24" viewBox="0 0 24 24">
+  <!-- Drawing App icon -->
+  <g id="fills" inkscape:groupmode="layer" inkscape:label="Fills">
+    <path d="M10.75,13.25 L13.25,13.25 L13.25,10.75 L10.75,10.75 Z" fill="#4da3ff" fill-rule="evenodd" stroke="none"/>
+    <path d="M12,3.5 L13.25,3.5 L13.25,2.25 L10.75,2.25 L10.75,3.5 Z" fill="#4da3ff" fill-rule="evenodd" stroke="none"/>
+  </g>
+  <g id="strokes" inkscape:groupmode="layer" inkscape:label="Strokes">
+    <line x1="16.9075" y1="3.5" x2="7.0925" y2="3.5" fill="none" stroke="#d5d9de" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="7.0925" y1="3.5" x2="2.185" y2="12" fill="none" stroke="#d5d9de" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="2.185" y1="12" x2="7.0925" y2="20.5" fill="none" stroke="#d5d9de" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="7.0925" y1="20.5" x2="16.9075" y2="20.5" fill="none" stroke="#d5d9de" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="16.9075" y1="20.5" x2="21.815" y2="12" fill="none" stroke="#d5d9de" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="21.815" y1="12" x2="16.9075" y2="3.5" fill="none" stroke="#d5d9de" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="12" cy="12" r="8.5" fill="none" stroke="#d5d9de" stroke-width="1.5" stroke-linecap="butt" stroke-dasharray="7.5,4.5"/>
+    <line x1="10.75" y1="13.25" x2="13.25" y2="13.25" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="13.25" y1="13.25" x2="13.25" y2="10.75" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="13.25" y1="10.75" x2="10.75" y2="10.75" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="10.75" y1="10.75" x2="10.75" y2="13.25" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="10.75" y1="4.75" x2="13.25" y2="4.75" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="13.25" y1="4.75" x2="13.25" y2="2.25" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="13.25" y1="2.25" x2="10.75" y2="2.25" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="10.75" y1="2.25" x2="10.75" y2="4.75" fill="none" stroke="#4da3ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

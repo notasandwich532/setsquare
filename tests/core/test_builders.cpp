@@ -298,6 +298,26 @@ TEST_CASE("Arc slots: DOF 6, concentric sides, caps tangent", "[builders]")
     }
 }
 
+TEST_CASE("A fully constrained arc slot reports 0 DOF, not over-constrained", "[builders]")
+{
+    // Its arcs' own rules have one built-in dependency, which shouldn't show once it's pinned down.
+    Sketch s;
+    const Id c = s.addPoint(0, 0);
+    const build::Slot slot = build::arcSlot(s, c, {20, 0}, {0, 20}, 4);
+    s.entity(c).fixed = true;
+    s.entity(slot.centers[0]).fixed = true;
+    s.entity(slot.centers[1]).fixed = true;
+    requireClean(s, 1);  // the width
+    s.addConstraint(CT::Radius, {slot.curves[1]}, 2.5);
+    requireClean(s, 0);
+    CHECK(radiusOf(s, slot.curves[3]) == Approx(2.5).margin(1e-7));
+
+    // A constraint that really is one too many still says so.
+    const Id extra = s.addConstraint(CT::Radius, {slot.curves[3]}, 2.5);
+    const SolveResult r = solve(s);
+    CHECK(r.redundant == std::vector<Id>{extra});
+}
+
 TEST_CASE("Collinear puts the second line on the first", "[builders][constraints]")
 {
     Sketch s;

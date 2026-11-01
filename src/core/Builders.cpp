@@ -487,8 +487,10 @@ Slot arcSlot(Sketch& s, Id center, Vec2 start, Vec2 end, double width)
     const Id capE = s.addArc(E, oE, iE);  // bulges on past the end
     out.curves = {outer, capE, inner, capS};
 
-    // Each cap meets both sides tangentially at their shared ends. These four are independent
-    // (an extra "equal caps" would be redundant); together they leave just the width.
+    // Each cap meets both sides tangentially at their shared ends; together they leave just the
+    // width (an extra "equal caps" would be redundant). Even so, one of the arcs' own rules is
+    // implied by the rest (the centreline, outer, inner and one cap fix the other cap's radius),
+    // which the solver allows for when the slot is fully constrained.
     s.addConstraint(CT::Tangent, {capS, outer});
     s.addConstraint(CT::Tangent, {capS, inner});
     s.addConstraint(CT::Tangent, {capE, outer});

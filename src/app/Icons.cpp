@@ -11,9 +11,15 @@ namespace icons
 
 namespace
 {
-// The two colours icons are drawn in (see icons/build_icons.py).
+// The colours icons are drawn in (see icons/build_icons.py).
 const QByteArray kRed = "#e8615c";
 const QByteArray kGrey = "#d5d9de";
+const QByteArray kBlue = "#4da3ff";
+
+QByteArray whitened(QByteArray svg)
+{
+    return svg.replace(kRed, "#ffffff").replace(kGrey, "#ffffff").replace(kBlue, "#ffffff");
+}
 
 QByteArray load(const QString& name)
 {
@@ -28,8 +34,7 @@ public:
     explicit SvgIconEngine(QByteArray normal)
         : m_normal(std::move(normal))
     {
-        m_checked = m_normal;
-        m_checked.replace(kRed, "#ffffff").replace(kGrey, "#ffffff");
+        m_checked = whitened(m_normal);
     }
 
     void paint(QPainter* painter, const QRect& rect, QIcon::Mode mode, QIcon::State state) override
@@ -80,10 +85,7 @@ QIcon forName(const QString& name)
 QByteArray svg(const QString& name, QIcon::State state)
 {
     QByteArray data = load(name);
-    if (state == QIcon::On) {
-        data.replace(kRed, "#ffffff").replace(kGrey, "#ffffff");
-    }
-    return data;
+    return state == QIcon::On ? whitened(std::move(data)) : data;
 }
 
 }  // namespace icons

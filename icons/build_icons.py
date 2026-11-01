@@ -5,14 +5,17 @@
 #   drawapp-cli icons/build_icons.py tangent    (just some)
 #
 # Style (after Fusion's, simplified, with thicker lines so they read when small): what the tool
-# acts on is RED, what it acts against is GREY. The app swaps the colours for other states (e.g.
-# white on the green "active" button), so keep to these two.
+# acts on is RED, what it acts against is GREY; for create tools, the shape is GREY and where you
+# click (or what you pick) is BLUE. The app swaps these colours for other states (e.g. white on the
+# green "active" button), so keep to these three.
+import math
 import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RED = "#e8615c"
 GREY = "#d5d9de"
+BLUE = "#4da3ff"  # create tools: where you click, and curves you pick
 W = 2.5  # line width, in grid units (thick, so they read at 16 px)
 
 
@@ -282,11 +285,367 @@ def dimension():
     return finish("dimension")
 
 
+# --- create tools -----------------------------------------------------------------------------
+# The shape drawn is GREY; where you click is a BLUE square; curves you pick (e.g. to be tangent
+# to) are BLUE lines.
+
+THIN = 1.5  # dashed guides: radii, centre lines, construction circles
+
+
+def marker(p, size=2.5):
+    """A click point: a small square on `p`, stroked thick so it reads as a rounded dot."""
+    x, y = p.pos
+    sq = s.rectangle_center(p, (x + size / 2, y + size / 2))
+    stroke(sq, BLUE)
+    s.distance(sq[0], value=size)
+    s.distance(sq[1], value=size)
+    s.fill(at=(x, y), color=BLUE)
+    return sq
+
+
+def guide(a, b):
+    """A thin dashed grey line."""
+    return line(a, b, GREY, width=THIN, dash="dashed")
+
+
+def ray(center, angle, r, curve, shown=False):
+    """A point on `curve` at `angle` degrees from `center`, held by a line from the centre."""
+    cx, cy = center.pos
+    p = s.point(cx + r * math.cos(math.radians(angle)), cy + r * math.sin(math.radians(angle)))
+    s.coincident(p, curve)
+    l = guide(center, p) if shown else s.line(center, p)
+    if not shown:
+        l.construction = True
+    s.angle(l, s.x_axis, value=abs((angle + 180) % 360 - 180))  # unsigned; the side is kept
+    return p
+
+
+def show_construction_circle(c):
+    c.construction = False
+    stroke(c, GREY, width=THIN, dash="dashed")
+
+
+def icon_line():
+    start()
+    l = line((4, 5), (20, 19), GREY)
+    pin(l.p1, 4, 5)
+    pin(l.p2, 20, 19)
+    marker(l.p1)
+    marker(l.p2)
+    return finish("line")
+
+
+def icon_point():
+    start()
+    p = s.point(12, 12)
+    pin(p, 12, 12)
+    marker(p, size=6)
+    return finish("point")
+
+
+def icon_rectangle():
+    start()
+    r = stroke(s.rectangle((3, 5), (21, 19)), GREY)
+    pin(r[0].p1, 3, 5)
+    s.distance(r[0], value=18)
+    s.distance(r[1], value=14)
+    marker(r[0].p1)
+    marker(r[2].p1)
+    return finish("rectangle")
+
+
+def icon_rectangle_3point():
+    start()
+    a = s.point(3.5, 12.5)
+    pin(a, 3.5, 12.5)
+    b = s.point(14.76, 19)
+    r = stroke(s.rectangle_3point(a, b, (18.76, 12.07)), GREY)
+    s.angle(r[0], s.x_axis, value=30)
+    s.distance(r[0], value=13)
+    s.distance(r[1], value=9.5)
+    marker(a)
+    marker(b)
+    marker(r[1].p2)
+    return finish("rectangle_3point")
+
+
+def icon_rectangle_center():
+    start()
+    c = s.point(12, 12)
+    pin(c, 12, 12)
+    r = stroke(s.rectangle_center(c, (21, 19)), GREY)
+    s.distance(r[0], value=18)
+    s.distance(r[1], value=14)
+    marker(c)
+    marker(r[1].p2)
+    return finish("rectangle_center")
+
+
+def icon_circle():
+    start()
+    c = stroke(s.circle((12, 12), 9.5), GREY)
+    pin(c.center, 12, 12)
+    s.radius(c, value=9.5)
+    p = ray(c.center, 45, 9.5, c, shown=True)
+    marker(c.center)
+    marker(p)
+    return finish("circle")
+
+
+def icon_circle_2point():
+    start()
+    d = guide((2.5, 12), (21.5, 12))
+    pin(d.p1, 2.5, 12)
+    s.horizontal(d)
+    s.distance(d, value=19)
+    c = stroke(s.circle((12, 12), 9.5), GREY)
+    s.midpoint(c.center, d)
+    s.coincident(d.p1, c)
+    marker(d.p1)
+    marker(d.p2)
+    return finish("circle_2point")
+
+
+def icon_circle_3point():
+    start()
+    c = stroke(s.circle((12, 12), 9.5), GREY)
+    pin(c.center, 12, 12)
+    s.radius(c, value=9.5)
+    points = [ray(c.center, a, 9.5, c) for a in (90, 210, 330)]
+    for p in points:
+        marker(p)
+    return finish("circle_3point")
+
+
+def icon_circle_tangent2():
+    start()
+    floor = line((2.5, 3), (21.5, 3), BLUE)
+    wall = line(floor.p1, (2.5, 21.5), BLUE)
+    pin(floor.p1, 2.5, 3)
+    s.horizontal(floor)
+    s.vertical(wall)
+    s.distance(floor, value=19)
+    s.distance(wall, value=18.5)
+    c = stroke(s.circle((10.5, 11), 8), GREY)
+    s.tangent(c, floor)
+    s.tangent(c, wall)
+    s.radius(c, value=8)
+    return finish("circle_tangent2")
+
+
+def icon_circle_tangent3():
+    start()
+    centre = s.point(12, 9)
+    pin(centre, 12, 9)
+    sides = stroke(s.polygon(centre, (12, 21.5), sides=3), BLUE)
+    s.horizontal(sides[1])
+    ring = [c for c in s.circles if c.construction][0]
+    s.radius(ring, value=12.5)
+    c = stroke(s.circle((12, 9.2), 6), GREY)
+    for side in sides:
+        s.tangent(c, side)
+    return finish("circle_tangent3")
+
+
+def icon_arc():
+    start()
+    centre = s.point(12, 5)
+    pin(centre, 12, 5)
+    a = stroke(s.arc(centre, (21.19, 12.71), (2.81, 12.71)), GREY)
+    s.radius(a, value=12)
+    for end, angle in ((a.start, 40), (a.end, 140)):
+        l = guide(centre, end)
+        s.angle(l, s.x_axis, value=angle)
+    marker(centre)
+    marker(a.start)
+    marker(a.end)
+    return finish("arc")
+
+
+def icon_arc3():
+    start()
+    centre = s.point(12, 10)
+    pin(centre, 12, 10)
+    a = stroke(s.arc(centre, (20.46, 6.92), (3.54, 6.92)), GREY)
+    s.radius(a, value=9)
+    chord = s.line(a.start, a.end)
+    chord.construction = True
+    s.horizontal(chord)
+    s.horizontal_distance(centre, a.start, value=8.46)
+    through = ray(centre, 90, 9, a)
+    marker(a.start)
+    marker(a.end)
+    marker(through)
+    return finish("arc3")
+
+
+def icon_arc_tangent():
+    start()
+    l = line((2.5, 5), (11, 5), BLUE)
+    pin(l.p1, 2.5, 5)
+    s.horizontal(l)
+    s.distance(l, value=8.5)
+    end = s.point(11, 20)
+    pin(end, 11, 20)
+    stroke(s.arc_tangent(l, l.p2, end), GREY)
+    marker(end)
+    return finish("arc_tangent")
+
+
+def polygon_ring(inner):
+    """The polygon's construction circle: the one through its corners, or the one inside it."""
+    rings = sorted((c for c in s.circles if c.construction), key=lambda c: c.radius)
+    return rings[0] if inner else rings[-1]
+
+
+def icon_polygon_inscribed():
+    start()
+    centre = s.point(12, 12)
+    pin(centre, 12, 12)
+    sides = stroke(s.polygon(centre, (12, 21.5), sides=6), GREY)
+    s.vertical(sides[1])
+    ring = polygon_ring(inner=False)
+    s.radius(ring, value=9.5)
+    show_construction_circle(ring)
+    marker(centre)
+    marker(sides[0].p1)
+    return finish("polygon_inscribed")
+
+
+def icon_polygon_circumscribed():
+    start()
+    centre = s.point(12, 12)
+    pin(centre, 12, 12)
+    sides = stroke(s.polygon(centre, (12, 20.5), sides=6, circumscribed=True), GREY)
+    top = max(sides, key=lambda l: l.p1.y + l.p2.y)
+    s.horizontal(top)
+    ring = polygon_ring(inner=True)
+    s.radius(ring, value=8.5)
+    show_construction_circle(ring)
+    mid = s.point(12, 20.5)
+    s.midpoint(mid, top)
+    marker(centre)
+    marker(mid)
+    return finish("polygon_circumscribed")
+
+
+def icon_polygon_edge():
+    start()
+    a = s.point(7.25, 3.75)
+    b = s.point(16.75, 3.75)
+    pin(a, 7.25, 3.75)
+    pin(b, 16.75, 3.75)
+    stroke(s.polygon_edge(a, b, sides=6), GREY)
+    marker(a)
+    marker(b)
+    return finish("polygon_edge")
+
+
+def icon_slot():
+    start()
+    c1 = s.point(7.25, 12)
+    c2 = s.point(16.75, 12)
+    pin(c1, 7.25, 12)
+    pin(c2, 16.75, 12)
+    curves = stroke(s.slot(c1, c2, 9.5), GREY)
+    s.radius(curves[1], value=4.75)
+    guide(c1, c2)
+    marker(c1)
+    marker(c2)
+    return finish("slot")
+
+
+def icon_slot_overall():
+    start()
+    curves = stroke(s.slot_overall((2.5, 12), (21.5, 12), 9.5), GREY)
+    top, cap2, _, cap1 = curves
+    pin(cap1.center, 7.25, 12)
+    pin(cap2.center, 16.75, 12)
+    s.radius(cap2, value=4.75)
+    overall = guide((2.5, 12), (21.5, 12))
+    s.coincident(overall.p1, cap1)
+    s.coincident(overall.p2, cap2)
+    s.coincident(cap1.center, overall)
+    s.coincident(cap2.center, overall)
+    marker(overall.p1)
+    marker(overall.p2)
+    return finish("slot_overall")
+
+
+def icon_slot_center_point():
+    start()
+    m = s.point(12, 12)
+    pin(m, 12, 12)
+    curves = stroke(s.slot_center_point(m, (18.5, 12), 7), GREY)
+    cap2 = curves[1]
+    centreline = next(l for l in s.lines if l.construction and cap2.center in (l.p1, l.p2))
+    s.horizontal(centreline)
+    s.distance(centreline, value=13)
+    s.radius(cap2, value=3.5)
+    guide(m, cap2.center)
+    marker(m)
+    marker(cap2.center)
+    return finish("slot_center_point")
+
+
+def arc_slot_parts(curves):
+    outer, cap_e, inner, cap_s = curves
+    return cap_s, cap_e
+
+
+def icon_arc_slot():
+    start()
+    centre = s.point(12, 4)
+    pin(centre, 12, 4)
+    r = 10.5
+    pos = lambda a: (12 + r * math.cos(math.radians(a)), 4 + r * math.sin(math.radians(a)))
+    curves = stroke(s.arc_slot(centre, pos(35), pos(145), 5.5), GREY)
+    cap_s, cap_e = arc_slot_parts(curves)
+    s.radius(cap_s, value=2.75)
+    for cap, angle in ((cap_s, 35), (cap_e, 145)):
+        l = guide(centre, cap.center)
+        s.angle(l, s.x_axis, value=angle)
+    s.distance(centre, cap_s.center, value=r)  # the other cap is on the same arc
+    marker(centre)
+    marker(cap_s.center)
+    marker(cap_e.center)
+    return finish("arc_slot")
+
+
+def icon_arc_slot_3point():
+    start()
+    r = 10.5
+    cy = 6
+    pos = lambda a: (12 + r * math.cos(math.radians(a)), cy + r * math.sin(math.radians(a)))
+    curves = stroke(s.arc_slot_3point(pos(35), pos(145), pos(90), 5.5), GREY)
+    cap_s, cap_e = arc_slot_parts(curves)
+    s.radius(cap_s, value=2.75)
+    centreline = [a for a in s.arcs if a.construction][0]
+    pin(centreline.center, 12, cy)
+    for cap, angle in ((cap_s, 35), (cap_e, 145)):
+        l = s.line(centreline.center, cap.center)
+        l.construction = True
+        s.angle(l, s.x_axis, value=angle)
+    s.radius(centreline, value=r)
+    through = ray(centreline.center, 90, r, centreline)
+    marker(cap_s.center)
+    marker(cap_e.center)
+    marker(through)
+    return finish("arc_slot_3point")
+
+
 ICONS = {
     f.__name__: f
     for f in [horizontal_vertical, coincident, tangent, equal, parallel, perpendicular, fix, midpoint, concentric,
               collinear, symmetric, dimension]
 }
+ICONS.update({
+    f.__name__.removeprefix("icon_"): f
+    for f in [icon_line, icon_point, icon_rectangle, icon_rectangle_3point, icon_rectangle_center, icon_circle,
+              icon_circle_2point, icon_circle_3point, icon_circle_tangent2, icon_circle_tangent3, icon_arc, icon_arc3,
+              icon_arc_tangent, icon_polygon_inscribed, icon_polygon_circumscribed, icon_polygon_edge, icon_slot,
+              icon_slot_overall, icon_slot_center_point, icon_arc_slot, icon_arc_slot_3point]
+})
 
 wanted = sys.argv[1:] or list(ICONS)
 failed = [name for name in wanted if not ICONS[name]()]
