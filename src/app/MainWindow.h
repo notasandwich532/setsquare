@@ -48,6 +48,9 @@ private:
     // Clipboard: the selection (and the constraints among it) as a sketch fragment.
     void showHistory();  // the document's command history, to read, copy or save as a macro
     void exportSvg();    // options, then where to
+    void exportDxf();
+    // Where to export to (next to the sketch file, with this suffix); empty if cancelled.
+    QString exportPath(const QString& suffix, const QString& title, const QString& filter);
     void copySelection();
     void pasteClipboard();  // starts the Paste tool with the clipboard's fragment
 
@@ -64,4 +67,5 @@ private:
     class QDockWidget* m_consoleDock = nullptr;
     class ToolSearch* m_search = nullptr;
     core::exporter::SvgOptions m_svgOptions;  // as last used
+    core::exporter::DxfOptions m_dxfOptions;
 };

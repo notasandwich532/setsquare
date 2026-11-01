@@ -4,6 +4,7 @@
 #include "Regions.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <numbers>
@@ -232,6 +233,288 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
     }
     out << "</svg>\n";
     return out.str();
+}
+
+// ---------------------------------------------------------------------------------------------
+// DXF
+// ---------------------------------------------------------------------------------------------
+
+namespace
+{
+// The AutoCAD colour index palette (index -> RGB).
+std::array<Color, 256> aciPalette()
+{
+    std::array<Color, 256> p{};
+    const Color basic[10] = {{0, 0, 0, 255},       {255, 0, 0, 255},     {255, 255, 0, 255}, {0, 255, 0, 255},
+                             {0, 255, 255, 255},   {0, 0, 255, 255},     {255, 0, 255, 255}, {255, 255, 255, 255},
+                             {128, 128, 128, 255}, {192, 192, 192, 255}};
+    for (int i = 0; i < 10; ++i) {
+        p[static_cast<size_t>(i)] = basic[i];
+    }
+    // 10-249: 24 hues in 15 degree steps; in each, five brightnesses, full then half saturation.
+    const double values[5] = {1.0, 0.8, 0.6, 0.5, 0.3};
+    for (int i = 10; i < 250; ++i) {
+        const double h = (i / 10 - 1) * 15.0;
+        const double v = values[(i % 10) / 2];
+        const double sat = i % 2 == 0 ? 1.0 : 0.5;
+        const double c = v * sat;
+        const double x = c * (1 - std::abs(std::fmod(h / 60.0, 2.0) - 1));
+        const double m = v - c;
+        double r = 0, g = 0, b = 0;
+        if (h < 60) {
+            r = c, g = x;
+        }
+        else if (h < 120) {
+            r = x, g = c;
+        }
+        else if (h < 180) {
+            g = c, b = x;
+        }
+        else if (h < 240) {
+            g = x, b = c;
+        }
+        else if (h < 300) {
+            r = x, b = c;
+        }
+        else {
+            r = c, b = x;
+        }
+        auto byte = [](double u) { return static_cast<std::uint8_t>(std::lround(u * 255)); };
+        p[static_cast<size_t>(i)] = Color{byte(r + m), byte(g + m), byte(b + m), 255};
+    }
+    const std::uint8_t greys[6] = {51, 80, 105, 130, 190, 255};
+    for (int i = 0; i < 6; ++i) {
+        p[static_cast<size_t>(250 + i)] = Color{greys[i], greys[i], greys[i], 255};
+    }
+    return p;
+}
+
+// R12 linetypes for the dash styles (pattern lengths in mm, for lines around 0.5 mm wide).
+struct LineType
+{
+    const char* name;
+    const char* description;
+    std::vector<double> pattern;  // dashes positive, gaps negative
+};
+const LineType kLineTypes[] = {
+    {"CONTINUOUS", "Solid line", {}},
+    {"DASHED", "Dashed __ __ __", {2.5, -1.5}},
+    {"DOT", "Dotted . . . .", {0.0, -1.0}},
+    {"DASHDOT", "Dash dot __ . __ .", {4.0, -1.5, 0.0, -1.5}},
+    {"DIVIDE", "Dash dot dot __ . . __", {4.0, -1.5, 0.0, -1.5, 0.0, -1.5}},
+};
+
+const char* lineTypeFor(Dash dash)
+{
+    switch (dash) {
+        case Dash::Solid: return "CONTINUOUS";
+        case Dash::Dashed: return "DASHED";
+        case Dash::Dotted: return "DOT";
+        case Dash::DashDot: return "DASHDOT";
+        case Dash::DashDotDot: return "DIVIDE";
+    }
+    return "CONTINUOUS";
+}
+
+// DXF is lines of group code, then value.
+class DxfWriter
+{
+public:
+    void pair(int code, const std::string& value) { m_out << code << "\r\n" << value << "\r\n"; }
+    void pair(int code, int value) { pair(code, std::to_string(value)); }
+    void real(int code, double value) { pair(code, num(value)); }
+    std::string str() const { return m_out.str(); }
+
+private:
+    std::ostringstream m_out;
+};
+}  // namespace
+
+int nearestAci(const Color& c)
+{
+    // Black and white both come out as 7, which CAD shows contrasting with its background.
+    const int hi = std::max({c.r, c.g, c.b}), lo = std::min({c.r, c.g, c.b});
+    if (hi < 40 || lo > 230) {
+        return 7;
+    }
+    static const std::array<Color, 256> palette = aciPalette();
+    int best = 1;
+    long bestDistance = -1;
+    for (int i = 1; i < 256; ++i) {
+        if (i == 7) {
+            continue;
+        }
+        const Color& p = palette[static_cast<size_t>(i)];
+        const long dr = c.r - p.r, dg = c.g - p.g, db = c.b - p.b;
+        const long d = dr * dr + dg * dg + db * db;
+        if (bestDistance < 0 || d < bestDistance) {
+            bestDistance = d;
+            best = i;
+        }
+    }
+    return best;
+}
+
+std::string toDxf(const Sketch& s, const DxfOptions& o)
+{
+    struct Item
+    {
+        Id curve = kNoId;
+        const char* layer = "GEOMETRY";
+        const char* lineType = nullptr;  // null: the layer's
+        int color = 256;                 // 256: the layer's
+    };
+    std::vector<Item> items;
+    for (const auto& [id, e] : s.entities()) {
+        if (e.kind() == EntityKind::Point || s.isReference(id)) {
+            continue;
+        }
+        if (e.construction) {
+            if (o.construction) {
+                items.push_back({id, "CONSTRUCTION"});
+            }
+        }
+        else if (const StrokeStyle* style = s.stroke(id); style && o.styles) {
+            items.push_back({id, "STROKES", lineTypeFor(style->dash), nearestAci(style->color)});
+        }
+        else {
+            items.push_back({id, "GEOMETRY"});
+        }
+    }
+    if (items.empty()) {
+        throw SketchError("there's nothing to export");
+    }
+
+    double x0 = 1e300, y0 = 1e300, x1 = -1e300, y1 = -1e300;
+    for (const Item& item : items) {
+        for (const Vec2& p : sample(s, item.curve, 256)) {
+            x0 = std::min(x0, p.x);
+            y0 = std::min(y0, p.y);
+            x1 = std::max(x1, p.x);
+            y1 = std::max(y1, p.y);
+        }
+    }
+
+    DxfWriter w;
+    // Header: R12, millimetres.
+    w.pair(0, "SECTION");
+    w.pair(2, "HEADER");
+    w.pair(9, "$ACADVER");
+    w.pair(1, "AC1009");
+    w.pair(9, "$INSUNITS");
+    w.pair(70, 4);  // millimetres
+    w.pair(9, "$MEASUREMENT");
+    w.pair(70, 1);  // metric
+    w.pair(9, "$EXTMIN");
+    w.real(10, x0);
+    w.real(20, y0);
+    w.real(30, 0.0);
+    w.pair(9, "$EXTMAX");
+    w.real(10, x1);
+    w.real(20, y1);
+    w.real(30, 0.0);
+    w.pair(9, "$LTSCALE");
+    w.real(40, 1.0);
+    w.pair(0, "ENDSEC");
+
+    // Tables: linetypes, then layers.
+    w.pair(0, "SECTION");
+    w.pair(2, "TABLES");
+    w.pair(0, "TABLE");
+    w.pair(2, "LTYPE");
+    w.pair(70, static_cast<int>(std::size(kLineTypes)));
+    for (const LineType& lt : kLineTypes) {
+        double total = 0.0;
+        for (double d : lt.pattern) {
+            total += std::abs(d);
+        }
+        w.pair(0, "LTYPE");
+        w.pair(2, lt.name);
+        w.pair(70, 0);
+        w.pair(3, lt.description);
+        w.pair(72, 65);  // 'A'
+        w.pair(73, static_cast<int>(lt.pattern.size()));
+        w.real(40, total);
+        for (double d : lt.pattern) {
+            w.real(49, d);
+        }
+    }
+    w.pair(0, "ENDTAB");
+    struct Layer
+    {
+        const char* name;
+        int color;  // negative: switched off
+        const char* lineType;
+    };
+    const Layer layers[] = {{"0", 7, "CONTINUOUS"},
+                            {"GEOMETRY", 7, "CONTINUOUS"},
+                            {"STROKES", 7, "CONTINUOUS"},
+                            {"CONSTRUCTION", -8, "DASHED"}};
+    w.pair(0, "TABLE");
+    w.pair(2, "LAYER");
+    w.pair(70, static_cast<int>(std::size(layers)));
+    for (const Layer& l : layers) {
+        w.pair(0, "LAYER");
+        w.pair(2, l.name);
+        w.pair(70, 0);
+        w.pair(62, l.color);
+        w.pair(6, l.lineType);
+    }
+    w.pair(0, "ENDTAB");
+    w.pair(0, "ENDSEC");
+
+    // The geometry, exactly: DXF is y up and arcs run counter-clockwise, as here.
+    w.pair(0, "SECTION");
+    w.pair(2, "ENTITIES");
+    for (const Item& item : items) {
+        const Entity& e = s.entity(item.curve);
+        auto common = [&](const char* type) {
+            w.pair(0, type);
+            w.pair(8, item.layer);
+            if (item.lineType) {
+                w.pair(6, item.lineType);
+            }
+            if (item.color != 256) {
+                w.pair(62, item.color);
+            }
+        };
+        if (const auto* l = std::get_if<Line>(&e.geom)) {
+            const Point& a = s.point(l->p1);
+            const Point& b = s.point(l->p2);
+            common("LINE");
+            w.real(10, a.x);
+            w.real(20, a.y);
+            w.real(30, 0.0);
+            w.real(11, b.x);
+            w.real(21, b.y);
+            w.real(31, 0.0);
+        }
+        else if (const auto* c = std::get_if<Circle>(&e.geom)) {
+            const Point& centre = s.point(c->center);
+            common("CIRCLE");
+            w.real(10, centre.x);
+            w.real(20, centre.y);
+            w.real(30, 0.0);
+            w.real(40, c->radius);
+        }
+        else {
+            const ArcShape a = arcShape(s, item.curve);
+            auto degrees = [](double r) {
+                double d = std::fmod(r * 180.0 / kPi, 360.0);
+                return d < 0 ? d + 360.0 : d;
+            };
+            common("ARC");
+            w.real(10, a.center.x);
+            w.real(20, a.center.y);
+            w.real(30, 0.0);
+            w.real(40, a.radius);
+            w.real(50, degrees(a.startAngle));
+            w.real(51, degrees(a.startAngle + a.sweep));
+        }
+    }
+    w.pair(0, "ENDSEC");
+    w.pair(0, "EOF");
+    return w.str();
 }
 
 }  // namespace core::exporter

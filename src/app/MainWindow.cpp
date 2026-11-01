@@ -339,16 +339,9 @@ void MainWindow::exportSvg()
     m_svgOptions.construction = construction->isChecked();
     m_svgOptions.margin = margin->value();
 
-    const QFileInfo current(m_doc->filePath());
-    const QString start = m_doc->filePath().isEmpty()
-        ? QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + QStringLiteral("/drawing.svg")
-        : current.absolutePath() + QLatin1Char('/') + current.completeBaseName() + QStringLiteral(".svg");
-    QString path = QFileDialog::getSaveFileName(this, tr("Export SVG"), start, tr("SVG drawings (*.svg)"));
+    const QString path = exportPath(QStringLiteral("svg"), tr("Export SVG"), tr("SVG drawings (*.svg)"));
     if (path.isEmpty()) {
         return;
-    }
-    if (QFileInfo(path).suffix().isEmpty()) {
-        path += QStringLiteral(".svg");
     }
     QString error;
     if (!m_doc->exportSvg(path, m_svgOptions, &error)) {
@@ -356,6 +349,59 @@ void MainWindow::exportSvg()
         return;
     }
     statusBar()->showMessage(tr("Exported %1").arg(QDir::toNativeSeparators(path)), 4000);
+}
+
+void MainWindow::exportDxf()
+{
+    QDialog dialog(this);
+    dialog.setObjectName(QStringLiteral("exportDxfDialog"));
+    dialog.setWindowTitle(tr("Export DXF"));
+    auto* form = new QFormLayout(&dialog);
+    auto* note = new QLabel(tr("The exact geometry in millimetres (DXF R12), for CAD and CAM. Fills aren't "
+                               "included."),
+                            &dialog);
+    note->setWordWrap(true);
+    form->addRow(note);
+    auto* styles = new QCheckBox(tr("Stroke colours and line styles"), &dialog);
+    styles->setChecked(m_dxfOptions.styles);
+    auto* construction = new QCheckBox(tr("Construction geometry (on its own layer, switched off)"), &dialog);
+    construction->setChecked(m_dxfOptions.construction);
+    form->addRow(styles);
+    form->addRow(construction);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    buttons->button(QDialogButtonBox::Ok)->setText(tr("Export..."));
+    form->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    m_dxfOptions.styles = styles->isChecked();
+    m_dxfOptions.construction = construction->isChecked();
+
+    const QString path = exportPath(QStringLiteral("dxf"), tr("Export DXF"), tr("DXF drawings (*.dxf)"));
+    if (path.isEmpty()) {
+        return;
+    }
+    QString error;
+    if (!m_doc->exportDxf(path, m_dxfOptions, &error)) {
+        QMessageBox::critical(this, tr("Export failed"), error);
+        return;
+    }
+    statusBar()->showMessage(tr("Exported %1").arg(QDir::toNativeSeparators(path)), 4000);
+}
+
+QString MainWindow::exportPath(const QString& suffix, const QString& title, const QString& filter)
+{
+    const QFileInfo current(m_doc->filePath());
+    const QString start = m_doc->filePath().isEmpty()
+        ? QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + QStringLiteral("/drawing.") + suffix
+        : current.absolutePath() + QLatin1Char('/') + current.completeBaseName() + QLatin1Char('.') + suffix;
+    QString path = QFileDialog::getSaveFileName(this, title, start, filter);
+    if (!path.isEmpty() && QFileInfo(path).suffix().isEmpty()) {
+        path += QLatin1Char('.') + suffix;
+    }
+    return path;
 }
 
 void MainWindow::showHistory()
@@ -484,6 +530,9 @@ void MainWindow::createActions()
     auto* exportSvgAction = exportMenu->addAction(tr("&SVG..."));
     exportSvgAction->setToolTip(tr("The drawing as it looks in presentation view, at true size"));
     connect(exportSvgAction, &QAction::triggered, this, &MainWindow::exportSvg);
+    auto* exportDxfAction = exportMenu->addAction(tr("&DXF..."));
+    exportDxfAction->setToolTip(tr("Exact geometry for CAD and CAM, in millimetres"));
+    connect(exportDxfAction, &QAction::triggered, this, &MainWindow::exportDxf);
     auto* historyAction = fileMenu->addAction(tr("Command &History..."));
     historyAction->setToolTip(tr("The commands that built this drawing (saved with it)"));
     connect(historyAction, &QAction::triggered, this, &MainWindow::showHistory);

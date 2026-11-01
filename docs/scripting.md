@@ -194,6 +194,9 @@ e.fully_constrained
 ### Document and window
 ```python
 doc.save(path)  doc.open(path)  doc.new()  doc.undo()  doc.redo()  doc.path  doc.modified
+doc.export_svg(path, fills=True, undecorated=True, construction=False, margin=2)  # as presentation view, in mm
+doc.export_dxf(path, styles=True, construction=False)  # exact geometry, DXF R12, mm; no fills
+doc.to_svg(...), doc.to_dxf(...)                       # the same, as strings
 doc.history      # the commands that built the sketch, one per edit (saved in the .dsk; undo
                  # takes commands off); run them in a new sketch to rebuild it
 doc.to_json()

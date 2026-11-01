@@ -527,11 +527,11 @@ bool Document::open(const QString& path, QString* error)
     return true;
 }
 
-bool Document::exportSvg(const QString& path, const core::exporter::SvgOptions& o, QString* error)
+bool Document::writeExport(const QString& path, const std::function<std::string()>& make, QString* error)
 {
-    std::string svg;
+    std::string text;
     try {
-        svg = core::exporter::toSvg(m_sketch, o);
+        text = make();
     }
     catch (const core::SketchError& e) {
         if (error) {
@@ -540,16 +540,42 @@ bool Document::exportSvg(const QString& path, const core::exporter::SvgOptions& 
         return false;
     }
     QSaveFile file(path);
-    if (!file.open(QIODevice::WriteOnly) || file.write(svg.data(), qint64(svg.size())) != qint64(svg.size())
+    if (!file.open(QIODevice::WriteOnly) || file.write(text.data(), qint64(text.size())) != qint64(text.size())
         || !file.commit()) {
         if (error) {
             *error = tr("Couldn't write %1: %2").arg(path, file.errorString());
         }
         return false;
     }
-    const auto flag = [](bool b) { return b ? QStringLiteral("True") : QStringLiteral("False"); };
+    return true;
+}
+
+namespace
+{
+QString pyBool(bool b)
+{
+    return b ? QStringLiteral("True") : QStringLiteral("False");
+}
+}  // namespace
+
+bool Document::exportSvg(const QString& path, const core::exporter::SvgOptions& o, QString* error)
+{
+    if (!writeExport(path, [&] { return core::exporter::toSvg(m_sketch, o); }, error)) {
+        return false;
+    }
     announce(QStringLiteral("doc.export_svg(%1, fills=%2, undecorated=%3, construction=%4, margin=%5)")
-                 .arg(pyString(path), flag(o.fills), flag(o.undecorated), flag(o.construction), Editor::number(o.margin)));
+                 .arg(pyString(path), pyBool(o.fills), pyBool(o.undecorated), pyBool(o.construction),
+                      Editor::number(o.margin)));
+    return true;
+}
+
+bool Document::exportDxf(const QString& path, const core::exporter::DxfOptions& o, QString* error)
+{
+    if (!writeExport(path, [&] { return core::exporter::toDxf(m_sketch, o); }, error)) {
+        return false;
+    }
+    announce(QStringLiteral("doc.export_dxf(%1, styles=%2, construction=%3)")
+                 .arg(pyString(path), pyBool(o.styles), pyBool(o.construction)));
     return true;
 }
 

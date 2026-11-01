@@ -1255,6 +1255,29 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
             }
         }, py::arg("fills") = true, py::arg("undecorated") = true, py::arg("construction") = false,
            py::arg("margin") = 2.0, "The SVG export as a string.")
+        .def("export_dxf", [](const DocumentH&, const std::string& path, bool styles, bool construction) {
+            core::exporter::DxfOptions o;
+            o.styles = styles;
+            o.construction = construction;
+            Document::SilentRecording quiet(doc());
+            QString error;
+            if (!doc().exportDxf(QString::fromStdString(path), o, &error)) {
+                throw std::runtime_error(error.toStdString());
+            }
+        }, py::arg("path"), py::arg("styles") = true, py::arg("construction") = false,
+           "Write the geometry as DXF (R12, millimetres): exact lines, circles and arcs; strokes' colours and "
+           "line styles (styles=True); construction on a switched-off layer if asked. No fills.")
+        .def("to_dxf", [](const DocumentH&, bool styles, bool construction) {
+            core::exporter::DxfOptions o;
+            o.styles = styles;
+            o.construction = construction;
+            try {
+                return core::exporter::toDxf(sketch(), o);
+            }
+            catch (const core::SketchError& e) {
+                throw py::value_error(e.what());
+            }
+        }, py::arg("styles") = true, py::arg("construction") = false, "The DXF export as a string.")
         .def_property_readonly("history", [](const DocumentH&) {
             py::list out;
             for (const QString& entry : doc().history()) {

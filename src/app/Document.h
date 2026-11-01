@@ -112,6 +112,7 @@ public:
     bool open(const QString& path, QString* error = nullptr);
     // Writes the drawing as SVG (see core/Export.h). Doesn't change the document.
     bool exportSvg(const QString& path, const core::exporter::SvgOptions& options, QString* error = nullptr);
+    bool exportDxf(const QString& path, const core::exporter::DxfOptions& options, QString* error = nullptr);
     void newSketch();
 
 signals:
@@ -133,6 +134,8 @@ private:
     // `hold`: points to keep in place where the sketch leaves a choice.
     bool commitChecked(core::Sketch working, QString* error, const std::vector<core::Id>& hold = {});
     core::Id midpointOnLine(const std::vector<core::Id>& refs, QString* error);
+    // Writes an export (made by `make`, which may throw SketchError) to `path`.
+    bool writeExport(const QString& path, const std::function<std::string()>& make, QString* error);
     void resolve();
 
     core::Sketch m_sketch;

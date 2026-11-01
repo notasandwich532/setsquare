@@ -72,6 +72,15 @@ sees them, and per item styles live alongside the sketch (they go into layers la
    a gap, highlights the nearest loose ends and offers to close the gap.
 4. **Layers panel.** Layers, each a sketch with ordered sublayers (show / fade / hide, lock).
 
+## Export (done)
+- **SVG** (File > Export): the drawing as presentation view shows it, in millimetres (y up), with
+  fills (even-odd, holes kept), strokes (colour, opacity, width, dashes), exact lines, circles and
+  arcs, plain curves in thin black, and optional construction; Inkscape layers.
+- **DXF R12**: exact LINE / CIRCLE / ARC in millimetres for CAD and CAM; layers GEOMETRY, STROKES
+  (nearest AutoCAD colour + linetype) and CONSTRUCTION (off). No fills, true colour or line weights
+  (R12 has none); an R2000+ writer could add them later.
+- Import (SVG/DXF into a sketch) is a later, bigger job.
+
 ## M9: New curve types
 - **Ellipse** and elliptical arc, with major/minor radius dimensions.
 - **Splines:** control-point and fit-point. Fit points are constrained onto the curve.

@@ -28,3 +28,23 @@ try:
 except ValueError:
     pass
 print("ok")
+
+# DXF: exact geometry in mm.
+doc.new()
+sides = s.rectangle((0, 0), (30, 20))
+s.stroke(sides[0], color="#ff0000", dash="dashed")
+hole = s.circle((15, 10), 4)
+dxf = doc.to_dxf()
+pairs = dxf.split("\r\n")[:-1]
+assert len(pairs) % 2 == 0
+codes = list(zip(pairs[0::2], pairs[1::2]))
+assert ("0", "EOF") == codes[-1] and ("1", "AC1009") in codes
+assert codes.count(("0", "LINE")) == 4 and codes.count(("0", "CIRCLE")) == 1
+assert ("6", "DASHED") in codes and ("62", "1") in codes
+with tempfile.TemporaryDirectory() as folder:
+    path = os.path.join(folder, "out.dxf")
+    doc.export_dxf(path, styles=False)
+    with open(path, encoding="ascii", newline="") as f:
+        written = f.read()
+    assert "STROKES" not in written.split("ENTITIES")[1]
+print("dxf ok")

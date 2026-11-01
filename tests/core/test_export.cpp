@@ -6,7 +6,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <map>
 #include <string>
+#include <vector>
 
 using namespace core;
 
@@ -96,4 +99,101 @@ TEST_CASE("An empty drawing can't be exported", "[export][svg]")
     Sketch s;
     s.ensureOrigin();
     CHECK_THROWS_AS(exporter::toSvg(s), SketchError);
+}
+
+namespace
+{
+// A DXF file as its (group code, value) pairs; fails the test if it isn't pairs of lines.
+std::vector<std::pair<int, std::string>> dxfPairs(const std::string& text)
+{
+    std::vector<std::string> lines;
+    size_t start = 0;
+    while (start < text.size()) {
+        const size_t end = text.find("\r\n", start);
+        REQUIRE(end != std::string::npos);  // every line ends CRLF
+        lines.push_back(text.substr(start, end - start));
+        start = end + 2;
+    }
+    REQUIRE(lines.size() % 2 == 0);
+    std::vector<std::pair<int, std::string>> pairs;
+    for (size_t i = 0; i < lines.size(); i += 2) {
+        pairs.push_back({std::stoi(lines[i]), lines[i + 1]});
+    }
+    return pairs;
+}
+
+// The values of the group codes of the n-th entity of a type.
+std::map<int, std::string> dxfEntity(const std::vector<std::pair<int, std::string>>& pairs, const std::string& type,
+                                     size_t n = 0)
+{
+    for (size_t i = 0; i < pairs.size(); ++i) {
+        if (pairs[i].first == 0 && pairs[i].second == type && n-- == 0) {
+            std::map<int, std::string> out;
+            for (size_t j = i + 1; j < pairs.size() && pairs[j].first != 0; ++j) {
+                out[pairs[j].first] = pairs[j].second;
+            }
+            return out;
+        }
+    }
+    return {};
+}
+}  // namespace
+
+TEST_CASE("DXF holds the exact geometry in millimetres", "[export][dxf]")
+{
+    Sketch s;
+    rect(s, 0, 0, 20, 10);
+    s.addCircle(30, 5, 4);
+    s.addArc(50, 0, 6, 30, 120);
+    const auto pairs = dxfPairs(exporter::toDxf(s));
+    CHECK(pairs.front() == std::pair<int, std::string>{0, "SECTION"});
+    CHECK(pairs.back() == std::pair<int, std::string>{0, "EOF"});
+    CHECK(std::ranges::find(pairs, std::pair<int, std::string>{1, "AC1009"}) != pairs.end());
+    CHECK(std::ranges::count(pairs, std::pair<int, std::string>{0, "LINE"}) == 4);
+
+    const auto circle = dxfEntity(pairs, "CIRCLE");
+    CHECK(circle.at(10) == "30");
+    CHECK(circle.at(40) == "4");
+    CHECK(circle.at(8) == "GEOMETRY");
+    const auto arc = dxfEntity(pairs, "ARC");
+    CHECK(arc.at(10) == "50");
+    CHECK(arc.at(40) == "6");
+    CHECK(arc.at(50) == "30");   // counter-clockwise from 30 degrees
+    CHECK(arc.at(51) == "120");  // to 120
+}
+
+TEST_CASE("DXF strokes keep a colour and line style; construction is a switched-off layer", "[export][dxf]")
+{
+    Sketch s;
+    const Id l = s.addLine(0, 0, 10, 0);
+    const Id helper = s.addLine(0, 0, 0, 10);
+    s.entity(helper).construction = true;
+    StrokeStyle style;
+    Color::fromHex("#ff0000", style.color);
+    style.dash = Dash::DashDot;
+    s.setStroke(l, style);
+
+    exporter::DxfOptions o;
+    o.construction = true;
+    const auto pairs = dxfPairs(exporter::toDxf(s, o));
+    const auto stroked = dxfEntity(pairs, "LINE", 0);
+    CHECK(stroked.at(8) == "STROKES");
+    CHECK(stroked.at(62) == "1");  // red
+    CHECK(stroked.at(6) == "DASHDOT");
+    CHECK(dxfEntity(pairs, "LINE", 1).at(8) == "CONSTRUCTION");
+    // The CONSTRUCTION layer is off (negative colour).
+    for (size_t i = 0; i + 2 < pairs.size(); ++i) {
+        if (pairs[i] == std::pair<int, std::string>{2, "CONSTRUCTION"}) {
+            CHECK(dxfEntity(pairs, "LAYER", 3).at(62) == "-8");
+        }
+    }
+    CHECK(exporter::nearestAci({0, 0, 255, 255}) == 5);
+    CHECK(exporter::nearestAci({0, 0, 0, 255}) == 7);  // black shows as 7 (black on white)
+    CHECK(exporter::nearestAci({255, 128, 0, 255}) != 7);
+
+    o.construction = false;
+    o.styles = false;
+    const auto plain = dxfPairs(exporter::toDxf(s, o));
+    CHECK(std::ranges::count(plain, std::pair<int, std::string>{0, "LINE"}) == 1);
+    CHECK(dxfEntity(plain, "LINE").at(8) == "GEOMETRY");
 }
