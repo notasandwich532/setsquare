@@ -698,7 +698,9 @@ void Sketch::remove(Id id)
         m_entities.erase(d);
         m_strokes.erase(d);
     }
-    std::erase_if(m_texts, [&](const auto& kv) { return doomed.contains(kv.second.anchor); });
+    std::erase_if(m_texts, [&](const auto& kv) {
+        return doomed.contains(kv.second.anchor) || doomed.contains(kv.second.path);
+    });
     std::erase_if(m_constraints, [&](const auto& kv) {
         return std::ranges::any_of(kv.second.refs, [&](Id r) { return doomed.contains(r); });
     });
@@ -832,6 +834,49 @@ bool textOutlineFromString(const std::string& name, TextOutline& out)
     return false;
 }
 
+const char* toString(TextAlign align)
+{
+    switch (align) {
+        case TextAlign::Left: return "left";
+        case TextAlign::Center: return "center";
+        case TextAlign::Right: return "right";
+    }
+    return "?";
+}
+
+const char* toString(TextVAlign align)
+{
+    switch (align) {
+        case TextVAlign::Baseline: return "baseline";
+        case TextVAlign::Top: return "top";
+        case TextVAlign::Middle: return "middle";
+        case TextVAlign::Bottom: return "bottom";
+    }
+    return "?";
+}
+
+bool textAlignFromString(const std::string& name, TextAlign& out)
+{
+    for (TextAlign a : {TextAlign::Left, TextAlign::Center, TextAlign::Right}) {
+        if (name == toString(a)) {
+            out = a;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool textVAlignFromString(const std::string& name, TextVAlign& out)
+{
+    for (TextVAlign a : {TextVAlign::Baseline, TextVAlign::Top, TextVAlign::Middle, TextVAlign::Bottom}) {
+        if (name == toString(a)) {
+            out = a;
+            return true;
+        }
+    }
+    return false;
+}
+
 Point textToWorld(const Point& anchor, double angleDeg, const Point& local)
 {
     const double a = angleDeg * std::numbers::pi / 180.0;
@@ -852,8 +897,16 @@ void checkText(const Sketch& s, const Text& t)
     if (!(t.minThickness >= 0.0) || !std::isfinite(t.minThickness)) {
         throw SketchError("text: the minimum thickness can't be negative");
     }
-    if (!std::isfinite(t.angle)) {
-        throw SketchError("text: the angle must be a number");
+    if (!std::isfinite(t.angle) || !std::isfinite(t.spacing)) {
+        throw SketchError("text: the angle and spacing must be numbers");
+    }
+    if (t.path != kNoId) {
+        if (!s.hasEntity(t.path) || s.entity(t.path).kind() == EntityKind::Point || s.isReference(t.path)) {
+            throw SketchError("text: the path must be a line, arc or circle");
+        }
+        if (s.definingPoints(t.path).front() != t.anchor) {
+            throw SketchError("text: text along a path is anchored at the path's first point");
+        }
     }
 }
 }  // namespace

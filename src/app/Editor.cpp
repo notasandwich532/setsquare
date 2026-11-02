@@ -529,22 +529,37 @@ QString textArgs(const core::Text& t)
     if (t.hasColor) {
         args << QStringLiteral("color=\"%1\"").arg(QString::fromStdString(t.color.hex()));
     }
+    if (t.spacing != 0.0) {
+        args << QStringLiteral("spacing=") + Editor::number(t.spacing);
+    }
+    if (t.align != core::TextAlign::Left) {
+        args << QStringLiteral("align=\"%1\"").arg(QString::fromLatin1(core::toString(t.align)));
+    }
+    if (t.valign != core::TextVAlign::Baseline) {
+        args << QStringLiteral("valign=\"%1\"").arg(QString::fromLatin1(core::toString(t.valign)));
+    }
+    if (t.flipH) {
+        args << QStringLiteral("flip_h=True");
+    }
+    if (t.flipV) {
+        args << QStringLiteral("flip_v=True");
+    }
     return args.join(QStringLiteral(", "));
 }
 }  // namespace
 
 Id Editor::text(core::Text t)
 {
-    textshapes::update(t);
+    textshapes::update(t, &m_sketch);
     const Id id = m_sketch.addText(t);
-    log(QStringLiteral("%1 = s.text(%2, %3, %4)")
-            .arg(name(m_sketch, id), pyString(t.text), name(m_sketch, t.anchor), textArgs(t)));
+    const QString where = t.path != core::kNoId ? QStringLiteral("path=") + name(m_sketch, t.path) : name(m_sketch, t.anchor);
+    log(QStringLiteral("%1 = s.text(%2, %3, %4)").arg(name(m_sketch, id), pyString(t.text), where, textArgs(t)));
     return id;
 }
 
 void Editor::setText(core::Text t)
 {
-    textshapes::update(t);
+    textshapes::update(t, &m_sketch);
     m_sketch.setText(t);
     log(QStringLiteral("s.edit_text(%1, text=%2, %3)").arg(name(m_sketch, t.id), pyString(t.text), textArgs(t)));
 }

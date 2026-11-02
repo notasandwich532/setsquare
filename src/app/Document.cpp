@@ -1,5 +1,7 @@
 #include "Document.h"
 
+#include "TextShapes.h"
+
 #include <core/Regions.h>
 #include <core/Serialize.h>
 
@@ -280,6 +282,7 @@ bool Document::commitChecked(core::Sketch working, QString* error, const std::ve
         emit blocked(blockers);
         return false;
     }
+    textshapes::refreshPathTexts(working);
     core::regions::refreshFills(working);
     commit(std::move(working));
     m_result = std::move(result);
@@ -366,6 +369,7 @@ void Document::dragTo(double dx, double dy)
     }
     if (m_dragSolver->dragTo(dx, dy)) {
         m_dragSolver->writeBack(m_sketch);
+        textshapes::refreshPathTexts(m_sketch);
         m_dragMoved = true;
         m_dragDx = dx;
         m_dragDy = dy;
@@ -381,6 +385,7 @@ void Document::dragMove(double dx, double dy, double angle, core::Vec2 about)
     const core::Affine t = Editor::moveMap(dx, dy, angle, about);
     if (m_dragSolver->dragMap([&](core::Vec2 p) { return t.apply(p); })) {
         m_dragSolver->writeBack(m_sketch);
+        textshapes::refreshPathTexts(m_sketch);
         m_dragMoved = true;
         m_dragIsMove = true;
         m_dragDx = dx;
@@ -546,7 +551,8 @@ void Document::reset(core::Sketch sketch)
 void Document::resolve()
 {
     m_result = core::solve(m_sketch);
-    core::regions::refreshFills(m_sketch);  // fills keep track of their areas as edits go on
+    textshapes::refreshPathTexts(m_sketch);  // text along a curve follows it
+    core::regions::refreshFills(m_sketch);   // fills keep track of their areas as edits go on
 }
 
 void Document::record(const QString& python)

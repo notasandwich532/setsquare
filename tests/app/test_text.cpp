@@ -8,13 +8,17 @@
 #include "Snapshot.h"
 #include "TextShapes.h"
 
+#include <core/Serialize.h>
+
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <QComboBox>
 #include <QCoreApplication>
 #include <QDoubleSpinBox>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QTest>
 
@@ -137,7 +141,7 @@ TEST_CASE("Text tool: click a place, type, search for a font, OK", "[text][tool]
     f.view.setTool(ToolKind::Text);
     QTest::mouseMove(&f.view, f.at(10, 20));
     QTest::mouseClick(&f.view, Qt::LeftButton, {}, f.at(10, 20));
-    auto* text = f.field<QLineEdit>("text");
+    auto* text = f.field<QPlainTextEdit>("text");
     text->selectAll();
     QTest::keyClicks(text, "Hi there");
     f.field<QDoubleSpinBox>("height")->setValue(8);
@@ -199,9 +203,9 @@ TEST_CASE("Text: drag it by its letters; double-click to edit; Delete removes it
     QTest::mouseDClick(&f.view, Qt::LeftButton, {}, letters);
     f.settle();
     CHECK(f.view.toolKind() == ToolKind::Text);
-    auto* text = f.field<QLineEdit>("text");
-    CHECK(text->text() == "Move me");
-    text->setText("Moved");
+    auto* text = f.field<QPlainTextEdit>("text");
+    CHECK(text->toPlainText() == "Move me");
+    text->setPlainText("Moved");
     f.field<QPushButton>("ok")->click();
     f.settle();
     CHECK(f.doc.sketch().text(id).text == "Moved");
@@ -211,4 +215,109 @@ TEST_CASE("Text: drag it by its letters; double-click to edit; Delete removes it
     f.view.deleteSelection();
     CHECK(f.doc.sketch().texts().empty());
     CHECK_FALSE(f.doc.sketch().hasEntity(anchor));
+}
+
+TEST_CASE("Lines, alignment, spacing and flips", "[text]")
+{
+    const Bounds one = boundsOf(textshapes::make(sample("Ab")));
+    Text two = sample("Ab\nAb");
+    const Bounds lines = boundsOf(textshapes::make(two));
+    CHECK(lines.y0 < one.y0 - 5.0);  // a second line below the first
+    CHECK(lines.x1 == Approx(one.x1).margin(0.01));
+
+    // Centred / right: the anchor in the middle / at the right; top: caps hanging from it.
+    Text t = sample("Ab");
+    t.align = TextAlign::Center;
+    const Bounds centred = boundsOf(textshapes::make(t));
+    CHECK((centred.x0 + centred.x1) / 2 == Approx(0.0).margin(0.6));
+    t.align = TextAlign::Right;
+    CHECK(boundsOf(textshapes::make(t)).x1 == Approx(0.0).margin(0.6));
+    t.align = TextAlign::Left;
+    t.valign = TextVAlign::Top;
+    CHECK(boundsOf(textshapes::make(t)).y1 == Approx(0.0).margin(0.2));
+    t.valign = TextVAlign::Middle;
+    const Bounds middle = boundsOf(textshapes::make(t));
+    CHECK((middle.y0 + middle.y1) / 2 == Approx(0.0).margin(1.0));
+
+    // Spacing spreads the letters; flips mirror them in place.
+    Text spaced = sample("Ab");
+    spaced.spacing = 50;
+    CHECK(boundsOf(textshapes::make(spaced)).x1 > one.x1 + 2.0);
+    Text flipped = sample("Ab");
+    flipped.flipH = flipped.flipV = true;
+    const Bounds f = boundsOf(textshapes::make(flipped));
+    CHECK(f.x1 - f.x0 == Approx(one.x1 - one.x0).margin(0.01));
+    CHECK(f.y1 - f.y0 == Approx(one.y1 - one.y0).margin(0.01));
+}
+
+TEST_CASE("Text along a path follows its curve", "[text][path]")
+{
+    Document doc;
+    Id line = kNoId, circle = kNoId, onLine = kNoId, onCircle = kNoId;
+    doc.edit("text", [&](Editor& ed) {
+        Sketch& s = const_cast<Sketch&>(ed.sketch());
+        line = s.addLine(0, 0, 100, 0);
+        Text t = sample("ALONG");
+        t.path = line;
+        t.anchor = s.line(line).p1;
+        t.align = TextAlign::Center;
+        onLine = ed.text(t);
+        circle = s.addCircle(200, 0, 20);
+        Text c = sample("ROUND");
+        c.path = circle;
+        c.anchor = s.circle(circle).center;
+        c.align = TextAlign::Center;
+        onCircle = ed.text(c);
+    });
+    const Sketch& s = doc.sketch();
+    auto worldBounds = [&](Id id) {
+        const Text& t = s.text(id);
+        Bounds b;
+        for (const auto& c : t.shape) {
+            for (const Point& p : c) {
+                const Point w = textToWorld(s.point(t.anchor), t.angle, p);
+                b.x0 = std::min(b.x0, w.x), b.y0 = std::min(b.y0, w.y), b.x1 = std::max(b.x1, w.x), b.y1 = std::max(b.y1, w.y);
+            }
+        }
+        return b;
+    };
+    // On the line: standing on it, centred along it.
+    Bounds b = worldBounds(onLine);
+    CHECK(b.y0 == Approx(0.0).margin(0.2));
+    CHECK((b.x0 + b.x1) / 2 == Approx(50.0).margin(1.0));
+    // Round the circle: centred on its top, outside it.
+    b = worldBounds(onCircle);
+    CHECK((b.x0 + b.x1) / 2 == Approx(200.0).margin(1.0));
+    CHECK(b.y1 > 20.0 + 8.0);
+    CHECK(b.y0 > 0.0);
+
+    // Drag the line's end up: the text turns with it.
+    doc.beginDrag({s.line(line).p2});
+    doc.dragTo(0, 100);
+    doc.endDrag();
+    b = worldBounds(onLine);
+    CHECK(b.y1 > 40.0);  // now climbing to (100, 100)
+    // Saved and loaded, still on its curve.
+    const Sketch back = fromJson(toJson(s));
+    CHECK(back.text(onLine).path == line);
+}
+
+TEST_CASE("Text tool: along a path", "[text][tool]")
+{
+    Fixture f;
+    Id arc = kNoId;
+    f.doc.modify("arc", [&](Sketch& s) { arc = s.addArc(0, 0, 30, 0, 180); });
+    f.view.setTool(ToolKind::Text);
+    f.field<QComboBox>("type")->setCurrentIndex(1);
+    QTest::mouseMove(&f.view, f.at(0, 30));
+    QTest::mouseClick(&f.view, Qt::LeftButton, {}, f.at(0, 30));  // the arc's top
+    auto* text = f.field<QPlainTextEdit>("text");
+    text->setPlainText("Over the top");
+    f.field<QComboBox>("align")->setCurrentIndex(1);
+    f.field<QPushButton>("ok")->click();
+    f.settle();
+    const Text& t = f.doc.sketch().text(f.onlyText());
+    CHECK(t.path == arc);
+    CHECK(t.align == TextAlign::Center);
+    CHECK(f.recorded.last().contains(QStringLiteral("path=a%1").arg(arc)));
 }

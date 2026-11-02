@@ -10,10 +10,15 @@ namespace textshapes
 
 // The outline of `text` with its settings (font, bold/italic, height, outline mode, minimum
 // thickness), in text space: mm, x along the baseline from the anchor, y up.
-std::vector<std::vector<core::Point>> make(const core::Text& text);
+// Text along a path needs the sketch (for its curve); without one it's laid out in lines.
+std::vector<std::vector<core::Point>> make(const core::Text& text, const core::Sketch* sketch = nullptr);
 
 // Makes the shape afresh into `text`.
-void update(core::Text& text);
+void update(core::Text& text, const core::Sketch* sketch = nullptr);
+
+// Remakes the shape of each text along a path whose curve has changed since (after a solve, or as
+// a drag goes).
+void refreshPathTexts(core::Sketch& sketch);
 
 // The installed font families whose names contain `search` (any case), sorted; all of them if
 // it's empty.

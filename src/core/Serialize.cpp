@@ -172,6 +172,24 @@ std::string toJson(const Sketch& sketch, bool compact, const std::vector<std::st
             if (t.minThickness > 0.0) {
                 j["min_thickness"] = t.minThickness;
             }
+            if (t.spacing != 0.0) {
+                j["spacing"] = t.spacing;
+            }
+            if (t.align != TextAlign::Left) {
+                j["align"] = toString(t.align);
+            }
+            if (t.valign != TextVAlign::Baseline) {
+                j["valign"] = toString(t.valign);
+            }
+            if (t.flipH) {
+                j["flip_h"] = true;
+            }
+            if (t.flipV) {
+                j["flip_v"] = true;
+            }
+            if (t.path != kNoId) {
+                j["path"] = t.path;
+            }
             if (t.hasColor) {
                 j["color"] = t.color.hex();
             }
@@ -259,6 +277,14 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
             t.height = j.value("height", 10.0);
             t.angle = j.value("angle", 0.0);
             t.minThickness = j.value("min_thickness", 0.0);
+            t.spacing = j.value("spacing", 0.0);
+            t.flipH = j.value("flip_h", false);
+            t.flipV = j.value("flip_v", false);
+            t.path = j.value("path", Id{kNoId});
+            if (!textAlignFromString(j.value("align", std::string("left")), t.align)
+                || !textVAlignFromString(j.value("valign", std::string("baseline")), t.valign)) {
+                throw SketchError("unknown text alignment");
+            }
             if (!textOutlineFromString(j.value("outline", std::string("as_designed")), t.outline)) {
                 throw SketchError("unknown text outline '" + j.value("outline", std::string()) + "'");
             }

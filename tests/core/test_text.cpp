@@ -72,6 +72,10 @@ TEST_CASE("Texts are saved with their shape, and exported as filled outlines", "
     t.angle = 30;
     t.outline = TextOutline::Silhouette;
     t.minThickness = 0.4;
+    t.spacing = 12.5;
+    t.align = TextAlign::Right;
+    t.valign = TextVAlign::Middle;
+    t.flipV = true;
     t.hasColor = true;
     Color::fromHex("#ff0000", t.color);
     const Id id = s.addText(t);
@@ -84,6 +88,11 @@ TEST_CASE("Texts are saved with their shape, and exported as filled outlines", "
     CHECK(r.angle == 30.0);
     CHECK(r.outline == TextOutline::Silhouette);
     CHECK(r.minThickness == 0.4);
+    CHECK(r.spacing == 12.5);
+    CHECK(r.align == TextAlign::Right);
+    CHECK(r.valign == TextVAlign::Middle);
+    CHECK(r.flipV);
+    CHECK_FALSE(r.flipH);
     CHECK(r.hasColor);
     CHECK(r.color.hex() == "#ff0000");
     REQUIRE(r.shape.size() == 1);

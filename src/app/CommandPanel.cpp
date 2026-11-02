@@ -11,6 +11,7 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPlainTextEdit>
 #include <QSpinBox>
 #include <QStyle>
 #include <QToolButton>
@@ -220,7 +221,12 @@ bool CommandPanel::eventFilter(QObject* watched, QEvent* event)
         place();
     }
     else if (watched != m_canvas && event->type() == QEvent::KeyPress) {
-        const int key = static_cast<QKeyEvent*>(event)->key();
+        const auto* keyEvent = static_cast<QKeyEvent*>(event);
+        const int key = keyEvent->key();
+        if ((key == Qt::Key_Return || key == Qt::Key_Enter) && qobject_cast<QPlainTextEdit*>(watched)
+            && !(keyEvent->modifiers() & Qt::ControlModifier)) {
+            return false;  // a new line in a multi-line box (Ctrl+Enter accepts)
+        }
         if (key == Qt::Key_Return || key == Qt::Key_Enter) {
             // A sum typed in a number box is worked out first; one that doesn't read is put back,
             // and that Enter doesn't go ahead (so nothing is made from a half-typed sum).

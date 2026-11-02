@@ -175,6 +175,10 @@ t = s.text("Scribble", p, font="Segoe Script", outline="merged")      # overlapp
 t = s.text("Scribble", p, font="Segoe Script", outline="silhouette")  # only the outside edge
 t = s.text("Thin", p, font="Ink Free", min_thickness=0.8)  # parts narrower than 0.8 mm thickened
 s.edit_text(t, text="Hi", height=10)      # any of the settings; the letters are remade
+t = s.text("Two\nlines", p, align="center", valign="top")  # which part sits on p
+t = s.text("Spaced", p, spacing=20, flip_h=True)   # % of the size between letters; mirrored
+t = s.text("Round we go", path=circle, align="center")  # along a line/arc/circle, following it
+                                          # (align: its start/middle/end; a circle: its top)
 t.anchor, t.contours, t.bounds            # its point; its outline as loops of (x, y); extent
 ```
 ### Appearance (strokes)

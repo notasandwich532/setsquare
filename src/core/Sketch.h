@@ -3,6 +3,7 @@
 #include "Style.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <stdexcept>
@@ -166,6 +167,27 @@ enum class TextOutline
 const char* toString(TextOutline outline);
 bool textOutlineFromString(const std::string& name, TextOutline& out);
 
+// Which part of the text sits on its anchor. Along a path: horizontally, where on the curve it
+// goes (its start, middle or end); vertically, which side of the curve (letters standing on it,
+// centred on it, or hanging below it).
+enum class TextAlign
+{
+    Left,
+    Center,
+    Right,
+};
+enum class TextVAlign
+{
+    Baseline,  // the first line's baseline (along a path: standing on it)
+    Top,       // the top of the first line's capitals (along a path: hanging below it)
+    Middle,    // halfway between those (along a path: centred on it)
+    Bottom,    // the last line's baseline
+};
+const char* toString(TextAlign align);
+const char* toString(TextVAlign align);
+bool textAlignFromString(const std::string& name, TextAlign& out);
+bool textVAlignFromString(const std::string& name, TextVAlign& out);
+
 struct Text
 {
     Id id = kNoId;
@@ -178,6 +200,15 @@ struct Text
     double angle = 0.0;    // degrees, baseline direction from +x
     TextOutline outline = TextOutline::AsDesigned;
     double minThickness = 0.0;  // mm; 0 = as the font has it
+    double spacing = 0.0;       // extra space between letters, % of the font size (may be negative)
+    TextAlign align = TextAlign::Left;
+    TextVAlign valign = TextVAlign::Baseline;
+    bool flipH = false;  // mirrored left to right (along a path: running the other way)
+    bool flipV = false;  // mirrored top to bottom (along a path: on the other side of it)
+    // Text along a curve (a line, arc or circle) instead of in lines: it follows the curve as it
+    // moves. Its anchor is then the curve's first point, and the shape is remade as it changes.
+    Id path = kNoId;
+    std::size_t layoutKey = 0;  // (not saved) what the shape was last made from, to skip remaking
     bool hasColor = false;
     Color color;  // when set: filled in this colour in the drawing (else like plain geometry)
 

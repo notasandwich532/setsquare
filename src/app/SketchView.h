@@ -132,6 +132,7 @@ public:
         bool textItalic = false;
         int textOutline = 0;  // core::TextOutline
         double textMinThickness = 0.0;
+        double textSpacing = 0.0;
     };
     ModifyOptions& modifyOptions() { return m_modifyOptions; }
     const ModifyOptions& modifyOptions() const { return m_modifyOptions; }

@@ -1,5 +1,7 @@
 #include "TextShapes.h"
 
+#include <core/Geometry.h>
+
 #include <QDir>
 #include <QFileInfo>
 #include <QFont>
@@ -16,6 +18,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <numbers>
 #include <set>
 
 namespace textshapes
@@ -707,7 +710,168 @@ QPainterPath thicken(const QPainterPath& shape, double width)
 }
 }  // namespace
 
-std::vector<std::vector<core::Point>> make(const core::Text& t)
+namespace
+{
+// The letters laid out in lines (font pixels, y down, the anchor at 0, 0): each line aligned on
+// its own, the block placed vertically on the anchor, then mirrored in place if asked.
+QPainterPath layoutLines(const core::Text& t, const QFont& font, double capHeight)
+{
+    const QFontMetricsF fm(font);
+    const QStringList lines = QString::fromStdString(t.text).split(QLatin1Char('\n'));
+    QPainterPath path;
+    path.setFillRule(Qt::WindingFill);
+    double left = 0, right = 0;
+    for (qsizetype i = 0; i < lines.size(); ++i) {
+        const double width = fm.horizontalAdvance(lines[i]);
+        const double x = t.align == core::TextAlign::Left ? 0.0 : t.align == core::TextAlign::Center ? -width / 2 : -width;
+        path.addText(x, double(i) * fm.lineSpacing(), font, lines[i]);
+        left = i == 0 ? x : std::min(left, x);
+        right = i == 0 ? x + width : std::max(right, x + width);
+    }
+    const double lastBaseline = double(lines.size() - 1) * fm.lineSpacing();
+    double shift = 0.0;  // down
+    switch (t.valign) {
+        case core::TextVAlign::Baseline: break;
+        case core::TextVAlign::Top: shift = capHeight; break;
+        case core::TextVAlign::Middle: shift = (capHeight - lastBaseline) / 2; break;
+        case core::TextVAlign::Bottom: shift = -lastBaseline; break;
+    }
+    path.translate(0, shift);
+    // Mirrored about the middle of the block (caps' top to last baseline), so it stays put.
+    const double cx = (left + right) / 2, cy = shift + (lastBaseline - capHeight) / 2;
+    if (t.flipH || t.flipV) {
+        QTransform m;
+        m.translate(cx, cy);
+        m.scale(t.flipH ? -1 : 1, t.flipV ? -1 : 1);
+        m.translate(-cx, -cy);
+        path = m.map(path);
+    }
+    path.setFillRule(Qt::WindingFill);
+    return path;
+}
+
+// The letters set along a curve, one by one (same units, relative to the anchor): each turned
+// to the curve where its middle falls, standing on it (or centred on it, or hanging below).
+QPainterPath layoutAlongPath(const core::Text& t, const core::Sketch& s, const QFont& font, double capHeight,
+                             double mmPerPixel)
+{
+    QPainterPath path;
+    path.setFillRule(Qt::WindingFill);
+    if (!s.hasEntity(t.path) || !s.hasEntity(t.anchor)) {
+        return path;
+    }
+    // The curve, in font pixels relative to the anchor (y down), the way the text runs: a line
+    // from its first end; arcs and circles clockwise, so the letters stand on the outside and
+    // read left to right over the top; a circle from its top (so centred text is centred there).
+    const core::Point& anchor = s.point(t.anchor);
+    const core::Entity& e = s.entity(t.path);
+    const bool closed = e.kind() == core::EntityKind::Circle;
+    std::vector<core::Vec2> world;
+    if (closed) {
+        const core::Circle& c = s.circle(t.path);
+        const core::Point& o = s.point(c.center);
+        constexpr int kSteps = 720;
+        for (int k = 0; k <= kSteps; ++k) {
+            const double a = std::numbers::pi / 2 - 2 * std::numbers::pi * k / kSteps;
+            world.push_back({o.x + c.radius * std::cos(a), o.y + c.radius * std::sin(a)});
+        }
+    }
+    else {
+        world = core::sample(s, t.path, 720);
+        if (e.kind() == core::EntityKind::Arc) {
+            std::ranges::reverse(world);  // (arcs run anticlockwise)
+        }
+    }
+    std::vector<QPointF> curve;
+    for (const core::Vec2& p : world) {
+        curve.emplace_back((p.x - anchor.x) / mmPerPixel, -(p.y - anchor.y) / mmPerPixel);
+    }
+    if (curve.size() < 2) {
+        return path;
+    }
+    if (t.flipH) {
+        std::ranges::reverse(curve);  // running the other way (so on the other side, still readable)
+    }
+    std::vector<double> along{0.0};
+    for (size_t i = 1; i < curve.size(); ++i) {
+        along.push_back(along.back() + std::hypot(curve[i].x() - curve[i - 1].x(), curve[i].y() - curve[i - 1].y()));
+    }
+    const double length = along.back();
+    // Where a distance along it falls, and the direction there (carried on past the ends).
+    auto at = [&](double d, QPointF& point, QPointF& direction) {
+        if (closed && length > 0) {
+            d = std::fmod(d, length);  // round and round
+            if (d < 0) {
+                d += length;
+            }
+        }
+        size_t i = 1;
+        while (i + 1 < curve.size() && along[i] < d) {
+            ++i;
+        }
+        const QPointF a = curve[i - 1], b = curve[i];
+        const double seg = std::max(1e-12, along[i] - along[i - 1]);
+        direction = (b - a) / seg;
+        point = a + direction * (d - along[i - 1]);
+    };
+
+    const QFontMetricsF fm(font);
+    QString text = QString::fromStdString(t.text);
+    text.replace(QLatin1Char('\n'), QLatin1Char(' '));
+    const double width = fm.horizontalAdvance(text);
+    // Where it starts: from the curve's start, its middle or its end (a circle's top for all three:
+    // starting there, centred on it, or ending there).
+    const double place = closed ? 0.0 : t.align == core::TextAlign::Left ? 0.0 : t.align == core::TextAlign::Center ? length / 2 : length;
+    const double start = place - (t.align == core::TextAlign::Left ? 0.0 : t.align == core::TextAlign::Center ? width / 2 : width);
+    double lift = 0.0;  // the baseline's distance above the curve (font pixels)
+    switch (t.valign) {
+        case core::TextVAlign::Baseline:
+        case core::TextVAlign::Bottom: break;
+        case core::TextVAlign::Top: lift = -capHeight; break;
+        case core::TextVAlign::Middle: lift = -capHeight / 2; break;
+    }
+    for (qsizetype i = 0; i < text.size(); ++i) {
+        if (text[i].isLowSurrogate()) {
+            continue;  // (the pair goes with its high half)
+        }
+        const qsizetype n = text[i].isHighSurrogate() && i + 1 < text.size() ? 2 : 1;
+        const QString glyph = text.mid(i, n);
+        const double x0 = fm.horizontalAdvance(text.left(i));
+        const double advance = fm.horizontalAdvance(text.left(i + n)) - x0;
+        QPainterPath g;
+        g.addText(-advance / 2, -lift, font, glyph);  // its middle at 0, baseline lifted
+        if (g.isEmpty()) {
+            continue;
+        }
+        QPointF point, direction;
+        at(start + x0 + advance / 2, point, direction);
+        // Screen-like axes (y down): along the curve, and "up" for the letter to its left.
+        const QPointF up(direction.y(), -direction.x());
+        const double sign = t.flipV ? -1.0 : 1.0;  // mirrored: hanging the other way
+        const QTransform frame(direction.x(), direction.y(), -up.x() * sign, -up.y() * sign, point.x(), point.y());
+        path.addPath(frame.map(g));
+    }
+    path.setFillRule(Qt::WindingFill);
+    return path;
+}
+
+// A fingerprint of what a path text's curve is now (its points and size), to skip remaking.
+std::size_t curveKey(const core::Sketch& s, core::Id curve)
+{
+    std::size_t key = std::hash<core::Id>{}(curve);
+    auto mix = [&](double v) { key = key * 1000003u ^ std::hash<long long>{}(std::llround(v * 1e6)); };
+    for (core::Id p : s.definingPoints(curve)) {
+        mix(s.point(p).x);
+        mix(s.point(p).y);
+    }
+    if (s.entity(curve).kind() == core::EntityKind::Circle) {
+        mix(s.circle(curve).radius);
+    }
+    return key;
+}
+}  // namespace
+
+std::vector<std::vector<core::Point>> make(const core::Text& t, const core::Sketch* sketch)
 {
     if (t.text.empty()) {
         return {};
@@ -717,11 +881,9 @@ std::vector<std::vector<core::Point>> make(const core::Text& t)
     font.setBold(t.bold);
     font.setItalic(t.italic);
     font.setKerning(true);
-
-    QPainterPath path;
-    path.setFillRule(Qt::WindingFill);
-    path.addText(0, 0, font, QString::fromStdString(t.text));  // baseline at y = 0, y down
-    path.setFillRule(Qt::WindingFill);
+    if (t.spacing != 0.0) {
+        font.setLetterSpacing(QFont::AbsoluteSpacing, t.spacing / 100.0 * kPixelSize);
+    }
 
     double capHeight = QFontMetricsF(font).capHeight();
     if (!(capHeight > 0)) {
@@ -729,6 +891,8 @@ std::vector<std::vector<core::Point>> make(const core::Text& t)
     }
     const double mmPerPixel = t.height / capHeight;
 
+    QPainterPath path = t.path != core::kNoId && sketch ? layoutAlongPath(t, *sketch, font, capHeight, mmPerPixel)
+                                                        : layoutLines(t, font, capHeight);
     switch (t.outline) {
         case core::TextOutline::AsDesigned: break;
         case core::TextOutline::Merged: path = path.simplified(); break;
@@ -757,11 +921,28 @@ std::vector<std::vector<core::Point>> make(const core::Text& t)
     return out;
 }
 
-void update(core::Text& text)
+void update(core::Text& text, const core::Sketch* sketch)
 {
-    text.shape = make(text);
+    if (text.path != core::kNoId) {
+        text.angle = 0.0;  // (the curve sets the letters' directions)
+    }
+    text.shape = make(text, sketch);
+    text.layoutKey = text.path != core::kNoId && sketch && sketch->hasEntity(text.path) ? curveKey(*sketch, text.path) : 0;
 }
 
+void refreshPathTexts(core::Sketch& sketch)
+{
+    std::vector<core::Text> changed;
+    for (const auto& [id, t] : sketch.texts()) {
+        if (t.path != core::kNoId && sketch.hasEntity(t.path) && curveKey(sketch, t.path) != t.layoutKey) {
+            changed.push_back(t);
+        }
+    }
+    for (core::Text& t : changed) {
+        update(t, &sketch);
+        sketch.setText(t);
+    }
+}
 QStringList families(const QString& search)
 {
     QStringList out;
