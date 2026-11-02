@@ -40,7 +40,7 @@ TEST_CASE("A rectangle encloses its inside", "[regions]")
 {
     Sketch s;
     const auto r = rect(s, 0, 0, 20, 10);
-    const Arrangement a(s);
+    const Arrangement a(s, s.activeLayer());
     const auto inside = a.regionAt({5, 5});
     REQUIRE(inside);
     CHECK(inside->area == Approx(200.0));
@@ -55,7 +55,7 @@ TEST_CASE("Islands are holes; clicking in one fills the island", "[regions]")
     Sketch s;
     rect(s, 0, 0, 40, 40);
     const Id c = s.addCircle(20, 20, 5);
-    const Arrangement a(s);
+    const Arrangement a(s, s.activeLayer());
     const auto ring = a.regionAt({5, 5});
     REQUIRE(ring);
     REQUIRE(ring->holes.size() == 1);
@@ -72,7 +72,7 @@ TEST_CASE("Crossing curves cut areas", "[regions]")
     Sketch s;
     rect(s, 0, 0, 20, 20);
     rect(s, 10, 10, 30, 30);
-    const Arrangement a(s);
+    const Arrangement a(s, s.activeLayer());
     const auto overlap = a.regionAt({15, 15});
     REQUIRE(overlap);
     CHECK(overlap->area == Approx(100.0));
@@ -89,7 +89,7 @@ TEST_CASE("A line across splits an area; a stub doesn't", "[regions]")
     SECTION("across")
     {
         s.addLine(10, -5, 10, 15);
-        const Arrangement a(s);
+        const Arrangement a(s, s.activeLayer());
         REQUIRE(a.regionAt({5, 5}));
         CHECK(a.regionAt({5, 5})->area == Approx(100.0));
         CHECK(a.looseEnds().size() == 2);  // the bits sticking out
@@ -97,7 +97,7 @@ TEST_CASE("A line across splits an area; a stub doesn't", "[regions]")
     SECTION("stub inside")
     {
         const Id stub = s.addLine(10, 5, 10, 10.0);  // from inside to the top side
-        const Arrangement a(s);
+        const Arrangement a(s, s.activeLayer());
         const auto inside = a.regionAt({5, 5});
         REQUIRE(inside);
         CHECK(inside->area == Approx(200.0));
@@ -112,7 +112,7 @@ TEST_CASE("Open outlines enclose nothing and show their loose ends", "[regions]"
     Sketch s;
     const auto r = rect(s, 0, 0, 20, 10);
     s.remove(r.sides[3]);  // no left side
-    const Arrangement a(s);
+    const Arrangement a(s, s.activeLayer());
     CHECK_FALSE(a.regionAt({5, 5}));
     CHECK(a.looseEnds().size() == 2);
 }
@@ -127,7 +127,7 @@ TEST_CASE("Lines ending where they touch a circle close an area (a drop shape)",
     for (double side : {-1.0, 1.0}) {
         s.addLine(0, d, side * r * std::sin(angle), r * std::cos(angle));
     }
-    const Arrangement a(s);
+    const Arrangement a(s, s.activeLayer());
     CHECK(a.looseEnds().empty());
     const auto tip = a.regionAt({0, 7});
     REQUIRE(tip);
@@ -140,7 +140,7 @@ TEST_CASE("Arcs bound areas too", "[regions]")
     Sketch s;
     const Id arc = s.addArc(0, 0, 10, 0, 180);
     s.addLine(s.arc(arc).end, s.arc(arc).start);  // close the half disc
-    const Arrangement a(s);
+    const Arrangement a(s, s.activeLayer());
     const auto half = a.regionAt({0, 3});
     REQUIRE(half);
     CHECK(half->area == Approx(std::numbers::pi * 50).epsilon(0.01));
@@ -153,8 +153,8 @@ TEST_CASE("Construction geometry doesn't bound areas", "[regions]")
     const auto r = rect(s, 0, 0, 20, 10);
     const Id split = s.addLine(10, 0, 10, 10);
     s.entity(split).construction = true;
-    REQUIRE(Arrangement(s).regionAt({5, 5}));
-    CHECK(Arrangement(s).regionAt({5, 5})->area == Approx(200.0));
+    REQUIRE(Arrangement(s, s.activeLayer()).regionAt({5, 5}));
+    CHECK(Arrangement(s, s.activeLayer()).regionAt({5, 5})->area == Approx(200.0));
     (void)r;
 }
 
@@ -171,24 +171,24 @@ TEST_CASE("Fills follow their outline, and come back when it's mended", "[region
 
     // Moved away from its seed: found by its outline, and the seed moves inside.
     xform::apply(s, sides(r), Affine::translation(100, 0));
-    REQUIRE(regions::resolve(Arrangement(s), s.fill(id)));
+    REQUIRE(regions::resolve(Arrangement(s, s.activeLayer()), s.fill(id)));
     regions::refreshFills(s);
     CHECK(s.fill(id).seed.x > 100);
 
     // A side broken in two: the outline is different curves now, found by the seed.
     s.addLine(110, -5, 110, 2);  // crosses the bottom side
     modify::breakCurve(s, r.sides[0], {105, 0});
-    REQUIRE(regions::resolve(Arrangement(s), s.fill(id)));
+    REQUIRE(regions::resolve(Arrangement(s, s.activeLayer()), s.fill(id)));
     regions::refreshFills(s);
     CHECK(s.fill(id).boundary.size() == 5);
 
     // A side gone: lost, but kept; back when the outline closes again.
     Sketch before = s;
     s.remove(r.sides[2]);
-    CHECK_FALSE(regions::resolve(Arrangement(s), s.fill(id)));
+    CHECK_FALSE(regions::resolve(Arrangement(s, s.activeLayer()), s.fill(id)));
     CHECK(s.hasFill(id));
     s = before;
-    CHECK(regions::resolve(Arrangement(s), s.fill(id)));
+    CHECK(regions::resolve(Arrangement(s, s.activeLayer()), s.fill(id)));
 }
 
 TEST_CASE("Fills are saved, and copied with their outline", "[regions][fill]")
@@ -210,7 +210,7 @@ TEST_CASE("Fills are saved, and copied with their outline", "[regions][fill]")
     REQUIRE(map.contains(id));
     const Fill& copy = s.fill(map.at(id));
     CHECK(copy.seed.y == Approx(55.0));
-    const auto region = regions::resolve(Arrangement(s), copy);
+    const auto region = regions::resolve(Arrangement(s, s.activeLayer()), copy);
     REQUIRE(region);
     CHECK(region->contains({5, 55}));
 

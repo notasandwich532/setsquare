@@ -72,6 +72,19 @@ struct Sublayer
     Id id = kNoId;  // its own id space (not the items')
     std::string name;
     bool visible = true;
+    Id layer = 1;  // the layer it's part of
+};
+
+// A sketch of its own, drawn over the layers below it (the first in the list is the top). Its
+// geometry is solved, constrained and coloured apart from the other layers': nothing in it may
+// refer to another layer's geometry, except through projections (Project), linked copies that
+// follow the original but are fixed here. Its sublayers are edited one at a time.
+struct Layer
+{
+    Id id = kNoId;  // its own id space
+    std::string name;
+    bool visible = true;
+    Id activeSublayer = kNoId;  // the sublayer last edited in it
 };
 
 struct Entity
@@ -81,6 +94,9 @@ struct Entity
     bool construction = false;  // reference geometry, not part of the drawing
     bool fixed = false;         // locked in place (Fusion's "Fix")
     Id sublayer = kNoId;        // which sublayer it's in (none: the origin and axes)
+    // A projection: a linked copy of this entity from another layer, kept where the original is
+    // (and fixed). If the original is deleted, the copy stays put, unlinked.
+    Id projectedFrom = kNoId;
 
     EntityKind kind() const { return static_cast<EntityKind>(geom.index()); }
 };
@@ -165,6 +181,7 @@ struct Fill
     Id id = kNoId;
     Color color;
     Point seed;                // a point inside the area
+    Id layer = kNoId;          // the layer whose geometry outlines it
     std::vector<Id> boundary;  // the curves around it when it was last found (sorted)
 };
 
@@ -340,6 +357,46 @@ public:
     // Loading: replaces the list (and the active one).
     void setSublayers(std::vector<Sublayer> sublayers, Id active);
 
+    // --- layers ---
+    // Always at least one, each with at least one sublayer. The first is drawn on top. The active
+    // layer is the active sublayer's; new sublayers go into it.
+    const std::vector<Layer>& layers() const { return m_layers; }
+    bool hasLayer(Id id) const;
+    const Layer& layer(Id id) const;
+    Id activeLayer() const;
+    void setActiveLayer(Id id);  // (its last active sublayer becomes the active one)
+    // A new layer (on top), with one sublayer; returns its id. Not made active.
+    Id addLayer(const std::string& name, const std::string& sublayerName);
+    void renameLayer(Id id, const std::string& name);
+    void setLayerVisible(Id id, bool visible);
+    void moveLayer(Id id, size_t index);
+    // Deletes a layer, its sublayers and everything in them, and its fills (not the last layer).
+    // Projections of its geometry in other layers stay, unlinked.
+    void removeLayer(Id id);
+    std::vector<Id> sublayersOf(Id layer) const;  // in order
+    // The layer an item is in (entity, constraint, text: through its sublayer; fill: its own);
+    // kNoId for the origin and axes (which belong to every layer) and anything unknown.
+    Id layerOf(Id item) const;
+    Id layerOfSublayer(Id sublayer) const;
+    // Loading: replaces the list (sublayers must already name these layers).
+    void setLayers(std::vector<Layer> layers);
+
+    // --- projections ---
+    // Copies `source` (an entity in another layer, with the points it's built on) into the active
+    // layer, as fixed construction geometry linked to it; returns the copy. Already projected
+    // here: the existing copy. Refuses what would make layers depend on each other in a circle.
+    Id project(Id source);
+    bool isProjection(Id id) const;  // projected (linked or not)
+    bool isLinked(Id id) const;      // projected, and the original is still there
+    // Makes a projection ordinary geometry (no longer fixed or following the original), with the
+    // points it's built on.
+    void breakLink(Id id);
+    // Moves projections (in `layer`, or everywhere) to where their originals are now; returns
+    // whether anything moved.
+    bool syncProjections(Id layer = kNoId);
+    // Whether `layer` uses geometry of `other` (directly or through other layers).
+    bool dependsOn(Id layer, Id other) const;
+
     // --- origin and axes ---
     // A fixed point at (0, 0) plus fixed X and Y axis lines through it, which geometry can snap
     // to and be constrained/dimensioned against (e.g. an angle to the X axis). Created on
@@ -412,8 +469,12 @@ private:
     std::map<Id, StrokeStyle> m_strokes;
     std::map<Id, Fill> m_fills;
     std::map<Id, Text> m_texts;
-    std::vector<Sublayer> m_sublayers{{1, "Sublayer 1", true}};
+    // Throws unless every one of these items is in `layer` (or is the origin/axes).
+    void requireLayer(const std::vector<Id>& items, Id layer) const;
+
+    std::vector<Sublayer> m_sublayers{{1, "Sublayer 1", true, 1}};
     Id m_activeSublayer = 1;
+    std::vector<Layer> m_layers{{1, "Layer 1", true, 1}};
     Id m_nextId = 1;
     Id m_origin = kNoId;
     std::array<Id, 2> m_axes{kNoId, kNoId};

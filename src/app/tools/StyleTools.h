@@ -59,6 +59,7 @@ private:
 
     std::unique_ptr<core::regions::Arrangement> m_arrangement;
     quint64 m_builtFor = ~quint64(0);  // document revision the arrangement is of
+    core::Id m_builtLayer = core::kNoId;  // and the layer
     std::optional<core::regions::Region> m_hover;
     std::vector<core::Vec2> m_looseEnds;  // shown after a click that found no area
 };

@@ -116,6 +116,11 @@ struct SublayerH
 {
     Id id = kNoId;
 };
+// A layer, likewise.
+struct LayerH
+{
+    Id id = kNoId;
+};
 
 const core::Entity& entity(Id id)
 {
@@ -271,13 +276,40 @@ Id sublayerArg(py::handle h)
         }
         return id;
     }
+    // A name: the active layer's sublayer called that, else another layer's; "Layer/Sublayer"
+    // to say which layer.
     const std::string name = h.cast<std::string>();
-    for (const core::Sublayer& l : sketch().sublayers()) {
-        if (l.name == name) {
+    const core::Sketch& s = sketch();
+    for (const core::Sublayer& l : s.sublayers()) {
+        if (l.layer == s.activeLayer() && l.name == name) {
+            return l.id;
+        }
+    }
+    for (const core::Sublayer& l : s.sublayers()) {
+        if (l.name == name || s.layer(l.layer).name + "/" + l.name == name) {
             return l.id;
         }
     }
     throw py::value_error("no sublayer called '" + name + "'");
+}
+
+// A layer argument: a Layer handle, or a name.
+Id layerArg(py::handle h)
+{
+    if (py::isinstance<LayerH>(h)) {
+        const Id id = h.cast<LayerH&>().id;
+        if (!sketch().hasLayer(id)) {
+            throw py::value_error("that layer no longer exists");
+        }
+        return id;
+    }
+    const std::string name = h.cast<std::string>();
+    for (const core::Layer& l : sketch().layers()) {
+        if (l.name == name) {
+            return l.id;
+        }
+    }
+    throw py::value_error("no layer called '" + name + "'");
 }
 
 template<typename F>
@@ -475,6 +507,20 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
             const Id l = sketch().sublayerOf(i.id);
             return l != kNoId ? py::cast(SublayerH{l}) : py::none();
         }, "The sublayer it's in (None for the origin, axes and fills).")
+        .def_property_readonly("layer", [](const Item& i) -> py::object {
+            const Id l = sketch().layerOf(i.id);
+            return l != kNoId ? py::cast(LayerH{l}) : py::none();
+        }, "The layer it's in (None for the origin and axes, which are in every layer).")
+        .def_property_readonly("projected", [](const Item& i) { return sketch().isProjection(i.id); },
+                               "Whether it's a projection of geometry from another layer.")
+        .def_property_readonly("linked", [](const Item& i) { return sketch().isLinked(i.id); },
+                               "A projection whose original is still there (and which it follows).")
+        .def_property_readonly("source", [](const Item& i) -> py::object {
+            if (!sketch().isLinked(i.id)) {
+                return py::none();
+            }
+            return wrapAll({sketch().entity(i.id).projectedFrom})[0];
+        }, "A projection's original (None if it isn't one, or the original is gone).")
         .def("__eq__", [](const Item& a, py::handle b) { return py::isinstance<Item>(b) && a.id == b.cast<Item&>().id; })
         .def("__hash__", [](const Item& i) { return py::hash(py::int_(i.id)); });
 
@@ -525,6 +571,54 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
             }
             const core::Sublayer& s = sketch().sublayer(l.id);
             return "<Sublayer \"" + s.name + "\"" + (sketch().activeSublayer() == l.id ? " active" : "")
+                + (s.visible ? "" : " hidden") + ">";
+        })
+        .def_property_readonly("layer", [](const SublayerH& l) { return LayerH{sketch().sublayer(l.id).layer}; });
+
+    py::class_<LayerH>(m, "Layer",
+                       "A sketch of its own, drawn over the layers after it in Sketch.layers (the first is on top). "
+                       "Its geometry can't refer to other layers' except through projections (Sketch.project). "
+                       "Set name/visible to change.")
+        .def_property(
+            "name", [](const LayerH& l) { return sketch().layer(l.id).name; },
+            [](const LayerH& l, const std::string& name) {
+                const Id id = layerArg(py::cast(l));
+                editReturningId("Rename layer", [&](Editor& ed) {
+                    ed.renameLayer(id, QString::fromStdString(name));
+                    return id;
+                });
+            })
+        .def_property(
+            "visible", [](const LayerH& l) { return sketch().layer(l.id).visible; },
+            [](const LayerH& l, bool visible) {
+                Call call;
+                call.target().setLayerVisible(layerArg(py::cast(l)), visible);
+            })
+        .def_property_readonly("active", [](const LayerH& l) { return sketch().activeLayer() == l.id; })
+        .def_property_readonly("sublayers", [](const LayerH& l) {
+            py::list out;
+            for (Id id : sketch().sublayersOf(l.id)) {
+                out.append(SublayerH{id});
+            }
+            return out;
+        })
+        .def_property_readonly("fills", [](const LayerH& l) {
+            std::vector<Id> ids;
+            for (const auto& [id, f] : sketch().fills()) {
+                if (f.layer == l.id) {
+                    ids.push_back(id);
+                }
+            }
+            return wrapAll(ids);
+        })
+        .def("__eq__", [](const LayerH& a, py::handle b) { return py::isinstance<LayerH>(b) && a.id == b.cast<LayerH&>().id; })
+        .def("__hash__", [](const LayerH& l) { return py::hash(py::int_(l.id)); })
+        .def("__repr__", [](const LayerH& l) {
+            if (!sketch().hasLayer(l.id)) {
+                return std::string("<Layer (deleted)>");
+            }
+            const core::Layer& s = sketch().layer(l.id);
+            return "<Layer \"" + s.name + "\"" + (sketch().activeLayer() == l.id ? " active" : "")
                 + (s.visible ? "" : " hidden") + ">";
         });
 
@@ -732,17 +826,14 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
             return py::make_tuple(fill.seed.x, fill.seed.y);
         }, "A point inside the area.")
         .def_property_readonly("boundary", [fillOf](const FillH& f) {
-            const core::regions::Arrangement arrangement(sketch());
-            const auto region = core::regions::resolve(arrangement, fillOf(f.id));
+            const auto region = core::regions::resolve(core::regions::Arrangements(sketch()), fillOf(f.id));
             return wrapAll(region ? region->boundary : std::vector<Id>{});
         }, "The curves around the area now (empty if its outline is open).")
         .def_property_readonly("broken", [fillOf](const FillH& f) {
-            const core::regions::Arrangement arrangement(sketch());
-            return !core::regions::resolve(arrangement, fillOf(f.id)).has_value();
+            return !core::regions::resolve(core::regions::Arrangements(sketch()), fillOf(f.id)).has_value();
         }, "True while its outline is open (it shows again once the outline is closed).")
         .def_property_readonly("area", [fillOf](const FillH& f) {
-            const core::regions::Arrangement arrangement(sketch());
-            const auto region = core::regions::resolve(arrangement, fillOf(f.id));
+            const auto region = core::regions::resolve(core::regions::Arrangements(sketch()), fillOf(f.id));
             if (!region) {
                 return 0.0;
             }
@@ -1336,11 +1427,70 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
         })
         .def_property_readonly("sublayers", [](const SketchH&) {
             py::list out;
-            for (const core::Sublayer& l : sketch().sublayers()) {
-                out.append(SublayerH{l.id});
+            for (Id id : sketch().sublayersOf(sketch().activeLayer())) {
+                out.append(SublayerH{id});
             }
             return out;
-        }, "Its sublayers, in order.")
+        }, "The active layer's sublayers, in order (other layers': Layer.sublayers).")
+        .def_property_readonly("layers", [](const SketchH&) {
+            py::list out;
+            for (const core::Layer& l : sketch().layers()) {
+                out.append(LayerH{l.id});
+            }
+            return out;
+        }, "Its layers, top first.")
+        .def_property(
+            "layer", [](const SketchH&) { return LayerH{sketch().activeLayer()}; },
+            [](const SketchH&, py::handle which) {
+                const Id id = layerArg(which);
+                Call call;
+                call.target().setActiveLayer(id);
+            },
+            "The active layer (its active sublayer is where new things go); set it to a Layer or a name.")
+        .def("add_layer", [](const SketchH&, const std::string& name) {
+            const Id id = editReturningId("New layer", [&](Editor& ed) { return ed.addLayer(QString::fromStdString(name)); });
+            return LayerH{id};
+        }, py::arg("name") = "Layer", "A new layer on top, with one sublayer (made the active one).")
+        .def("rename_layer", [](const SketchH&, py::handle which, const std::string& name) {
+            const Id id = layerArg(which);
+            editReturningId("Rename layer", [&](Editor& ed) {
+                ed.renameLayer(id, QString::fromStdString(name));
+                return id;
+            });
+        }, py::arg("layer"), py::arg("name"))
+        .def("delete_layer", [](const SketchH&, py::handle which) {
+            const Id id = layerArg(which);
+            editReturningId("Delete layer", [&](Editor& ed) {
+                ed.removeLayer(id);
+                return id;
+            });
+        }, py::arg("layer"), "Delete a layer and everything in it (not the last one). Projections of its "
+                             "geometry elsewhere stay, unlinked.")
+        .def("move_layer", [](const SketchH&, py::handle which, int index) {
+            const Id id = layerArg(which);
+            editReturningId("Move layer", [&](Editor& ed) {
+                ed.moveLayer(id, index);
+                return id;
+            });
+        }, py::arg("layer"), py::arg("index"), "To that place in the order (0 = top).")
+        .def("show_layer", [](const SketchH&, py::handle which, bool visible) {
+            const Id id = layerArg(which);
+            Call call;
+            call.target().setLayerVisible(id, visible);
+        }, py::arg("layer"), py::arg("visible") = true)
+        .def("project", [](const SketchH&, py::handle items) {
+            const std::vector<Id> ids = itemsOf(items);
+            return editCurves("Project", [&](Editor& ed) { return ed.project(ids); });
+        }, py::arg("items"),
+           "Copy geometry from other layers into the active one, linked: the copies stay where the originals are "
+           "(fixed, and construction until made solid). Returns the copies, in order.")
+        .def("break_link", [](const SketchH&, py::handle items) {
+            const std::vector<Id> ids = itemsOf(items);
+            editReturningId("Break link", [&](Editor& ed) {
+                ed.breakLink(ids);
+                return kNoId;
+            });
+        }, py::arg("items"), "Make projections ordinary geometry (no longer following their originals).")
         .def_property(
             "sublayer", [](const SketchH&) { return SublayerH{sketch().activeSublayer()}; },
             [](const SketchH&, py::handle which) {
@@ -1397,7 +1547,7 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
         }, "Fills, bottom to top.")
         .def("loose_ends", [](const SketchH&) {
             py::list out;
-            for (const core::Vec2& p : core::regions::Arrangement(sketch()).looseEnds()) {
+            for (const core::Vec2& p : core::regions::Arrangement(sketch(), sketch().activeLayer()).looseEnds()) {
                 out.append(py::make_tuple(p.x, p.y));
             }
             return out;

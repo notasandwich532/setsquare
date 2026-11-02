@@ -172,6 +172,7 @@ const std::pair<ToolKind, const char*> kToolNames[] = {
     {ToolKind::Concentric, "concentric"},
     {ToolKind::Symmetric, "symmetric"},
     {ToolKind::Fix, "fix"},
+    {ToolKind::Project, "project"},
 };
 
 QString macrosFolder()
@@ -698,6 +699,7 @@ void MainWindow::createActions()
     addTools(toolbar, {
                           {ToolKind::Point, tr("Point"), QKeySequence(Qt::Key_P)},
                           {ToolKind::Text, tr("Text"), {}},
+                          {ToolKind::Project, tr("Project"), {}},
                       });
     // Modify tools on a row of their own: one row is too narrow for everything.
     addToolBarBreak();
@@ -804,6 +806,21 @@ void MainWindow::createActions()
                 }
             }
         });
+    });
+    auto* breakLink = sketchMenu->addAction(tr("&Break Link"));
+    breakLink->setToolTip(tr("Make the selected projections ordinary geometry (no longer following their originals)"));
+    connect(breakLink, &QAction::triggered, this, [this] {
+        std::vector<core::Id> projections;
+        for (core::Id id : m_view->selection()) {
+            if (m_doc->sketch().isProjection(id)) {
+                projections.push_back(id);
+            }
+        }
+        if (projections.empty()) {
+            m_view->message(tr("Select projected geometry (from Project) first"));
+            return;
+        }
+        m_view->tryEdit(tr("Break link"), [&](Editor& ed) { ed.breakLink(projections); });
     });
     m_toolActions[ToolKind::Select]->setChecked(true);
     // The active tool (and other modes that are on, like presentation view) shows green.

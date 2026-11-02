@@ -43,6 +43,29 @@ std::string rgb(const Color& c)
     return buf;
 }
 
+// Whether an item's layer is shown (hidden layers aren't exported; hidden sublayers are only
+// hidden while sketching).
+bool layerShown(const Sketch& s, Id id)
+{
+    const Id layer = s.layerOf(id);
+    return layer == kNoId || !s.hasLayer(layer) || s.layer(layer).visible;
+}
+
+std::string xmlEscape(const std::string& text)
+{
+    std::string out;
+    for (char c : text) {
+        switch (c) {
+            case '&': out += "&amp;"; break;
+            case '<': out += "&lt;"; break;
+            case '>': out += "&gt;"; break;
+            case '"': out += "&quot;"; break;
+            default: out += c;
+        }
+    }
+    return out;
+}
+
 struct Item
 {
     Id curve = kNoId;
@@ -65,62 +88,84 @@ std::vector<double> dashPattern(Dash dash)
 
 std::string toSvg(const Sketch& s, const SvgOptions& o)
 {
-    // What goes in, by layer.
-    std::vector<Item> strokes, plain, construction;
-    const StrokeStyle constructionStyle{{0x9a, 0xa0, 0xa6, 255}, 0.18, Dash::Dashed};
-    for (const auto& [id, e] : s.entities()) {
-        if (e.kind() == EntityKind::Point || s.isReference(id)) {
-            continue;
-        }
-        if (e.construction) {
-            if (o.construction) {
-                construction.push_back({id, constructionStyle});
-            }
-        }
-        else if (const StrokeStyle* style = s.stroke(id)) {
-            strokes.push_back({id, *style});
-        }
-        else if (o.undecorated) {
-            plain.push_back({id, o.plain});
-        }
-    }
+    // What goes in: per layer (bottom first; hidden ones left out), by kind.
     struct Area
     {
         Color color;
         regions::Region region;
     };
-    std::vector<Area> fills;
-    if (o.fills && !s.fills().empty()) {
-        const regions::Arrangement arrangement(s, kPi / 720);  // quarter-degree steps on arcs
-        for (const auto& [id, f] : s.fills()) {
-            if (auto region = regions::resolve(arrangement, f)) {
-                fills.push_back({f.color, std::move(*region)});
-            }
-        }
-    }
-    // Texts: their letters in world coordinates, filled.
     struct TextArea
     {
         Color color;
         std::vector<std::vector<Vec2>> contours;
     };
-    std::vector<TextArea> texts;
-    for (const auto& [id, t] : s.texts()) {
-        if (t.shape.empty() || !s.hasEntity(t.anchor)) {
+    struct Group
+    {
+        const Layer* layer = nullptr;
+        std::vector<Item> strokes, plain, construction;
+        std::vector<Area> fills;
+        std::vector<TextArea> texts;
+        bool empty() const
+        {
+            return strokes.empty() && plain.empty() && construction.empty() && fills.empty() && texts.empty();
+        }
+    };
+    const StrokeStyle constructionStyle{{0x9a, 0xa0, 0xa6, 255}, 0.18, Dash::Dashed};
+    const regions::Arrangements arrangements(s, kPi / 720);  // quarter-degree steps on arcs
+    std::vector<Group> groups;
+    for (auto it = s.layers().rbegin(); it != s.layers().rend(); ++it) {
+        if (!it->visible) {
             continue;
         }
-        TextArea area{t.hasColor ? t.color : o.plain.color, {}};
-        for (const auto& contour : t.shape) {
-            std::vector<Vec2> pts;
-            for (const Point& p : contour) {
-                const Point w = textToWorld(s.point(t.anchor), t.angle, p);
-                pts.push_back({w.x, w.y});
+        Group g;
+        g.layer = &*it;
+        for (const auto& [id, e] : s.entities()) {
+            if (e.kind() == EntityKind::Point || s.isReference(id) || s.layerOf(id) != it->id) {
+                continue;
             }
-            area.contours.push_back(std::move(pts));
+            if (e.construction) {
+                if (o.construction) {
+                    g.construction.push_back({id, constructionStyle});
+                }
+            }
+            else if (const StrokeStyle* style = s.stroke(id)) {
+                g.strokes.push_back({id, *style});
+            }
+            else if (o.undecorated) {
+                g.plain.push_back({id, o.plain});
+            }
         }
-        texts.push_back(std::move(area));
+        if (o.fills) {
+            for (const auto& [id, f] : s.fills()) {
+                if (f.layer != it->id) {
+                    continue;
+                }
+                if (auto region = regions::resolve(arrangements, f)) {
+                    g.fills.push_back({f.color, std::move(*region)});
+                }
+            }
+        }
+        // Texts: their letters in world coordinates, filled.
+        for (const auto& [id, t] : s.texts()) {
+            if (t.shape.empty() || !s.hasEntity(t.anchor) || s.layerOf(id) != it->id) {
+                continue;
+            }
+            TextArea area{t.hasColor ? t.color : o.plain.color, {}};
+            for (const auto& contour : t.shape) {
+                std::vector<Vec2> pts;
+                for (const Point& p : contour) {
+                    const Point w = textToWorld(s.point(t.anchor), t.angle, p);
+                    pts.push_back({w.x, w.y});
+                }
+                area.contours.push_back(std::move(pts));
+            }
+            g.texts.push_back(std::move(area));
+        }
+        if (!g.empty()) {
+            groups.push_back(std::move(g));
+        }
     }
-    if (strokes.empty() && plain.empty() && construction.empty() && fills.empty() && texts.empty()) {
+    if (groups.empty()) {
         throw SketchError("there's nothing to export");
     }
 
@@ -132,23 +177,25 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
         x1 = std::max(x1, p.x + pad);
         y1 = std::max(y1, p.y + pad);
     };
-    for (const auto* list : {&strokes, &plain, &construction}) {
-        for (const Item& item : *list) {
-            const double pad = std::max(item.style.width, kHairline) / 2;
-            for (const Vec2& p : sample(s, item.curve, 256)) {
-                include(p, pad);
+    for (const Group& g : groups) {
+        for (const auto* list : {&g.strokes, &g.plain, &g.construction}) {
+            for (const Item& item : *list) {
+                const double pad = std::max(item.style.width, kHairline) / 2;
+                for (const Vec2& p : sample(s, item.curve, 256)) {
+                    include(p, pad);
+                }
             }
         }
-    }
-    for (const Area& a : fills) {
-        for (const Vec2& p : a.region.outer) {
-            include(p, 0.0);
-        }
-    }
-    for (const TextArea& t : texts) {
-        for (const auto& contour : t.contours) {
-            for (const Vec2& p : contour) {
+        for (const Area& a : g.fills) {
+            for (const Vec2& p : a.region.outer) {
                 include(p, 0.0);
+            }
+        }
+        for (const TextArea& t : g.texts) {
+            for (const auto& contour : t.contours) {
+                for (const Vec2& p : contour) {
+                    include(p, 0.0);
+                }
             }
         }
     }
@@ -175,56 +222,16 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
         << num(width) << ' ' << num(height) << "\">\n"
         << (o.canvas ? "  <!-- Drawing App icon -->\n" : "  <!-- Drawing App export: 1 unit = 1 mm -->\n");
 
-    auto layer = [&](const char* id, const char* label) {
-        out << "  <g id=\"" << id << "\" inkscape:groupmode=\"layer\" inkscape:label=\"" << label << "\">\n";
+    // With several layers, each is an Inkscape layer holding its parts as sublayers.
+    const bool layered = s.layers().size() > 1;
+    std::string indent = "  ";
+    std::string prefix;
+    auto layer = [&](const std::string& id, const std::string& label) {
+        out << indent << "<g id=\"" << prefix << id << "\" inkscape:groupmode=\"layer\" inkscape:label=\""
+            << xmlEscape(label) << "\">\n";
     };
+    auto close = [&] { out << indent << "</g>\n"; };
 
-    if (!fills.empty()) {
-        layer("fills", "Fills");
-        for (const Area& a : fills) {
-            std::string d;
-            auto loop = [&](const std::vector<Vec2>& pts) {
-                for (size_t i = 0; i < pts.size(); ++i) {
-                    d += (i == 0 ? "M" : "L") + X(pts[i].x) + ',' + Y(pts[i].y) + ' ';
-                }
-                d += "Z ";
-            };
-            loop(a.region.outer);
-            for (const auto& hole : a.region.holes) {
-                loop(hole);
-            }
-            d.pop_back();
-            out << "    <path d=\"" << d << "\" fill=\"" << rgb(a.color) << '"';
-            if (a.color.a != 255) {
-                out << " fill-opacity=\"" << num(a.color.a / 255.0) << '"';
-            }
-            out << " fill-rule=\"evenodd\" stroke=\"none\"/>\n";
-        }
-        out << "  </g>\n";
-    }
-
-    if (!texts.empty()) {
-        layer("text", "Text");
-        for (const TextArea& t : texts) {
-            std::string d;
-            for (const auto& contour : t.contours) {
-                for (size_t i = 0; i < contour.size(); ++i) {
-                    d += (i == 0 ? "M" : "L") + X(contour[i].x) + ',' + Y(contour[i].y) + ' ';
-                }
-                d += "Z ";
-            }
-            if (d.empty()) {
-                continue;
-            }
-            d.pop_back();
-            out << "    <path d=\"" << d << "\" fill=\"" << rgb(t.color) << '"';
-            if (t.color.a != 255) {
-                out << " fill-opacity=\"" << num(t.color.a / 255.0) << '"';
-            }
-            out << " fill-rule=\"nonzero\" stroke=\"none\"/>\n";
-        }
-        out << "  </g>\n";
-    }
     auto writeCurve = [&](const Item& item) {
         const StrokeStyle& st = item.style;
         const double w = st.width > 0.0 ? st.width : kHairline;
@@ -250,19 +257,19 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
         if (const auto* l = std::get_if<Line>(&e.geom)) {
             const Point& a = s.point(l->p1);
             const Point& b = s.point(l->p2);
-            out << "    <line x1=\"" << X(a.x) << "\" y1=\"" << Y(a.y) << "\" x2=\"" << X(b.x) << "\" y2=\""
+            out << indent << "  <line x1=\"" << X(a.x) << "\" y1=\"" << Y(a.y) << "\" x2=\"" << X(b.x) << "\" y2=\""
                 << Y(b.y) << '"' << style << "/>\n";
         }
         else if (const auto* c = std::get_if<Circle>(&e.geom)) {
             const Point& centre = s.point(c->center);
-            out << "    <circle cx=\"" << X(centre.x) << "\" cy=\"" << Y(centre.y) << "\" r=\"" << num(c->radius)
+            out << indent << "  <circle cx=\"" << X(centre.x) << "\" cy=\"" << Y(centre.y) << "\" r=\"" << num(c->radius)
                 << '"' << style << "/>\n";
         }
         else {
             // Counter-clockwise with y up is clockwise with y down: SVG's sweep-flag 0.
             const ArcShape a = arcShape(s, item.curve);
             const double end = a.startAngle + a.sweep;
-            out << "    <path d=\"M" << X(a.center.x + a.radius * std::cos(a.startAngle)) << ','
+            out << indent << "  <path d=\"M" << X(a.center.x + a.radius * std::cos(a.startAngle)) << ','
                 << Y(a.center.y + a.radius * std::sin(a.startAngle)) << " A" << num(a.radius) << ','
                 << num(a.radius) << " 0 " << (a.sweep > kPi ? 1 : 0) << ",0 "
                 << X(a.center.x + a.radius * std::cos(end)) << ',' << Y(a.center.y + a.radius * std::sin(end))
@@ -270,31 +277,87 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
         }
     };
 
-    if (!strokes.empty()) {
-        layer("strokes", "Strokes");
-        for (const Item& item : strokes) {
-            writeCurve(item);
+    for (const Group& g : groups) {
+        if (layered) {
+            out << "  <g id=\"layer" << g.layer->id << "\" inkscape:groupmode=\"layer\" inkscape:label=\""
+                << xmlEscape(g.layer->name) << "\">\n";
+            indent = "    ";
+            prefix = "layer" + std::to_string(g.layer->id) + "-";
         }
-        out << "  </g>\n";
-    }
-    if (!plain.empty()) {
-        layer("geometry", "Geometry");
-        for (const Item& item : plain) {
-            writeCurve(item);
+        if (!g.fills.empty()) {
+            layer("fills", "Fills");
+            for (const Area& a : g.fills) {
+                std::string d;
+                auto loop = [&](const std::vector<Vec2>& pts) {
+                    for (size_t i = 0; i < pts.size(); ++i) {
+                        d += (i == 0 ? "M" : "L") + X(pts[i].x) + ',' + Y(pts[i].y) + ' ';
+                    }
+                    d += "Z ";
+                };
+                loop(a.region.outer);
+                for (const auto& hole : a.region.holes) {
+                    loop(hole);
+                }
+                d.pop_back();
+                out << indent << "  <path d=\"" << d << "\" fill=\"" << rgb(a.color) << '"';
+                if (a.color.a != 255) {
+                    out << " fill-opacity=\"" << num(a.color.a / 255.0) << '"';
+                }
+                out << " fill-rule=\"evenodd\" stroke=\"none\"/>\n";
+            }
+            close();
         }
-        out << "  </g>\n";
-    }
-    if (!construction.empty()) {
-        layer("construction", "Construction");
-        for (const Item& item : construction) {
-            writeCurve(item);
+
+        if (!g.texts.empty()) {
+            layer("text", "Text");
+            for (const TextArea& t : g.texts) {
+                std::string d;
+                for (const auto& contour : t.contours) {
+                    for (size_t i = 0; i < contour.size(); ++i) {
+                        d += (i == 0 ? "M" : "L") + X(contour[i].x) + ',' + Y(contour[i].y) + ' ';
+                    }
+                    d += "Z ";
+                }
+                if (d.empty()) {
+                    continue;
+                }
+                d.pop_back();
+                out << indent << "  <path d=\"" << d << "\" fill=\"" << rgb(t.color) << '"';
+                if (t.color.a != 255) {
+                    out << " fill-opacity=\"" << num(t.color.a / 255.0) << '"';
+                }
+                out << " fill-rule=\"nonzero\" stroke=\"none\"/>\n";
+            }
+            close();
         }
-        out << "  </g>\n";
+        if (!g.strokes.empty()) {
+            layer("strokes", "Strokes");
+            for (const Item& item : g.strokes) {
+                writeCurve(item);
+            }
+            close();
+        }
+        if (!g.plain.empty()) {
+            layer("geometry", "Geometry");
+            for (const Item& item : g.plain) {
+                writeCurve(item);
+            }
+            close();
+        }
+        if (!g.construction.empty()) {
+            layer("construction", "Construction");
+            for (const Item& item : g.construction) {
+                writeCurve(item);
+            }
+            close();
+        }
+        if (layered) {
+            out << "  </g>\n";
+        }
     }
     out << "</svg>\n";
     return out.str();
 }
-
 // ---------------------------------------------------------------------------------------------
 // DXF
 // ---------------------------------------------------------------------------------------------
@@ -426,7 +489,7 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
     };
     std::vector<Item> items;
     for (const auto& [id, e] : s.entities()) {
-        if (e.kind() == EntityKind::Point || s.isReference(id)) {
+        if (e.kind() == EntityKind::Point || s.isReference(id) || !layerShown(s, id)) {
             continue;
         }
         if (e.construction) {
@@ -449,7 +512,7 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
     };
     std::vector<TextOutline> textOutlines;
     for (const auto& [id, t] : s.texts()) {
-        if (!s.hasEntity(t.anchor)) {
+        if (!s.hasEntity(t.anchor) || !layerShown(s, id)) {
             continue;
         }
         const int color = t.hasColor && o.styles ? nearestAci(t.color) : 256;

@@ -189,6 +189,13 @@ Id pick(const Sketch& sketch, Vec2 p, const PickOptions& options)
             || (options.sublayer != kNoId && e.sublayer != kNoId && e.sublayer != options.sublayer)) {
             continue;
         }
+        if (options.layer != kNoId || options.otherLayers != kNoId) {
+            const Id layer = sketch.layerOf(id);
+            if ((options.layer != kNoId && layer != kNoId && layer != options.layer)
+                || (options.otherLayers != kNoId && (layer == kNoId || layer == options.otherLayers))) {
+                continue;
+            }
+        }
         const bool isPoint = e.kind() == EntityKind::Point;
         if ((isPoint && !options.points) || (!isPoint && !options.curves)) {
             continue;

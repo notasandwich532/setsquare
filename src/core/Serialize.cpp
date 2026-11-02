@@ -47,6 +47,9 @@ json entityToJson(const Entity& e)
     if (e.sublayer != kNoId) {
         j["sublayer"] = e.sublayer;
     }
+    if (e.projectedFrom != kNoId) {
+        j["projected_from"] = e.projectedFrom;
+    }
     return j;
 }
 
@@ -73,6 +76,7 @@ Entity entityFromJson(const json& j)
     e.construction = j.value("construction", false);
     e.fixed = j.value("fixed", false);
     e.sublayer = j.value("sublayer", Id{kNoId});
+    e.projectedFrom = j.value("projected_from", Id{kNoId});
     return e;
 }
 
@@ -152,8 +156,11 @@ std::string toJson(const Sketch& sketch, bool compact, const std::vector<std::st
     if (!sketch.fills().empty()) {
         json fills = json::array();
         for (const auto& [id, f] : sketch.fills()) {
-            fills.push_back(
-                {{"id", id}, {"color", f.color.hex()}, {"seed", {f.seed.x, f.seed.y}}, {"boundary", f.boundary}});
+            fills.push_back({{"id", id},
+                             {"color", f.color.hex()},
+                             {"seed", {f.seed.x, f.seed.y}},
+                             {"boundary", f.boundary},
+                             {"layer", f.layer}});
         }
         doc["fills"] = std::move(fills);
     }
@@ -213,13 +220,22 @@ std::string toJson(const Sketch& sketch, bool compact, const std::vector<std::st
     }
     json sublayers = json::array();
     for (const Sublayer& l : sketch.sublayers()) {
-        json j{{"id", l.id}, {"name", l.name}};
+        json j{{"id", l.id}, {"name", l.name}, {"layer", l.layer}};
         if (!l.visible) {
             j["visible"] = false;
         }
         sublayers.push_back(std::move(j));
     }
     doc["sublayers"] = std::move(sublayers);
+    json layers = json::array();
+    for (const Layer& l : sketch.layers()) {
+        json j{{"id", l.id}, {"name", l.name}, {"active_sublayer", l.activeSublayer}};
+        if (!l.visible) {
+            j["visible"] = false;
+        }
+        layers.push_back(std::move(j));
+    }
+    doc["layers"] = std::move(layers);
     doc["active_sublayer"] = sketch.activeSublayer();
     if (history && !history->empty()) {
         doc["history"] = *history;
@@ -244,9 +260,18 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
         if (doc.contains("sublayers")) {
             std::vector<Sublayer> sublayers;
             for (const json& j : doc.at("sublayers")) {
-                sublayers.push_back({j.at("id").get<Id>(), j.value("name", std::string()), j.value("visible", true)});
+                sublayers.push_back({j.at("id").get<Id>(), j.value("name", std::string()), j.value("visible", true),
+                                     j.value("layer", Id{1})});
             }
             sketch.setSublayers(std::move(sublayers), doc.value("active_sublayer", Id{kNoId}));
+        }
+        if (doc.contains("layers")) {
+            std::vector<Layer> layers;
+            for (const json& j : doc.at("layers")) {
+                layers.push_back({j.at("id").get<Id>(), j.value("name", std::string()), j.value("visible", true),
+                                  j.value("active_sublayer", Id{kNoId})});
+            }
+            sketch.setLayers(std::move(layers));
         }
         // Points first, so curves can refer to them regardless of order in the file.
         std::vector<Entity> curves;
@@ -295,6 +320,10 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
             const auto& seed = j.at("seed");
             f.seed = Point{seed.at(0).get<double>(), seed.at(1).get<double>()};
             f.boundary = j.value("boundary", std::vector<Id>{});
+            f.layer = j.value("layer", Id{kNoId});
+            if (!sketch.hasLayer(f.layer)) {
+                f.layer = sketch.layers().back().id;  // (from before layers: the only one)
+            }
             sketch.insertFill(f);
         }
         for (const json& j : doc.value("texts", json::array())) {

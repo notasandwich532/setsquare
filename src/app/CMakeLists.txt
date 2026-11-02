@@ -45,6 +45,8 @@ add_library(drawapp_lib STATIC
     tools/DrawTools.cpp
     tools/ModifyTools.cpp
     tools/ModifyTools.h
+    tools/ProjectTool.cpp
+    tools/ProjectTool.h
     tools/DrawTools.h
     tools/SelectTool.cpp
     tools/SelectTool.h

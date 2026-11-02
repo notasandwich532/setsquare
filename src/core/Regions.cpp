@@ -159,11 +159,11 @@ Vec2 Region::interiorPoint() const
 
 // ---------------------------------------------------------------------------------------------
 
-Arrangement::Arrangement(const Sketch& s, double arcStep)
+Arrangement::Arrangement(const Sketch& s, Id layer, double arcStep)
 {
     std::vector<Curve> curves;
     for (const auto& [id, e] : s.entities()) {
-        if (e.kind() == EntityKind::Point || e.construction || s.isReference(id)) {
+        if (e.kind() == EntityKind::Point || e.construction || s.isReference(id) || s.layerOf(id) != layer) {
             continue;
         }
         Curve c;
@@ -460,15 +460,29 @@ std::optional<Region> resolve(const Arrangement& arrangement, const Fill& fill)
     return arrangement.regionAt({fill.seed.x, fill.seed.y});
 }
 
+const Arrangement& Arrangements::of(Id layer) const
+{
+    auto it = m_byLayer.find(layer);
+    if (it == m_byLayer.end()) {
+        it = m_byLayer.emplace(layer, Arrangement(m_sketch, layer, m_arcStep)).first;
+    }
+    return it->second;
+}
+
+std::optional<Region> resolve(const Arrangements& arrangements, const Fill& fill)
+{
+    return resolve(arrangements.of(fill.layer), fill);
+}
+
 void refreshFills(Sketch& s)
 {
     if (s.fills().empty()) {
         return;
     }
-    const Arrangement arrangement(s);
+    const Arrangements arrangements(s);
     std::vector<Fill> updated;
     for (const auto& [id, fill] : s.fills()) {
-        const auto region = resolve(arrangement, fill);
+        const auto region = resolve(arrangements, fill);
         if (!region) {
             continue;  // lost: keep looking where it was
         }

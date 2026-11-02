@@ -236,6 +236,27 @@ s.move_to_sublayer([c, l2], "Walls")  # curves take their points; constraints wh
 s.delete_sublayer("Walls")            # and everything in it (not the last one)
 item.sublayer
 ```
+### Layers and projections
+Layers sit above sublayers: each is a sketch of its own, drawn over the layers after it in
+`s.layers` (the first is on top). Nothing in a layer may refer to another layer's geometry (lines,
+constraints and texts on it are refused), except through **projections**: linked copies made with
+`s.project`, which stay where their originals are (fixed), follow them when they change, and start
+as construction (make them solid to bound fills). If an original is deleted its copies stay put,
+unlinked. Fills are found per layer. The origin and axes are in every layer.
+```python
+s.layers                          # top first
+s.layer                           # the active one; s.layer = "Top" (or a handle) switches
+top = s.add_layer("Top")          # on top, with one sublayer; becomes active
+top.name = "Detail"  top.visible = False  top.active  top.sublayers  top.fills
+s.rename_layer("Detail", "Top")   s.show_layer("Top", False)   s.move_layer("Top", 1)
+s.delete_layer("Top")             # and everything in it (not the last one)
+copies = s.project([l13, c14])    # into the active layer; points they share are projected once
+k.projected  k.linked  k.source   # a copy, whether it still follows, its original
+s.break_link([copy])              # ordinary geometry again
+item.layer
+```
+`s.sublayers` is the active layer's. Sublayer names are unique within a layer; where two layers
+have one of the same name, `"Layer/Sublayer"` says which.
 ### Reading
 ```python
 s.origin, s[12], s.points, s.lines, s.circles, s.arcs, s.entities, s.constraints, s.dimensions
@@ -258,7 +279,7 @@ app.fit()  app.selection = [l, c]  app.tool = "line"  app.message("hi")   # need
 ```
 
 `app.tool` accepts the tool names, which follow the API names:
-- Geometry: select, line, point, rectangle, rectangle_3point, rectangle_center, circle, circle_2point, circle_3point, circle_tangent2, circle_tangent3, arc, arc3, arc_tangent
+- Geometry: select, line, point, project, rectangle, rectangle_3point, rectangle_center, circle, circle_2point, circle_3point, circle_tangent2, circle_tangent3, arc, arc3, arc_tangent
 - Polygons and slots: polygon_inscribed, polygon_circumscribed, polygon_edge, slot, slot_overall, slot_center_point, arc_slot, arc_slot_3point
 - Dimensions and constraints: dimension, coincident, horizontal_vertical, parallel, perpendicular, tangent, equal, midpoint, concentric, symmetric, collinear, fix
 

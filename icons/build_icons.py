@@ -822,6 +822,21 @@ def square(x, y, size, color, **style):
     return sides
 
 
+def icon_project():
+    """A grey shape in another layer, and the blue copy projected into this one, joined at two
+    corners by dashed projection lines."""
+    start()
+    back = square(11, 11, 10, GREY)
+    front = square(3, 3, 10, BLUE)
+
+    def corner(sides, x, y):
+        return next(p for l in sides for p in (l.p1, l.p2) if abs(p.x - x) < 1e-6 and abs(p.y - y) < 1e-6)
+
+    guide(corner(back, 11, 21), corner(front, 3, 13))
+    guide(corner(back, 21, 11), corner(front, 13, 3))
+    return finish("project")
+
+
 def icon_move():
     """A square moved up and right: where it was dashed, an arrow along the way."""
     start()
@@ -1030,7 +1045,7 @@ ICONS = {
 }
 ICONS.update({
     f.__name__.removeprefix("icon_"): f
-    for f in [icon_select, icon_text, icon_line, icon_point, icon_rectangle, icon_rectangle_3point, icon_rectangle_center, icon_circle,
+    for f in [icon_select, icon_text, icon_project, icon_line, icon_point, icon_rectangle, icon_rectangle_3point, icon_rectangle_center, icon_circle,
               icon_circle_2point, icon_circle_3point, icon_circle_tangent2, icon_circle_tangent3, icon_arc, icon_arc3,
               icon_arc_tangent, icon_polygon_inscribed, icon_polygon_circumscribed, icon_polygon_edge, icon_slot,
               icon_slot_overall, icon_slot_center_point, icon_arc_slot, icon_arc_slot_3point, icon_trim,

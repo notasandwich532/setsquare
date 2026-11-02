@@ -8,6 +8,7 @@
 #include "tools/ModifyTools.h"
 #include "tools/SelectTool.h"
 #include "tools/ShapeTools.h"
+#include "tools/ProjectTool.h"
 #include "tools/StyleTools.h"
 #include "tools/TextTool.h"
 #include "tools/TransformTools.h"
@@ -37,6 +38,9 @@ constexpr double kSnapPixels = 10.0;
 constexpr double kCurveWidth = 1.6;
 constexpr double kHighlightWidth = 2.6;
 constexpr double kOtherSublayerAlpha = 0.3;  // geometry in sublayers other than the active one
+constexpr double kOtherLayerAlpha = 0.2;     // sketch geometry of other layers (not referable)
+const QColor kProjected(0xb0, 0x8c, 0xff);   // projections from other layers (linked)
+const QColor kUnlinked(0x8c, 0x84, 0x9c);    // projections whose original is gone
 constexpr double kPointRadius = 2.6;
 constexpr double kRadToDeg = 180.0 / std::numbers::pi;
 const QColor kConstrainedPink(0xff, 0x2b, 0xd6);  // geometry of the selected constraints
@@ -185,6 +189,7 @@ void SketchView::setTool(ToolKind kind)
         case ToolKind::Paste: m_tool = std::make_unique<PasteTool>(*this, m_pasteFragment); break;
         case ToolKind::StrokeBrush: m_tool = std::make_unique<StrokeBrushTool>(*this); break;
         case ToolKind::Fill: m_tool = std::make_unique<FillTool>(*this); break;
+        case ToolKind::Project: m_tool = std::make_unique<ProjectTool>(*this); break;
         case ToolKind::Dimension: m_tool = std::make_unique<DimensionTool>(*this); break;
         default: m_tool = std::make_unique<ConstraintTool>(*this, kind); break;
     }
@@ -326,7 +331,8 @@ core::Id SketchView::textAt(QPointF screen, bool editable) const
     const core::Sketch& s = m_doc.sketch();
     core::Id found = core::kNoId;
     for (const auto& [id, t] : s.texts()) {  // the topmost (last) wins
-        if (!s.isShown(id) || (editable && t.sublayer != s.activeSublayer())) {
+        if (!s.isShown(id) || (editable && t.sublayer != s.activeSublayer())
+            || (!m_presentation && s.layerOf(id) != s.activeLayer())) {
             continue;
         }
         if (s.hasEntity(t.anchor) && textBox(t).containsPoint(screen, Qt::OddEvenFill)) {
@@ -400,6 +406,7 @@ core::PickOptions SketchView::editableOptions(double pixels) const
     core::PickOptions options;
     options.tolerance = pixels / m_zoom;
     options.sublayer = m_doc.sketch().activeSublayer();
+    options.layer = m_doc.sketch().activeLayer();
     return options;
 }
 
@@ -425,8 +432,11 @@ core::Id SketchView::pickAt(QPointF screen, bool annotations, bool editable) con
             }
         }
     }
-    if (editable && !m_presentation) {
-        options.sublayer = m_doc.sketch().activeSublayer();
+    if (!m_presentation) {
+        options.layer = m_doc.sketch().activeLayer();  // (other layers only through projections)
+        if (editable) {
+            options.sublayer = m_doc.sketch().activeSublayer();
+        }
     }
     const core::Id hit = core::pick(m_doc.sketch(), toWorld(screen), options);
     return hit != core::kNoId ? hit : textAt(screen, editable);  // geometry first, then text under it
@@ -440,6 +450,7 @@ Snap SketchView::snap(QPointF screen) const
     core::PickOptions options;
     options.tolerance = kSnapPixels / m_zoom;
     options.curves = false;
+    options.layer = sketch.activeLayer();  // (other layers only through projections)
     if (const core::Id id = core::pick(sketch, world, options); id != core::kNoId) {
         const core::Point& p = sketch.point(id);
         return Snap{{p.x, p.y}, id};
@@ -447,7 +458,8 @@ Snap SketchView::snap(QPointF screen) const
 
     // Line midpoints.
     for (const auto& [id, e] : sketch.entities()) {
-        if (const auto* l = std::get_if<core::Line>(&e.geom); l && !sketch.isAxis(id) && sketch.isShown(id)) {
+        if (const auto* l = std::get_if<core::Line>(&e.geom);
+            l && !sketch.isAxis(id) && sketch.isShown(id) && sketch.layerOf(id) == sketch.activeLayer()) {
             const core::Point& a = sketch.point(l->p1);
             const core::Point& b = sketch.point(l->p2);
             const core::Vec2 m{(a.x + b.x) / 2, (a.y + b.y) / 2};
@@ -492,9 +504,10 @@ void SketchView::setHovered(core::Id id)
 void SketchView::selectAll()
 {
     std::set<core::Id> all;
-    for (const auto& [id, e] : m_doc.sketch().entities()) {
-        if (!m_doc.sketch().isReference(id)) {
-            all.insert(id);
+    const core::Sketch& s = m_doc.sketch();
+    for (const auto& [id, e] : s.entities()) {
+        if (!s.isReference(id) && e.sublayer == s.activeSublayer() && s.isShown(id)) {
+            all.insert(id);  // (what can be changed: the active sublayer's)
         }
     }
     setSelection(std::move(all));
@@ -779,10 +792,14 @@ void SketchView::drawSketch(QPainter& painter) const
         constrained.insert(group.begin(), group.end());
     }
 
+    const core::Id activeLayer = sketch.activeLayer();
     auto styleFor = [&](const core::Entity& e) {
         QColor color = result.fullyConstrained.contains(e.id) ? colors.fullyConstrained : colors.underConstrained;
         if (e.construction) {
             color = colors.construction;
+        }
+        if (e.projectedFrom != core::kNoId) {
+            color = sketch.isLinked(e.id) ? kProjected : kUnlinked;
         }
         if (conflicted.contains(e.id)) {
             color = colors.conflict;
@@ -800,16 +817,25 @@ void SketchView::drawSketch(QPainter& painter) const
             color = colors.hover;
             width = kHighlightWidth;
         }
-        // Other sublayers: faded, as references (not while being pointed at or picked).
+        // Other sublayers: faded, as references (not while being pointed at or picked); other
+        // layers fainter still.
         if (!m_presentation && e.sublayer != core::kNoId && e.sublayer != sketch.activeSublayer()
             && width == kCurveWidth) {
-            color.setAlphaF(color.alphaF() * kOtherSublayerAlpha);
+            color.setAlphaF(color.alphaF()
+                            * (sketch.layerOfSublayer(e.sublayer) == activeLayer ? kOtherSublayerAlpha : kOtherLayerAlpha));
         }
         QPen pen(color, width, e.construction ? Qt::DashLine : Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
         return pen;
     };
-    // Hidden sublayers aren't drawn while sketching (presentation view shows the whole drawing).
-    auto hidden = [&](core::Id id) { return !m_presentation && !sketch.isShown(id); };
+    // Hidden sublayers aren't drawn while sketching (presentation view shows the whole drawing);
+    // hidden layers aren't drawn at all.
+    auto hidden = [&](core::Id id) {
+        const core::Id layer = sketch.layerOf(id);
+        if (layer != core::kNoId && sketch.hasLayer(layer) && !sketch.layer(layer).visible) {
+            return true;
+        }
+        return !m_presentation && !sketch.isShown(id);
+    };
 
     // The axes are drawn with the grid; here they only light up when hovered or selected.
     for (core::Id axis : {sketch.xAxis(), sketch.yAxis()}) {
@@ -850,11 +876,22 @@ void SketchView::drawSketch(QPainter& painter) const
         }
     };
 
-    // Fills, underneath everything: each found afresh from the geometry (see core/Regions.h).
-    if (!sketch.fills().empty()) {
-        const core::regions::Arrangement arrangement(sketch);
+    // Layer by layer, from the bottom: fills, strokes, texts, then the geometry.
+    const core::regions::Arrangements arrangements(sketch);
+    for (auto layerIt = sketch.layers().rbegin(); layerIt != sketch.layers().rend(); ++layerIt) {
+    const core::Id layer = layerIt->id;
+    if (!layerIt->visible) {
+        continue;
+    }
+    auto inLayer = [&](core::Id id) { return sketch.layerOf(id) == layer; };
+
+    // Fills, underneath the rest: each found afresh from the geometry (see core/Regions.h).
+    {
         for (const auto& [id, f] : sketch.fills()) {
-            const auto region = core::regions::resolve(arrangement, f);
+            if (f.layer != layer) {
+                continue;
+            }
+            const auto region = core::regions::resolve(arrangements, f);
             if (!region) {
                 continue;  // its outline is open: nothing to fill until it's closed again
             }
@@ -871,7 +908,7 @@ void SketchView::drawSketch(QPainter& painter) const
     painter.setBrush(Qt::NoBrush);
     std::set<core::Id> decorated;
     for (const auto& [id, style] : sketch.strokes()) {
-        if (!sketch.hasEntity(id) || sketch.entity(id).construction || hidden(id)) {
+        if (!sketch.hasEntity(id) || sketch.entity(id).construction || hidden(id) || !inLayer(id)) {
             continue;
         }
         QPen pen = strokePen(style);
@@ -888,7 +925,7 @@ void SketchView::drawSketch(QPainter& painter) const
     // Texts: filled faintly with an outline while sketching (in their anchor's colour, or their
     // own), solid in presentation view.
     for (const auto& [id, t] : sketch.texts()) {
-        if (!sketch.hasEntity(t.anchor) || hidden(id)) {
+        if (!sketch.hasEntity(t.anchor) || hidden(id) || !inLayer(id)) {
             continue;
         }
         const QPainterPath path = textPath(t);
@@ -905,7 +942,7 @@ void SketchView::drawSketch(QPainter& painter) const
             continue;
         }
         if (t.sublayer != sketch.activeSublayer() && !m_selection.contains(id) && id != m_hovered) {
-            color.setAlphaF(color.alphaF() * kOtherSublayerAlpha);
+            color.setAlphaF(color.alphaF() * (layer == activeLayer ? kOtherSublayerAlpha : kOtherLayerAlpha));
         }
         QColor faint = color;
         faint.setAlphaF(faint.alphaF() * 0.3);
@@ -915,9 +952,9 @@ void SketchView::drawSketch(QPainter& painter) const
         painter.strokePath(path, QPen(edge, hot ? kHighlightWidth : 1.0));
     }
 
-    // Curves first, points on top.
+    // Curves (points go on top of everything, below).
     for (const auto& [id, e] : sketch.entities()) {
-        if (sketch.isAxis(id) || e.kind() == core::EntityKind::Point || hidden(id)) {
+        if (sketch.isAxis(id) || e.kind() == core::EntityKind::Point || hidden(id) || !inLayer(id)) {
             continue;
         }
         if (m_presentation && e.construction) {
@@ -937,6 +974,7 @@ void SketchView::drawSketch(QPainter& painter) const
         painter.setPen(styleFor(e));
         drawCurve(id, e);
     }
+    }  // (layers)
 
     if (m_presentation) {
         return;  // no constraint symbols, dimensions or points: just the drawing
@@ -946,6 +984,9 @@ void SketchView::drawSketch(QPainter& painter) const
     for (const auto& [id, e] : sketch.entities()) {
         if (e.kind() != core::EntityKind::Point || sketch.isHiddenReference(id) || hidden(id)) {
             continue;
+        }
+        if (const core::Id layer = sketch.layerOf(id); layer != core::kNoId && layer != activeLayer) {
+            continue;  // other layers' points can't be used here
         }
         const core::Point& p = std::get<core::Point>(e.geom);
         QPen pen = styleFor(e);
@@ -960,7 +1001,7 @@ void SketchView::drawSketch(QPainter& painter) const
             painter.setPen(QPen(pen.color(), 1.5));
             painter.drawEllipse(toScreen({p.x, p.y}), 6.0, 6.0);
         }
-        else if (e.fixed) {
+        else if (e.fixed && e.projectedFrom == core::kNoId) {
             // Fixed points get a small square outline, a stand-in for Fusion's lock glyph.
             painter.setBrush(Qt::NoBrush);
             painter.setPen(QPen(pen.color(), 1.0));

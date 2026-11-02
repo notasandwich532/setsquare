@@ -3,6 +3,7 @@
 #include "Geometry.h"
 #include "Sketch.h"
 
+#include <map>
 #include <optional>
 #include <vector>
 
@@ -28,8 +29,10 @@ struct Region
 class Arrangement
 {
 public:
-    // Outlines follow arcs in steps of at most `arcStep` radians (finer for export).
-    explicit Arrangement(const Sketch& sketch, double arcStep = 3.141592653589793 / 48);
+    static constexpr double kArcStep = 3.141592653589793 / 48;
+    // The areas of one layer's geometry (fills don't see other layers'). Outlines follow arcs in
+    // steps of at most `arcStep` radians (finer for export).
+    Arrangement(const Sketch& sketch, Id layer, double arcStep = kArcStep);
 
     // The smallest closed area around p, or nothing if p isn't enclosed.
     std::optional<Region> regionAt(Vec2 p) const;
@@ -55,8 +58,26 @@ private:
     std::vector<Vec2> m_looseEnds;
 };
 
+// Each layer's arrangement, made when first asked for.
+class Arrangements
+{
+public:
+    explicit Arrangements(const Sketch& sketch, double arcStep = Arrangement::kArcStep)
+        : m_sketch(sketch)
+        , m_arcStep(arcStep)
+    {}
+    const Arrangement& of(Id layer) const;
+
+private:
+    const Sketch& m_sketch;
+    double m_arcStep;
+    mutable std::map<Id, Arrangement> m_byLayer;
+};
+
 // Where a fill is now: its outline if that's still there, else the area around its seed.
+// (`arrangement` must be of the fill's layer.)
 std::optional<Region> resolve(const Arrangement& arrangement, const Fill& fill);
+std::optional<Region> resolve(const Arrangements& arrangements, const Fill& fill);
 
 // After an edit: points each fill at its area as it now is (boundary curves, a seed inside), so
 // it can be found again whichever way the geometry changes next. Fills that can't be found are

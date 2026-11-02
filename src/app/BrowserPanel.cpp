@@ -2,7 +2,6 @@
 
 #include "Document.h"
 #include "SketchView.h"
-#include "Theme.h"
 
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -20,11 +19,12 @@ namespace
 {
 enum Column
 {
+    kName,
     kEye,
     kActive,
-    kName,
 };
 constexpr int kIdRole = Qt::UserRole;
+constexpr int kIsLayerRole = Qt::UserRole + 1;
 
 // Small icons drawn here: an eye (open, or shut with a slash) and the active marker (a filled dot,
 // or a ring for the others).
@@ -86,6 +86,12 @@ QString contents(const core::Sketch& s, Id sublayer)
     }
     return QObject::tr("%1 curves, %2 points, %3 constraints, %4 texts").arg(curves).arg(points).arg(constraints).arg(texts);
 }
+
+bool sublayerEmpty(const core::Sketch& s, Id sublayer)
+{
+    return std::ranges::none_of(s.entities(), [&](const auto& kv) { return kv.second.sublayer == sublayer; })
+        && std::ranges::none_of(s.texts(), [&](const auto& kv) { return kv.second.sublayer == sublayer; });
+}
 }  // namespace
 
 BrowserPanel::BrowserPanel(Document& doc, SketchView& view, QWidget* parent)
@@ -100,10 +106,15 @@ BrowserPanel::BrowserPanel(Document& doc, SketchView& view, QWidget* parent)
     auto* bar = new QHBoxLayout;
     bar->setContentsMargins(4, 2, 4, 0);
     auto* add = new QToolButton(this);
-    add->setObjectName(QStringLiteral("addSublayer"));
+    add->setObjectName(QStringLiteral("add"));
     add->setText(QStringLiteral("+"));
-    add->setToolTip(tr("New sublayer (it becomes the one being edited)"));
+    add->setToolTip(tr("New layer or sublayer"));
     add->setAutoRaise(true);
+    add->setPopupMode(QToolButton::InstantPopup);
+    auto* addMenu = new QMenu(add);
+    addMenu->addAction(tr("New Layer"), this, &BrowserPanel::addLayer);
+    addMenu->addAction(tr("New Sublayer"), this, &BrowserPanel::addSublayer);
+    add->setMenu(addMenu);
     bar->addWidget(add);
     bar->addStretch();
     layout->addLayout(bar);
@@ -116,45 +127,80 @@ BrowserPanel::BrowserPanel(Document& doc, SketchView& view, QWidget* parent)
     m_tree->setIconSize(QSize(16, 16));
     m_tree->setContextMenuPolicy(Qt::CustomContextMenu);
     m_tree->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
-    m_tree->header()->setStretchLastSection(true);
+    m_tree->header()->setStretchLastSection(false);
+    m_tree->header()->setSectionResizeMode(kName, QHeaderView::Stretch);
     m_tree->header()->setSectionResizeMode(kEye, QHeaderView::ResizeToContents);
     m_tree->header()->setSectionResizeMode(kActive, QHeaderView::ResizeToContents);
 
-    connect(add, &QToolButton::clicked, this, &BrowserPanel::addSublayer);
     connect(&m_doc, &Document::changed, this, &BrowserPanel::rebuild);
     connect(m_tree, &QTreeWidget::customContextMenuRequested, this, &BrowserPanel::showMenu);
     connect(m_tree, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem* item, int column) {
-        if (m_rebuilding || item == m_layer || !item) {
+        if (m_rebuilding || !item) {
             return;
         }
         const Id id = item->data(kName, kIdRole).toUInt();
-        if (column == kEye) {
-            m_doc.setSublayerVisible(id, !m_doc.sketch().sublayer(id).visible);
+        const core::Sketch& s = m_doc.sketch();
+        if (isLayerRow(item)) {
+            if (column == kEye) {
+                m_doc.setLayerVisible(id, !s.layer(id).visible);
+            }
+            else {
+                m_doc.setActiveLayer(id);
+            }
+        }
+        else if (column == kEye) {
+            m_doc.setSublayerVisible(id, !s.sublayer(id).visible);
         }
         else {
-            m_doc.setActiveSublayer(id);  // the marker or the name: edit this one
+            m_doc.setActiveSublayer(id);  // the marker or the name: edit this one (and its layer)
         }
     });
     connect(m_tree, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem* item, int column) {
-        if (m_rebuilding || item == m_layer || column != kName) {
+        if (m_rebuilding || column != kName) {
             return;
         }
         const Id id = item->data(kName, kIdRole).toUInt();
         const QString name = item->text(kName).trimmed();
-        if (name.isEmpty() || name.toStdString() == m_doc.sketch().sublayer(id).name) {
+        const core::Sketch& s = m_doc.sketch();
+        const std::string was = isLayerRow(item) ? s.layer(id).name : s.sublayer(id).name;
+        if (name.isEmpty() || name.toStdString() == was) {
+            m_shownKey.clear();
             rebuild();
             return;
         }
-        m_view.tryEdit(tr("Rename sublayer"), [&](Editor& ed) { ed.renameSublayer(id, name); });
+        if (isLayerRow(item)) {
+            m_view.tryEdit(tr("Rename layer"), [&](Editor& ed) { ed.renameLayer(id, name); });
+        }
+        else {
+            m_view.tryEdit(tr("Rename sublayer"), [&](Editor& ed) { ed.renameSublayer(id, name); });
+        }
     });
     rebuild();
 }
 
+bool BrowserPanel::isLayerRow(const QTreeWidgetItem* item) const
+{
+    return item && item->data(kName, kIsLayerRole).toBool();
+}
+
+QTreeWidgetItem* BrowserPanel::rowForLayer(Id layer) const
+{
+    for (int i = 0; i < m_tree->topLevelItemCount(); ++i) {
+        if (m_tree->topLevelItem(i)->data(kName, kIdRole).toUInt() == layer) {
+            return m_tree->topLevelItem(i);
+        }
+    }
+    return nullptr;
+}
+
 QTreeWidgetItem* BrowserPanel::rowFor(Id sublayer) const
 {
-    for (int i = 0; m_layer && i < m_layer->childCount(); ++i) {
-        if (m_layer->child(i)->data(kName, kIdRole).toUInt() == sublayer) {
-            return m_layer->child(i);
+    for (int i = 0; i < m_tree->topLevelItemCount(); ++i) {
+        QTreeWidgetItem* layer = m_tree->topLevelItem(i);
+        for (int j = 0; j < layer->childCount(); ++j) {
+            if (layer->child(j)->data(kName, kIdRole).toUInt() == sublayer) {
+                return layer->child(j);
+            }
         }
     }
     return nullptr;
@@ -163,74 +209,116 @@ QTreeWidgetItem* BrowserPanel::rowFor(Id sublayer) const
 void BrowserPanel::rebuild()
 {
     const core::Sketch& s = m_doc.sketch();
-    const auto& sublayers = s.sublayers();
-    const bool same = sublayers.size() == m_shown.size() && s.activeSublayer() == m_shownActive
-        && std::ranges::equal(sublayers, m_shown, [](const core::Sublayer& a, const core::Sublayer& b) {
-               return a.id == b.id && a.name == b.name && a.visible == b.visible;
-           });
-    if (same && m_layer) {
-        for (int i = 0; i < m_layer->childCount(); ++i) {  // (just the counts)
-            QTreeWidgetItem* row = m_layer->child(i);
-            row->setToolTip(kName, contents(s, row->data(kName, kIdRole).toUInt()));
+    // Rebuilt only when the layers or sublayers change (not on every edit): just tooltips then.
+    QString key = QString::number(s.activeSublayer());
+    for (const core::Layer& l : s.layers()) {
+        key += QStringLiteral("|L%1:%2:%3").arg(l.id).arg(QString::fromStdString(l.name)).arg(l.visible);
+        for (Id id : s.sublayersOf(l.id)) {
+            const core::Sublayer& sub = s.sublayer(id);
+            key += QStringLiteral("|S%1:%2:%3").arg(id).arg(QString::fromStdString(sub.name)).arg(sub.visible);
+        }
+    }
+    if (key == m_shownKey) {
+        for (const core::Sublayer& l : s.sublayers()) {
+            if (QTreeWidgetItem* row = rowFor(l.id)) {
+                row->setToolTip(kName, contents(s, l.id));
+            }
         }
         return;
     }
-    m_shown = sublayers;
-    m_shownActive = s.activeSublayer();
+    m_shownKey = key;
 
     m_rebuilding = true;
     m_tree->clear();
-    m_layer = new QTreeWidgetItem(m_tree);
-    m_layer->setText(kName, tr("Layer 1"));
-    m_layer->setToolTip(kName, tr("The drawing (layers come later); its sublayers are edited one at a time, "
-                                  "and coloured as one"));
-    m_layer->setFlags(Qt::ItemIsEnabled);
-    QFont layerFont = m_layer->font(kName);
-    layerFont.setBold(true);
-    m_layer->setFont(kName, layerFont);
-    m_layer->setFirstColumnSpanned(false);
-    for (const core::Sublayer& l : sublayers) {
-        auto* row = new QTreeWidgetItem(m_layer);
-        const bool active = l.id == s.activeSublayer();
-        row->setData(kName, kIdRole, l.id);
-        row->setText(kName, QString::fromStdString(l.name));
-        row->setIcon(kEye, eyeIcon(l.visible));
-        row->setToolTip(kEye, l.visible ? tr("Shown: click to hide") : tr("Hidden: click to show"));
-        row->setIcon(kActive, activeIcon(active));
-        row->setToolTip(kActive, active ? tr("Being edited") : tr("Click to edit this sublayer"));
-        row->setToolTip(kName, contents(s, l.id));
-        row->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsEditable);
-        QFont font = row->font(kName);
-        font.setBold(active);
-        row->setFont(kName, font);
+    const Id activeLayer = s.activeLayer();
+    for (const core::Layer& l : s.layers()) {
+        auto* layerRow = new QTreeWidgetItem(m_tree);
+        const bool layerActive = l.id == activeLayer;
+        layerRow->setData(kName, kIdRole, l.id);
+        layerRow->setData(kName, kIsLayerRole, true);
+        layerRow->setText(kName, QString::fromStdString(l.name));
+        layerRow->setToolTip(kName, tr("A layer: its own sketch, drawn over the ones below it. Other layers' "
+                                       "geometry can be used here only by projecting it (Project)."));
+        layerRow->setIcon(kEye, eyeIcon(l.visible));
+        layerRow->setToolTip(kEye, l.visible ? tr("Shown: click to hide") : tr("Hidden: click to show"));
+        layerRow->setIcon(kActive, activeIcon(layerActive));
+        layerRow->setToolTip(kActive, layerActive ? tr("Being edited") : tr("Click to edit this layer"));
+        layerRow->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsEditable);
+        QFont layerFont = layerRow->font(kName);
+        layerFont.setBold(layerActive);
+        layerRow->setFont(kName, layerFont);
         if (!l.visible) {
-            row->setForeground(kName, QColor(0xd5, 0xd9, 0xde, 110));
+            layerRow->setForeground(kName, QColor(0xd5, 0xd9, 0xde, 110));
         }
-        if (active) {
-            m_tree->setCurrentItem(row, kName);
+        for (Id id : s.sublayersOf(l.id)) {
+            const core::Sublayer& sub = s.sublayer(id);
+            auto* row = new QTreeWidgetItem(layerRow);
+            const bool active = id == s.activeSublayer();
+            row->setData(kName, kIdRole, id);
+            row->setData(kName, kIsLayerRole, false);
+            row->setText(kName, QString::fromStdString(sub.name));
+            row->setIcon(kEye, eyeIcon(sub.visible));
+            row->setToolTip(kEye, sub.visible ? tr("Shown: click to hide") : tr("Hidden: click to show"));
+            row->setIcon(kActive, activeIcon(active));
+            row->setToolTip(kActive, active ? tr("Being edited") : tr("Click to edit this sublayer"));
+            row->setToolTip(kName, contents(s, id));
+            row->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsEditable);
+            QFont font = row->font(kName);
+            font.setBold(active);
+            row->setFont(kName, font);
+            if (!sub.visible || !l.visible || !layerActive) {
+                row->setForeground(kName, QColor(0xd5, 0xd9, 0xde, layerActive ? 110 : 150));
+            }
+            if (active) {
+                m_tree->setCurrentItem(row, kName);
+            }
         }
+        layerRow->setExpanded(true);
     }
-    m_tree->expandAll();
     m_rebuilding = false;
+}
+
+void BrowserPanel::addLayer()
+{
+    m_view.tryEdit(tr("New layer"), [&](Editor& ed) {
+        ed.addLayer(tr("Layer %1").arg(m_doc.sketch().layers().size() + 1));
+    });
 }
 
 void BrowserPanel::addSublayer()
 {
-    m_view.tryEdit(tr("New sublayer"), [&](Editor& ed) { 
-        ed.addSublayer(tr("Sublayer %1").arg(m_doc.sketch().sublayers().size() + 1));
+    m_view.tryEdit(tr("New sublayer"), [&](Editor& ed) {
+        ed.addSublayer(tr("Sublayer %1").arg(m_doc.sketch().sublayersOf(m_doc.sketch().activeLayer()).size() + 1));
     });
+}
+
+void BrowserPanel::deleteLayer(Id layer, bool ask)
+{
+    const core::Sketch& s = m_doc.sketch();
+    if (!s.hasLayer(layer) || s.layers().size() < 2) {
+        emit m_view.message(tr("The last layer can't be deleted"));
+        return;
+    }
+    const std::vector<Id> own = s.sublayersOf(layer);
+    const bool empty = std::ranges::all_of(own, [&](Id id) { return sublayerEmpty(s, id); })
+        && std::ranges::none_of(s.fills(), [&](const auto& kv) { return kv.second.layer == layer; });
+    if (ask && !empty
+        && QMessageBox::question(this, tr("Delete layer"),
+                                 tr("Delete \"%1\" and everything in it?").arg(QString::fromStdString(s.layer(layer).name)))
+            != QMessageBox::Yes) {
+        return;
+    }
+    m_view.tryEdit(tr("Delete layer"), [&](Editor& ed) { ed.removeLayer(layer); });
 }
 
 void BrowserPanel::deleteSublayer(Id sublayer, bool ask)
 {
     const core::Sketch& s = m_doc.sketch();
-    if (!s.hasSublayer(sublayer) || s.sublayers().size() < 2) {
-        emit m_view.message(tr("The last sublayer can't be deleted"));
+    if (!s.hasSublayer(sublayer) || s.sublayersOf(s.layerOfSublayer(sublayer)).size() < 2) {
+        emit m_view.message(tr("A layer's last sublayer can't be deleted"));
         return;
     }
-    const bool empty = std::ranges::none_of(s.entities(), [&](const auto& kv) { return kv.second.sublayer == sublayer; })
-        && std::ranges::none_of(s.texts(), [&](const auto& kv) { return kv.second.sublayer == sublayer; });
-    if (ask && !empty
+    if (ask && !sublayerEmpty(s, sublayer)
         && QMessageBox::question(this, tr("Delete sublayer"),
                                  tr("Delete \"%1\" and everything in it?").arg(QString::fromStdString(s.sublayer(sublayer).name)))
             != QMessageBox::Yes) {
@@ -252,20 +340,41 @@ void BrowserPanel::moveSelectionTo(Id sublayer)
         emit m_view.message(tr("Select what to move first"));
         return;
     }
-    m_view.tryEdit(tr("Move to sublayer"), [&](Editor& ed) { ed.moveToSublayer(items, sublayer); });
-    m_view.setSelection({});
+    if (m_view.tryEdit(tr("Move to sublayer"), [&](Editor& ed) { ed.moveToSublayer(items, sublayer); })) {
+        m_view.setSelection({});
+    }
 }
 
 void BrowserPanel::showMenu(const QPoint& at)
 {
     QTreeWidgetItem* item = m_tree->itemAt(at);
     QMenu menu(this);
+    menu.addAction(tr("New Layer"), this, &BrowserPanel::addLayer);
     menu.addAction(tr("New Sublayer"), this, &BrowserPanel::addSublayer);
-    if (item && item != m_layer) {
+    const core::Sketch& s = m_doc.sketch();
+    if (item && isLayerRow(item)) {
         const Id id = item->data(kName, kIdRole).toUInt();
-        const core::Sketch& s = m_doc.sketch();
-        const auto& all = s.sublayers();
-        const int index = static_cast<int>(std::ranges::find_if(all, [&](const core::Sublayer& l) { return l.id == id; }) - all.begin());
+        const auto& all = s.layers();
+        const int index = static_cast<int>(std::ranges::find_if(all, [&](const core::Layer& l) { return l.id == id; }) - all.begin());
+        menu.addSeparator();
+        menu.addAction(tr("Edit This Layer"), this, [this, id] { m_doc.setActiveLayer(id); });
+        menu.addAction(s.layer(id).visible ? tr("Hide") : tr("Show"), this,
+                       [this, id] { m_doc.setLayerVisible(id, !m_doc.sketch().layer(id).visible); });
+        menu.addAction(tr("Rename"), this, [this, item] { m_tree->editItem(item, kName); });
+        menu.addSeparator();
+        menu.addAction(tr("Move Up"), this, [this, id, index] {
+                m_view.tryEdit(tr("Move layer"), [&](Editor& ed) { ed.moveLayer(id, index - 1); });
+            })->setEnabled(index > 0);
+        menu.addAction(tr("Move Down"), this, [this, id, index] {
+                m_view.tryEdit(tr("Move layer"), [&](Editor& ed) { ed.moveLayer(id, index + 1); });
+            })->setEnabled(index + 1 < static_cast<int>(all.size()));
+        menu.addSeparator();
+        menu.addAction(tr("Delete"), this, [this, id] { deleteLayer(id); })->setEnabled(all.size() > 1);
+    }
+    else if (item) {
+        const Id id = item->data(kName, kIdRole).toUInt();
+        const std::vector<Id> siblings = s.sublayersOf(s.layerOfSublayer(id));
+        const int index = static_cast<int>(std::ranges::find(siblings, id) - siblings.begin());
         menu.addSeparator();
         menu.addAction(tr("Edit This Sublayer"), this, [this, id] { m_doc.setActiveSublayer(id); });
         menu.addAction(s.sublayer(id).visible ? tr("Hide") : tr("Show"), this,
@@ -279,9 +388,9 @@ void BrowserPanel::showMenu(const QPoint& at)
             })->setEnabled(index > 0);
         menu.addAction(tr("Move Down"), this, [this, id, index] {
                 m_view.tryEdit(tr("Move sublayer"), [&](Editor& ed) { ed.moveSublayer(id, index + 1); });
-            })->setEnabled(index + 1 < static_cast<int>(all.size()));
+            })->setEnabled(index + 1 < static_cast<int>(siblings.size()));
         menu.addSeparator();
-        menu.addAction(tr("Delete"), this, [this, id] { deleteSublayer(id); })->setEnabled(all.size() > 1);
+        menu.addAction(tr("Delete"), this, [this, id] { deleteSublayer(id); })->setEnabled(siblings.size() > 1);
     }
     menu.exec(m_tree->viewport()->mapToGlobal(at));
 }

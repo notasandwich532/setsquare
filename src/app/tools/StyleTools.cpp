@@ -189,9 +189,11 @@ QString FillTool::hint() const
 const core::regions::Arrangement& FillTool::arrangement()
 {
     // Rebuilt after edits only (cheap to keep while hovering).
-    if (!m_arrangement || m_builtFor != doc().revision()) {
-        m_arrangement = std::make_unique<core::regions::Arrangement>(doc().sketch());
+    const Id layer = doc().sketch().activeLayer();  // (fills are made of the active layer's geometry)
+    if (!m_arrangement || m_builtFor != doc().revision() || m_builtLayer != layer) {
+        m_arrangement = std::make_unique<core::regions::Arrangement>(doc().sketch(), layer);
         m_builtFor = doc().revision();
+        m_builtLayer = layer;
     }
     return *m_arrangement;
 }
@@ -200,6 +202,9 @@ Id FillTool::fillAt(core::Vec2 p)
 {
     Id found = kNoId;
     for (const auto& [id, f] : doc().sketch().fills()) {  // later ones are on top
+        if (f.layer != doc().sketch().activeLayer()) {
+            continue;
+        }
         const auto region = core::regions::resolve(arrangement(), f);
         if (region && region->contains(p)) {
             found = id;

@@ -53,19 +53,19 @@ TEST_CASE("Browser lists sublayers; new, activate, hide", "[sublayers]")
     const Id second = f.sketch().activeSublayer();
     CHECK(second != first);
     REQUIRE(f.browser.rowFor(second));
-    CHECK(f.browser.rowFor(second)->font(2).bold());
-    CHECK_FALSE(f.browser.rowFor(first)->font(2).bold());
+    CHECK(f.browser.rowFor(second)->font(0).bold());
+    CHECK_FALSE(f.browser.rowFor(first)->font(0).bold());
 
-    // Clicking the first's name makes it the one being edited; its eye hides it.
+    // Clicking the first's marker makes it the one being edited; its eye hides it.
     emit tree->itemClicked(f.browser.rowFor(first), 2);
     CHECK(f.sketch().activeSublayer() == first);
-    emit tree->itemClicked(f.browser.rowFor(first), 0);
+    emit tree->itemClicked(f.browser.rowFor(first), 1);
     CHECK_FALSE(f.sketch().sublayer(first).visible);
-    emit tree->itemClicked(f.browser.rowFor(first), 0);
+    emit tree->itemClicked(f.browser.rowFor(first), 1);
     CHECK(f.sketch().sublayer(first).visible);
 
     // Renaming in place.
-    f.browser.rowFor(second)->setText(2, "Details");
+    f.browser.rowFor(second)->setText(0, "Details");
     CHECK(f.sketch().sublayer(second).name == "Details");
 
     // Adding a sublayer is an undo step.
@@ -139,4 +139,74 @@ TEST_CASE("Sublayers round-trip through a file", "[sublayers]")
     CHECK_FALSE(s.hasEntity(l));
     CHECK_FALSE(s.hasEntity(q));  // (the line's end, gone with it)
     CHECK(s.sublayers().size() == 1);
+}
+
+TEST_CASE("Browser lists layers; new layer goes on top and is edited", "[layers]")
+{
+    Fixture f;
+    QTreeWidget* tree = f.browser.findChild<QTreeWidget*>("browser");
+    REQUIRE(tree);
+    const Id first = f.sketch().activeLayer();
+    f.browser.addLayer();
+    REQUIRE(f.sketch().layers().size() == 2);
+    const Id second = f.sketch().activeLayer();
+    CHECK(second != first);
+    CHECK(f.sketch().layers().front().id == second);
+    REQUIRE(tree->topLevelItemCount() == 2);
+    CHECK(tree->topLevelItem(0) == f.browser.rowForLayer(second));
+    CHECK(f.browser.rowForLayer(second)->font(0).bold());
+    CHECK(f.browser.rowForLayer(second)->childCount() == 1);
+
+    // Clicking the other layer edits it (its own sublayer); its eye hides it.
+    emit tree->itemClicked(f.browser.rowForLayer(first), 2);
+    CHECK(f.sketch().activeLayer() == first);
+    emit tree->itemClicked(f.browser.rowForLayer(second), 1);
+    CHECK_FALSE(f.sketch().layer(second).visible);
+
+    f.browser.deleteLayer(second, false);
+    CHECK(f.sketch().layers().size() == 1);
+    f.browser.deleteLayer(first, false);  // (not the last)
+    CHECK(f.sketch().layers().size() == 1);
+}
+
+TEST_CASE("Other layers can't be picked or snapped to; Project brings them in", "[layers]")
+{
+    Fixture f;
+    Id a = kNoId;
+    f.doc.edit("line", [&](Editor& ed) { a = Fixture::lineAt(ed, 10, 10); });
+    f.browser.addLayer();
+    const Id top = f.sketch().activeLayer();
+
+    // Not selectable, not snappable, not a reference for a new line.
+    QTest::mouseClick(&f.view, Qt::LeftButton, {}, f.at(10, 10));
+    CHECK(f.view.selection().empty());
+    CHECK(f.view.pickAt(f.at(10, 10), false, false) == kNoId);
+    CHECK(f.view.snap(f.at(10, 20)).isFree());  // (its end; not on an axis)
+
+    // Project it by clicking it.
+    f.view.setTool(ToolKind::Project);
+    QTest::mouseMove(&f.view, f.at(10, 5));
+    QTest::mouseClick(&f.view, Qt::LeftButton, {}, f.at(10, 5));
+    Id copy = kNoId;
+    for (const auto& [id, e] : f.sketch().entities()) {
+        if (e.projectedFrom == a) {
+            copy = id;
+        }
+    }
+    REQUIRE(copy != kNoId);
+    CHECK(f.sketch().layerOf(copy) == top);
+    CHECK(f.sketch().entity(copy).construction);
+    CHECK(f.sketch().isLinked(copy));
+
+    // Now the copy is there to snap to.
+    f.view.setTool(ToolKind::Select);
+    CHECK(f.view.pickAt(f.at(10, 5), false, false) == copy);
+
+    // And it follows the original.
+    f.doc.setActiveLayer(f.sketch().layers().back().id);
+    f.doc.beginDrag(f.sketch().definingPoints(a));
+    f.doc.dragTo(5, 0);
+    f.doc.endDrag();
+    const core::Line& l = f.sketch().line(copy);
+    CHECK(std::abs(f.sketch().point(l.p1).x - 15) < 1e-6);
 }

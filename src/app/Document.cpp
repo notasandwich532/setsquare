@@ -260,6 +260,35 @@ void Document::setSublayerVisible(core::Id sublayer, bool visible)
                  .arg(Editor::sublayerName(m_sketch, sublayer), visible ? QStringLiteral("True") : QStringLiteral("False")));
 }
 
+void Document::followProjections()
+{
+    // Projections in other layers follow what's being dragged (their layers solved again).
+    if (m_sketch.syncProjections()) {
+        core::solve(m_sketch);
+    }
+}
+
+void Document::setActiveLayer(core::Id layer)
+{
+    if (layer == m_sketch.activeLayer() || !m_sketch.hasLayer(layer)) {
+        return;
+    }
+    m_sketch.setActiveLayer(layer);
+    emit changed();
+    announce(QStringLiteral("s.layer = %1").arg(Editor::layerName(m_sketch, layer)));
+}
+
+void Document::setLayerVisible(core::Id layer, bool visible)
+{
+    if (!m_sketch.hasLayer(layer) || m_sketch.layer(layer).visible == visible) {
+        return;
+    }
+    m_sketch.setLayerVisible(layer, visible);
+    emit changed();
+    announce(QStringLiteral("s.show_layer(%1, %2)")
+                 .arg(Editor::layerName(m_sketch, layer), visible ? QStringLiteral("True") : QStringLiteral("False")));
+}
+
 bool Document::commitChecked(core::Sketch working, QString* error, const std::vector<core::Id>& hold,
                              const std::vector<core::Id>& edited)
 {
@@ -390,6 +419,7 @@ void Document::dragTo(double dx, double dy)
     }
     if (m_dragSolver->dragTo(dx, dy)) {
         m_dragSolver->writeBack(m_sketch);
+        followProjections();
         textshapes::refreshPathTexts(m_sketch);
         m_dragMoved = true;
         m_dragDx = dx;
@@ -406,6 +436,7 @@ void Document::dragMove(double dx, double dy, double angle, core::Vec2 about)
     const core::Affine t = Editor::moveMap(dx, dy, angle, about);
     if (m_dragSolver->dragMap([&](core::Vec2 p) { return t.apply(p); })) {
         m_dragSolver->writeBack(m_sketch);
+        followProjections();
         textshapes::refreshPathTexts(m_sketch);
         m_dragMoved = true;
         m_dragIsMove = true;

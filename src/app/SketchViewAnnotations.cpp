@@ -363,7 +363,7 @@ std::vector<SketchView::Annotation> SketchView::layoutAnnotations() const
     // Fixed items: a padlock each (selecting it selects the item; F unfixes it).
     if (m_showConstraints) {
         for (const auto& [id, e] : s.entities()) {
-            if (e.fixed && !s.isReference(id) && e.sublayer == s.activeSublayer()) {
+            if (e.fixed && !s.isReference(id) && e.sublayer == s.activeSublayer() && e.projectedFrom == kNoId) {
                 Annotation a{id, false, {}, {}, {}, QStringLiteral("fix")};
                 a.rect = QRectF(symbolPos(id) - QPointF(kGlyphSize / 2, kGlyphSize / 2), QSizeF(kGlyphSize, kGlyphSize));
                 out.push_back(std::move(a));

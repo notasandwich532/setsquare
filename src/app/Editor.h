@@ -100,6 +100,18 @@ public:
     // A name not yet taken: `wanted`, or it numbered.
     static QString uniqueSublayerName(const core::Sketch& sketch, const QString& wanted, core::Id except = core::kNoId);
     static QString sublayerName(const core::Sketch& sketch, core::Id sublayer);  // as a Python string
+
+    // Layers (named uniquely). A new one goes on top and becomes the active one.
+    core::Id addLayer(const QString& name);
+    void renameLayer(core::Id layer, const QString& name);
+    void removeLayer(core::Id layer);  // and everything in it
+    void moveLayer(core::Id layer, int index);
+    static QString uniqueLayerName(const core::Sketch& sketch, const QString& wanted, core::Id except = core::kNoId);
+    static QString layerName(const core::Sketch& sketch, core::Id layer);  // as a Python string
+    // Projects geometry from other layers into the active one (see Sketch::project); returns the
+    // copies, in order.
+    std::vector<core::Id> project(const std::vector<core::Id>& sources);
+    void breakLink(const std::vector<core::Id>& items);
     // Text at t.anchor (an existing point); its letter shapes are made here from its settings.
     core::Id text(core::Text t);
     // Text in a box: a construction rectangle between two corner points, made here.

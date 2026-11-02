@@ -75,6 +75,9 @@ public:
     // sublayers are edits: see Editor.)
     void setActiveSublayer(core::Id sublayer);
     void setSublayerVisible(core::Id sublayer, bool visible);
+    // Layers likewise.
+    void setActiveLayer(core::Id layer);
+    void setLayerVisible(core::Id layer, bool visible);
 
     // Moving a dimension label (no solve); one undo step per drag.
     void beginLabelDrag();
@@ -149,6 +152,7 @@ private:
     // Writes an export (made by `make`, which may throw SketchError) to `path`.
     bool writeExport(const QString& path, const std::function<std::string()>& make, QString* error);
     void resolve();
+    void followProjections();  // while dragging
 
     core::Sketch m_sketch;
     core::SolveResult m_result;

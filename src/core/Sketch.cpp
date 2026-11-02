@@ -120,8 +120,13 @@ const Sublayer& Sketch::sublayer(Id id) const
 
 void Sketch::setActiveSublayer(Id id)
 {
-    sublayer(id);  // (throws if unknown)
+    const Id layerId = sublayer(id).layer;  // (throws if unknown)
     m_activeSublayer = id;
+    for (Layer& l : m_layers) {
+        if (l.id == layerId) {
+            l.activeSublayer = id;
+        }
+    }
 }
 
 Id Sketch::addSublayer(const std::string& name)
@@ -130,7 +135,7 @@ Id Sketch::addSublayer(const std::string& name)
     for (const Sublayer& l : m_sublayers) {
         id = std::max(id, l.id + 1);
     }
-    m_sublayers.push_back({id, name, true});
+    m_sublayers.push_back({id, name, true, activeLayer()});
     return id;
 }
 
@@ -158,20 +163,31 @@ void Sketch::setSublayerVisible(Id id, bool visible)
 
 void Sketch::moveSublayer(Id id, size_t index)
 {
+    // (`index` counts among the sublayers of its own layer)
     auto it = std::ranges::find_if(m_sublayers, [&](const Sublayer& l) { return l.id == id; });
     if (it == m_sublayers.end()) {
         throw SketchError("unknown sublayer " + std::to_string(id));
     }
     const Sublayer moved = *it;
     m_sublayers.erase(it);
-    m_sublayers.insert(m_sublayers.begin() + static_cast<std::ptrdiff_t>(std::min(index, m_sublayers.size())), moved);
+    std::vector<size_t> siblings;
+    for (size_t i = 0; i < m_sublayers.size(); ++i) {
+        if (m_sublayers[i].layer == moved.layer) {
+            siblings.push_back(i);
+        }
+    }
+    const size_t at = siblings.empty() ? m_sublayers.size()
+        : index < siblings.size()     ? siblings[index]
+                                      : siblings.back() + 1;
+    m_sublayers.insert(m_sublayers.begin() + static_cast<std::ptrdiff_t>(at), moved);
 }
 
 void Sketch::removeSublayer(Id id)
 {
-    sublayer(id);
-    if (m_sublayers.size() == 1) {
-        throw SketchError("the last sublayer can't be deleted");
+    const Id layerId = sublayer(id).layer;
+    if (sublayersOf(layerId).size() == 1) {
+        throw SketchError(m_layers.size() == 1 ? "the last sublayer can't be deleted"
+                                               : "a layer's last sublayer can't be deleted (delete the layer)");
     }
     // Its contents: texts and constraints, then geometry (whatever depends on it goes too).
     std::erase_if(m_constraints, [&](const auto& kv) { return kv.second.sublayer == id; });
@@ -196,11 +212,18 @@ void Sketch::removeSublayer(Id id)
             remove(d);
         }
     }
-    const auto it = std::ranges::find_if(m_sublayers, [&](const Sublayer& l) { return l.id == id; });
-    const size_t at = static_cast<size_t>(it - m_sublayers.begin());
-    m_sublayers.erase(it);
+    std::vector<Id> siblings = sublayersOf(layerId);
+    const size_t at = static_cast<size_t>(std::ranges::find(siblings, id) - siblings.begin());
+    siblings.erase(siblings.begin() + static_cast<std::ptrdiff_t>(at));
+    const Id replacement = siblings[std::min(at, siblings.size() - 1)];
+    std::erase_if(m_sublayers, [&](const Sublayer& l) { return l.id == id; });
+    for (Layer& l : m_layers) {
+        if (l.activeSublayer == id) {
+            l.activeSublayer = replacement;
+        }
+    }
     if (m_activeSublayer == id) {
-        m_activeSublayer = m_sublayers[std::min(at, m_sublayers.size() - 1)].id;
+        m_activeSublayer = replacement;
     }
 }
 
@@ -241,11 +264,14 @@ bool Sketch::isShown(Id item) const
 {
     const Id l = sublayerOf(item);
     if (l == kNoId) {
+        if (const auto f = m_fills.find(item); f != m_fills.end() && hasLayer(f->second.layer)) {
+            return layer(f->second.layer).visible;
+        }
         return true;
     }
     for (const Sublayer& s : m_sublayers) {
         if (s.id == l) {
-            return s.visible;
+            return s.visible && (!hasLayer(s.layer) || layer(s.layer).visible);
         }
     }
     return true;
@@ -258,6 +284,341 @@ void Sketch::setSublayers(std::vector<Sublayer> sublayers, Id active)
     }
     m_sublayers = std::move(sublayers);
     m_activeSublayer = hasSublayer(active) ? active : m_sublayers.front().id;
+}
+
+// --- layers ---
+
+bool Sketch::hasLayer(Id id) const
+{
+    return std::ranges::any_of(m_layers, [&](const Layer& l) { return l.id == id; });
+}
+
+const Layer& Sketch::layer(Id id) const
+{
+    for (const Layer& l : m_layers) {
+        if (l.id == id) {
+            return l;
+        }
+    }
+    throw SketchError("unknown layer " + std::to_string(id));
+}
+
+Id Sketch::activeLayer() const
+{
+    return hasSublayer(m_activeSublayer) ? sublayer(m_activeSublayer).layer : m_layers.front().id;
+}
+
+void Sketch::setActiveLayer(Id id)
+{
+    const Layer& l = layer(id);
+    const std::vector<Id> own = sublayersOf(id);
+    setActiveSublayer(std::ranges::find(own, l.activeSublayer) != own.end() ? l.activeSublayer : own.front());
+}
+
+Id Sketch::addLayer(const std::string& name, const std::string& sublayerName)
+{
+    Id id = 1;
+    for (const Layer& l : m_layers) {
+        id = std::max(id, l.id + 1);
+    }
+    Id sub = 1;
+    for (const Sublayer& l : m_sublayers) {
+        sub = std::max(sub, l.id + 1);
+    }
+    m_sublayers.push_back({sub, sublayerName, true, id});
+    m_layers.insert(m_layers.begin(), Layer{id, name, true, sub});
+    return id;
+}
+
+void Sketch::renameLayer(Id id, const std::string& name)
+{
+    for (Layer& l : m_layers) {
+        if (l.id == id) {
+            l.name = name;
+            return;
+        }
+    }
+    throw SketchError("unknown layer " + std::to_string(id));
+}
+
+void Sketch::setLayerVisible(Id id, bool visible)
+{
+    for (Layer& l : m_layers) {
+        if (l.id == id) {
+            l.visible = visible;
+            return;
+        }
+    }
+    throw SketchError("unknown layer " + std::to_string(id));
+}
+
+void Sketch::moveLayer(Id id, size_t index)
+{
+    auto it = std::ranges::find_if(m_layers, [&](const Layer& l) { return l.id == id; });
+    if (it == m_layers.end()) {
+        throw SketchError("unknown layer " + std::to_string(id));
+    }
+    const Layer moved = *it;
+    m_layers.erase(it);
+    m_layers.insert(m_layers.begin() + static_cast<std::ptrdiff_t>(std::min(index, m_layers.size())), moved);
+}
+
+void Sketch::removeLayer(Id id)
+{
+    layer(id);
+    if (m_layers.size() == 1) {
+        throw SketchError("the last layer can't be deleted");
+    }
+    const std::vector<Id> own = sublayersOf(id);
+    // Leave one sublayer to take the rest down with, then the layer itself.
+    const bool wasActive = activeLayer() == id;
+    const auto at = static_cast<size_t>(std::ranges::find_if(m_layers, [&](const Layer& l) { return l.id == id; })
+                                        - m_layers.begin());
+    for (size_t i = 1; i < own.size(); ++i) {
+        removeSublayer(own[i]);
+    }
+    // (the last one: as removeSublayer does, but without the "last sublayer" rule)
+    const Id last = own.front();
+    std::erase_if(m_constraints, [&](const auto& kv) { return kv.second.sublayer == last; });
+    std::vector<Id> doomed;
+    for (const auto& [tid, t] : m_texts) {
+        if (t.sublayer == last) {
+            doomed.push_back(tid);
+        }
+    }
+    for (int points = 0; points < 2; ++points) {
+        for (const auto& [eid, e] : m_entities) {
+            if (e.sublayer == last && (e.kind() == EntityKind::Point) == (points == 1)) {
+                doomed.push_back(eid);
+            }
+        }
+    }
+    for (Id d : doomed) {
+        if ((hasEntity(d) && !isReference(d)) || hasText(d)) {
+            remove(d);
+        }
+    }
+    std::erase_if(m_fills, [&](const auto& kv) { return kv.second.layer == id; });
+    std::erase_if(m_sublayers, [&](const Sublayer& l) { return l.id == last; });
+    m_layers.erase(m_layers.begin() + static_cast<std::ptrdiff_t>(at));
+    if (wasActive) {
+        setActiveLayer(m_layers[std::min(at, m_layers.size() - 1)].id);
+    }
+}
+
+std::vector<Id> Sketch::sublayersOf(Id layerId) const
+{
+    std::vector<Id> out;
+    for (const Sublayer& l : m_sublayers) {
+        if (l.layer == layerId) {
+            out.push_back(l.id);
+        }
+    }
+    return out;
+}
+
+Id Sketch::layerOfSublayer(Id sublayerId) const
+{
+    for (const Sublayer& l : m_sublayers) {
+        if (l.id == sublayerId) {
+            return l.layer;
+        }
+    }
+    return kNoId;
+}
+
+Id Sketch::layerOf(Id item) const
+{
+    if (const auto f = m_fills.find(item); f != m_fills.end()) {
+        return f->second.layer;
+    }
+    const Id sub = sublayerOf(item);
+    return sub == kNoId ? kNoId : layerOfSublayer(sub);
+}
+
+void Sketch::setLayers(std::vector<Layer> layers)
+{
+    if (layers.empty()) {
+        throw SketchError("a sketch needs a layer");
+    }
+    m_layers = std::move(layers);
+    for (Layer& l : m_layers) {
+        const std::vector<Id> own = sublayersOf(l.id);
+        if (own.empty()) {
+            throw SketchError("layer " + l.name + " has no sublayers");
+        }
+        if (std::ranges::find(own, l.activeSublayer) == own.end()) {
+            l.activeSublayer = own.front();
+        }
+    }
+    for (const Sublayer& s : m_sublayers) {
+        if (!hasLayer(s.layer)) {
+            throw SketchError("sublayer " + s.name + " is in an unknown layer");
+        }
+    }
+    if (hasSublayer(m_activeSublayer)) {
+        setActiveSublayer(m_activeSublayer);
+    }
+}
+
+void Sketch::requireLayer(const std::vector<Id>& items, Id layerId) const
+{
+    for (Id id : items) {
+        if (id == kNoId || isReference(id) || !(hasEntity(id) || hasConstraint(id) || hasText(id))) {
+            continue;
+        }
+        const Id other = layerOf(id);
+        if (other != kNoId && other != layerId) {
+            const std::string name = hasLayer(other) ? layer(other).name : std::to_string(other);
+            throw SketchError("that's on another layer (" + name + "): project it into this one first");
+        }
+    }
+}
+
+// --- projections ---
+
+bool Sketch::isProjection(Id id) const
+{
+    const auto it = m_entities.find(id);
+    return it != m_entities.end() && it->second.projectedFrom != kNoId;
+}
+
+bool Sketch::isLinked(Id id) const
+{
+    const auto it = m_entities.find(id);
+    if (it == m_entities.end() || it->second.projectedFrom == kNoId) {
+        return false;
+    }
+    const auto src = m_entities.find(it->second.projectedFrom);
+    return src != m_entities.end() && src->second.kind() == it->second.kind();
+}
+
+bool Sketch::dependsOn(Id layerId, Id other) const
+{
+    // Layers each layer takes projections from.
+    std::map<Id, std::set<Id>> from;
+    for (const auto& [id, e] : m_entities) {
+        if (e.projectedFrom != kNoId && hasEntity(e.projectedFrom)) {
+            const Id src = layerOf(e.projectedFrom), dst = layerOf(id);
+            if (src != kNoId && dst != kNoId && src != dst) {
+                from[dst].insert(src);
+            }
+        }
+    }
+    std::set<Id> seen;
+    std::vector<Id> todo{layerId};
+    while (!todo.empty()) {
+        const Id l = todo.back();
+        todo.pop_back();
+        for (Id s : from[l]) {
+            if (s == other) {
+                return true;
+            }
+            if (seen.insert(s).second) {
+                todo.push_back(s);
+            }
+        }
+    }
+    return false;
+}
+
+Id Sketch::project(Id source)
+{
+    const Entity& src = entity(source);  // (throws if unknown)
+    if (isReference(source)) {
+        throw SketchError("the origin and axes are in every layer already");
+    }
+    const Id here = activeLayer();
+    const Id there = layerOf(source);
+    if (there == here) {
+        throw SketchError("that's in this layer already");
+    }
+    if (dependsOn(there, here)) {
+        throw SketchError("that layer uses this one's geometry: projecting back would make them depend on each other");
+    }
+    for (const auto& [id, e] : m_entities) {
+        if (e.projectedFrom == source && layerOf(id) == here) {
+            return id;
+        }
+    }
+    const Entity copy = src;  // (adding may move it)
+    Id id = kNoId;
+    if (const auto* p = std::get_if<Point>(&copy.geom)) {
+        id = addPoint(p->x, p->y);
+    }
+    else if (const auto* l = std::get_if<Line>(&copy.geom)) {
+        const Id a = project(l->p1);
+        id = addLine(a, project(l->p2));
+    }
+    else if (const auto* c = std::get_if<Circle>(&copy.geom)) {
+        id = addCircle(project(c->center), c->radius);
+    }
+    else if (const auto* a = std::get_if<Arc>(&copy.geom)) {
+        const Id centre = project(a->center);
+        const Id start = project(a->start);
+        id = addArc(centre, start, project(a->end));
+    }
+    Entity& e = m_entities.at(id);
+    e.projectedFrom = source;
+    e.fixed = true;
+    e.construction = e.kind() != EntityKind::Point;  // reference geometry, until made solid
+    return id;
+}
+
+void Sketch::breakLink(Id id)
+{
+    Entity& e = entity(id);
+    if (e.projectedFrom == kNoId) {
+        return;
+    }
+    e.projectedFrom = kNoId;
+    e.fixed = false;
+    for (Id p : definingPoints(id)) {
+        // (its points, unless another projection is built on them too)
+        const bool shared = std::ranges::any_of(m_entities, [&](const auto& kv) {
+            if (kv.first == id || kv.second.projectedFrom == kNoId || kv.second.kind() == EntityKind::Point) {
+                return false;
+            }
+            const std::vector<Id> on = definingPoints(kv.first);
+            return std::ranges::find(on, p) != on.end();
+        });
+        if (p != id && !shared) {
+            Entity& pe = m_entities.at(p);
+            if (pe.projectedFrom != kNoId) {
+                pe.projectedFrom = kNoId;
+                pe.fixed = false;
+            }
+        }
+    }
+}
+
+bool Sketch::syncProjections(Id layerId)
+{
+    bool moved = false;
+    for (auto& [id, e] : m_entities) {
+        if (e.projectedFrom == kNoId || (layerId != kNoId && layerOf(id) != layerId)) {
+            continue;
+        }
+        const auto src = m_entities.find(e.projectedFrom);
+        if (src == m_entities.end() || src->second.kind() != e.kind()) {
+            continue;  // unlinked: stays put
+        }
+        if (auto* p = std::get_if<Point>(&e.geom)) {
+            const Point& to = std::get<Point>(src->second.geom);
+            if (p->x != to.x || p->y != to.y) {
+                *p = to;
+                moved = true;
+            }
+        }
+        else if (auto* c = std::get_if<Circle>(&e.geom)) {
+            const double r = std::get<Circle>(src->second.geom).radius;
+            if (c->radius != r) {
+                c->radius = r;
+                moved = true;
+            }
+        }
+    }
+    return moved;
 }
 
 bool Sketch::isReference(Id id) const
@@ -372,6 +733,7 @@ Id Sketch::addLine(Id p1, Id p2)
     if (p1 == p2) {
         throw SketchError("line endpoints must be different points");
     }
+    requireLayer({p1, p2}, activeLayer());
     const Id id = nextId();
     Entity line{id, Line{p1, p2}};
     line.sublayer = m_activeSublayer;
@@ -394,6 +756,7 @@ Id Sketch::addCircle(Id center, double radius)
     if (!(radius > 0.0)) {
         throw SketchError("circle radius must be positive");
     }
+    requireLayer({center}, activeLayer());
     const Id id = nextId();
     Entity circle{id, Circle{center, radius}};
     circle.sublayer = m_activeSublayer;
@@ -419,6 +782,7 @@ Id Sketch::addArc(Id center, Id start, Id end)
     if (center == start || center == end || start == end) {
         throw SketchError("arc centre, start and end must be different points");
     }
+    requireLayer({center, start, end}, activeLayer());
     const Id id = nextId();
     Entity arc{id, Arc{center, start, end}};
     arc.sublayer = m_activeSublayer;
@@ -446,6 +810,7 @@ Id Sketch::addConstraint(ConstraintType type, std::vector<Id> refs, double value
 {
     normalize(type, refs);
     validate(type, refs, value, params);
+    requireLayer(refs, activeLayer());
 
     const Id id = nextId();
     Constraint c{id, type, std::move(refs), value};
@@ -966,6 +1331,9 @@ Id Sketch::addFill(const Fill& fill)
 {
     Fill f = fill;
     f.id = nextId();
+    if (!hasLayer(f.layer)) {
+        f.layer = activeLayer();
+    }
     std::ranges::sort(f.boundary);
     m_fills.emplace(f.id, std::move(f));
     return m_nextId - 1;
@@ -1147,6 +1515,9 @@ void checkText(const Sketch& s, const Text& t)
 Id Sketch::addText(const Text& text)
 {
     checkText(*this, text);
+    std::vector<Id> on = textPoints(*this, text);
+    on.push_back(text.path);
+    requireLayer(on, activeLayer());
     Text t = text;
     t.id = nextId();
     t.sublayer = m_activeSublayer;
@@ -1161,6 +1532,9 @@ void Sketch::setText(const Text& text)
         throw SketchError("unknown text " + std::to_string(text.id));
     }
     checkText(*this, text);
+    std::vector<Id> on = textPoints(*this, text);
+    on.push_back(text.path);
+    requireLayer(on, layerOf(text.id));
     it->second = text;
 }
 
@@ -1213,8 +1587,9 @@ void Sketch::clear()
     m_strokes.clear();
     m_fills.clear();
     m_texts.clear();
-    m_sublayers = {{1, "Sublayer 1", true}};
+    m_sublayers = {{1, "Sublayer 1", true, 1}};
     m_activeSublayer = 1;
+    m_layers = {{1, "Layer 1", true, 1}};
     m_origin = kNoId;
     m_axes = {kNoId, kNoId};
     m_axisEnds = {kNoId, kNoId};

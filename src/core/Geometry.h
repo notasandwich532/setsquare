@@ -46,6 +46,10 @@ struct PickOptions
     // Sublayers: nothing in a hidden one is picked; with `sublayer` set, only what's in it (to
     // change: the active one). The origin and axes are in every sublayer.
     Id sublayer = kNoId;
+    // Layers: with `layer` set, only what's in it (other layers can't be referred to); with
+    // `otherLayers` set, only what's outside it (to project).
+    Id layer = kNoId;
+    Id otherLayers = kNoId;
 };
 
 // Nearest entity within tolerance; points win over curves so endpoints stay grabbable.

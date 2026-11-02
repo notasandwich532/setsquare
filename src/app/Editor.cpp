@@ -602,9 +602,11 @@ void Editor::setText(core::Text t)
 
 QString Editor::uniqueSublayerName(const core::Sketch& s, const QString& wanted, Id except)
 {
+    // (unique within its layer: the active one, for a new sublayer)
+    const Id layer = except != core::kNoId ? s.layerOfSublayer(except) : s.activeLayer();
     auto taken = [&](const QString& name) {
         return std::ranges::any_of(s.sublayers(), [&](const core::Sublayer& l) {
-            return l.id != except && QString::fromStdString(l.name) == name;
+            return l.id != except && l.layer == layer && QString::fromStdString(l.name) == name;
         });
     };
     const QString base = wanted.trimmed().isEmpty() ? QStringLiteral("Sublayer") : wanted.trimmed();
@@ -621,7 +623,15 @@ QString Editor::uniqueSublayerName(const core::Sketch& s, const QString& wanted,
 
 QString Editor::sublayerName(const core::Sketch& s, Id sublayer)
 {
-    return pyString(s.hasSublayer(sublayer) ? s.sublayer(sublayer).name : std::string());
+    if (!s.hasSublayer(sublayer)) {
+        return pyString(std::string());
+    }
+    // Its name, or "Layer/Sublayer" where another layer has one called that too.
+    const core::Sublayer& l = s.sublayer(sublayer);
+    const bool shared = std::ranges::any_of(s.sublayers(), [&](const core::Sublayer& o) {
+        return o.id != sublayer && o.name == l.name;
+    });
+    return pyString(shared ? s.layer(l.layer).name + "/" + l.name : l.name);
 }
 
 Id Editor::addSublayer(const QString& name)
@@ -656,13 +666,69 @@ void Editor::moveSublayer(Id sublayer, int index)
 
 void Editor::moveToSublayer(const std::vector<Id>& items, Id sublayer)
 {
-    // A curve takes its points along (unless they're another sublayer's curves' too).
+    // A curve takes its points along (unless they're another sublayer's curves' too); a text its
+    // points (and path).
     std::set<Id> moving(items.begin(), items.end());
     for (Id id : items) {
         if (m_sketch.hasEntity(id)) {
             for (Id p : m_sketch.definingPoints(id)) {
                 moving.insert(p);
             }
+        }
+        if (m_sketch.hasText(id)) {
+            const core::Text& t = m_sketch.text(id);
+            for (Id p : core::textPoints(m_sketch, t)) {
+                moving.insert(p);
+            }
+            if (t.path != core::kNoId) {
+                moving.insert(t.path);
+                for (Id p : m_sketch.definingPoints(t.path)) {
+                    moving.insert(p);
+                }
+            }
+        }
+    }
+    std::erase_if(moving, [&](Id id) { return m_sketch.isReference(id); });
+    const Id toLayer = m_sketch.layerOfSublayer(sublayer);
+    const bool crossing = std::ranges::any_of(moving, [&](Id id) {
+        const Id l = m_sketch.layerOf(id);
+        return l != core::kNoId && l != toLayer;
+    });
+    if (crossing) {
+        // Into another layer: nothing may stay behind that's tied to what goes (a point shared
+        // with a curve that stays, a text on moved points), since layers can't refer to each
+        // other. Constraints tying what goes to what stays are dropped.
+        for (const auto& [id, e] : m_sketch.entities()) {
+            if (moving.contains(id) || m_sketch.isReference(id)) {
+                continue;
+            }
+            for (Id p : m_sketch.definingPoints(id)) {
+                if (p != id && moving.contains(p)) {
+                    throw core::SketchError("a point is shared with " + name(m_sketch, id).toStdString()
+                                            + ", which isn't moving: move it too");
+                }
+            }
+        }
+        for (const auto& [id, t] : m_sketch.texts()) {
+            if (moving.contains(id)) {
+                continue;
+            }
+            std::vector<Id> on = core::textPoints(m_sketch, t);
+            on.push_back(t.path);
+            if (std::ranges::any_of(on, [&](Id p) { return moving.contains(p); })) {
+                throw core::SketchError("a text sits on that geometry: move it too");
+            }
+        }
+        std::vector<Id> ties;
+        for (const auto& [cid, c] : m_sketch.constraints()) {
+            const bool some = std::ranges::any_of(c.refs, [&](Id r) { return moving.contains(r); });
+            const bool all = std::ranges::all_of(c.refs, [&](Id r) { return moving.contains(r) || m_sketch.isReference(r); });
+            if (some && !all) {
+                ties.push_back(cid);
+            }
+        }
+        for (Id cid : ties) {
+            m_sketch.remove(cid);
         }
     }
     for (Id id : moving) {
@@ -680,9 +746,81 @@ void Editor::moveToSublayer(const std::vector<Id>& items, Id sublayer)
     log(QStringLiteral("s.move_to_sublayer(%1, %2)").arg(list(m_sketch, items), sublayerName(m_sketch, sublayer)));
 }
 
+QString Editor::uniqueLayerName(const core::Sketch& s, const QString& wanted, Id except)
+{
+    auto taken = [&](const QString& name) {
+        return std::ranges::any_of(s.layers(), [&](const core::Layer& l) {
+            return l.id != except && QString::fromStdString(l.name) == name;
+        });
+    };
+    const QString base = wanted.trimmed().isEmpty() ? QStringLiteral("Layer") : wanted.trimmed();
+    if (!taken(base)) {
+        return base;
+    }
+    for (int n = 2;; ++n) {
+        const QString name = QStringLiteral("%1 %2").arg(base).arg(n);
+        if (!taken(name)) {
+            return name;
+        }
+    }
+}
+
+QString Editor::layerName(const core::Sketch& s, Id layer)
+{
+    return pyString(s.hasLayer(layer) ? s.layer(layer).name : std::string());
+}
+
+Id Editor::addLayer(const QString& name)
+{
+    const QString unique = uniqueLayerName(m_sketch, name);
+    const Id id = m_sketch.addLayer(unique.toStdString(), "Sublayer 1");
+    m_sketch.setActiveLayer(id);
+    log(QStringLiteral("s.add_layer(%1)").arg(pyString(unique.toStdString())));
+    return id;
+}
+
+void Editor::renameLayer(Id layer, const QString& name)
+{
+    const QString was = layerName(m_sketch, layer);
+    const QString unique = uniqueLayerName(m_sketch, name, layer);
+    m_sketch.renameLayer(layer, unique.toStdString());
+    log(QStringLiteral("s.rename_layer(%1, %2)").arg(was, pyString(unique.toStdString())));
+}
+
+void Editor::removeLayer(Id layer)
+{
+    const QString was = layerName(m_sketch, layer);
+    m_sketch.removeLayer(layer);
+    log(QStringLiteral("s.delete_layer(%1)").arg(was));
+}
+
+void Editor::moveLayer(Id layer, int index)
+{
+    m_sketch.moveLayer(layer, static_cast<size_t>(std::max(0, index)));
+    log(QStringLiteral("s.move_layer(%1, %2)").arg(layerName(m_sketch, layer)).arg(index));
+}
+
+std::vector<Id> Editor::project(const std::vector<Id>& sources)
+{
+    std::vector<Id> copies;
+    for (Id id : sources) {
+        copies.push_back(m_sketch.project(id));
+    }
+    log(QStringLiteral("s.project(%1)").arg(list(m_sketch, sources)));
+    return copies;
+}
+
+void Editor::breakLink(const std::vector<Id>& items)
+{
+    for (Id id : items) {
+        m_sketch.breakLink(id);
+    }
+    log(QStringLiteral("s.break_link(%1)").arg(list(m_sketch, items)));
+}
+
 Id Editor::fill(core::Vec2 at, const core::Color& color)
 {
-    const core::regions::Arrangement arrangement(m_sketch);
+    const core::regions::Arrangement arrangement(m_sketch, m_sketch.activeLayer());
     const auto region = arrangement.regionAt(at);
     if (!region) {
         const size_t loose = arrangement.looseEnds().size();
@@ -693,6 +831,9 @@ Id Editor::fill(core::Vec2 at, const core::Color& color)
     // The same area already filled: recolour that fill rather than stacking another.
     Id id = core::kNoId;
     for (const auto& [fid, f] : m_sketch.fills()) {
+        if (f.layer != m_sketch.activeLayer()) {
+            continue;
+        }
         const auto there = core::regions::resolve(arrangement, f);
         // (Outlines, not just curves and area: two equal circles overlapping make two crescents
         // with the same curves and the same area.)
@@ -733,6 +874,9 @@ void Editor::remove(Id id)
 
 void Editor::setFixed(Id id, bool fixed)
 {
+    if (!fixed && m_sketch.isProjection(id)) {
+        throw core::SketchError("projected geometry stays where its original is: break the link to change it");
+    }
     m_sketch.entity(id).fixed = fixed;
     log(QStringLiteral("%1.fixed = %2").arg(name(m_sketch, id), fixed ? "True" : "False"));
 }

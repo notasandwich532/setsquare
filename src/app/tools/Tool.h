@@ -70,6 +70,8 @@ enum class ToolKind
     Symmetric,
     Collinear,
     Fix,
+
+    Project,
 };
 
 struct ToolEvent

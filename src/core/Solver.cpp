@@ -1072,10 +1072,20 @@ void Solver::endDrag()
 
 SolveResult solve(Sketch& sketch)
 {
-    Solver solver(sketch);
-    SolveResult result = solver.solve();
-    if (result.ok) {
-        solver.writeBack(sketch);
+    // Layers share no unknowns (projections are fixed copies), so one solve does them all; but a
+    // projection is a constant there, so when its original moves, it's moved and solved again
+    // (once per layer it passes through, at most).
+    sketch.syncProjections();
+    SolveResult result;
+    for (size_t pass = 0; pass <= sketch.layers().size(); ++pass) {
+        Solver solver(sketch);
+        result = solver.solve();
+        if (result.ok) {
+            solver.writeBack(sketch);
+        }
+        if (!result.ok || !sketch.syncProjections()) {
+            break;
+        }
     }
     return result;
 }
@@ -1083,6 +1093,7 @@ SolveResult solve(Sketch& sketch)
 SolveResult solveHolding(Sketch& sketch, const std::vector<Id>& points)
 {
     Sketch held = sketch;
+    held.syncProjections();
     {
         Solver solver(held);
         solver.beginDrag(points);  // pulled softly towards where they are now
