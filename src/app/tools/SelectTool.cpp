@@ -104,7 +104,9 @@ void SelectTool::startDrag()
                 }
             }
             else if (sketch.hasText(id)) {
-                points.insert(sketch.text(id).anchor);  // a text moves by its anchor
+                for (core::Id p : core::textPoints(sketch, sketch.text(id))) {
+                    points.insert(p);  // a text moves by its anchor (and its box, all of it)
+                }
             }
         }
         doc().beginDrag({points.begin(), points.end()});

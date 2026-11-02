@@ -16,8 +16,8 @@ std::vector<std::vector<core::Point>> make(const core::Text& text, const core::S
 // Makes the shape afresh into `text`.
 void update(core::Text& text, const core::Sketch* sketch = nullptr);
 
-// Remakes the shape of each text along a path whose curve has changed since (after a solve, or as
-// a drag goes).
+// Remakes the shape of each text along a path, or in a box, whose curve or box has changed since
+// (after a solve, or as a drag goes).
 void refreshPathTexts(core::Sketch& sketch);
 
 // The installed font families whose names contain `search` (any case), sorted; all of them if

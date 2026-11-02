@@ -644,8 +644,32 @@ void Sketch::remove(Id id)
         return;
     }
     if (auto t = m_texts.find(id); t != m_texts.end()) {
-        // The text, and its anchor too unless something else is built on it.
+        // The text, and its anchor too unless something else is built on it. A box text takes
+        // its box (the construction lines between its corners) with it.
         const Id anchor = t->second.anchor;
+        if (t->second.inBox()) {
+            const std::vector<Id> corners = textPoints(*this, t->second);
+            m_texts.erase(t);
+            std::vector<Id> sides;
+            for (const auto& [eid, e] : m_entities) {
+                const auto* l = std::get_if<Line>(&e.geom);
+                if (l && e.construction && std::ranges::find(corners, l->p1) != corners.end()
+                    && std::ranges::find(corners, l->p2) != corners.end()) {
+                    sides.push_back(eid);
+                }
+            }
+            for (Id side : sides) {
+                if (hasEntity(side)) {
+                    remove(side);  // (corners nothing else uses go with them)
+                }
+            }
+            for (Id corner : corners) {
+                if (hasEntity(corner) && !isReference(corner) && !isPointUsed(corner)) {
+                    remove(corner);
+                }
+            }
+            return;
+        }
         m_texts.erase(t);
         const bool constrained = std::ranges::any_of(m_constraints, [&](const auto& kv) {
             return std::ranges::find(kv.second.refs, anchor) != kv.second.refs.end();
@@ -699,7 +723,8 @@ void Sketch::remove(Id id)
         m_strokes.erase(d);
     }
     std::erase_if(m_texts, [&](const auto& kv) {
-        return doomed.contains(kv.second.anchor) || doomed.contains(kv.second.path);
+        return doomed.contains(kv.second.anchor) || doomed.contains(kv.second.path) || doomed.contains(kv.second.boxSide)
+            || doomed.contains(kv.second.boxCorner);
     });
     std::erase_if(m_constraints, [&](const auto& kv) {
         return std::ranges::any_of(kv.second.refs, [&](Id r) { return doomed.contains(r); });
@@ -877,6 +902,39 @@ bool textVAlignFromString(const std::string& name, TextVAlign& out)
     return false;
 }
 
+std::vector<Id> textPoints(const Sketch& s, const Text& t)
+{
+    std::vector<Id> out{t.anchor};
+    if (!t.inBox()) {
+        return out;
+    }
+    out.push_back(t.boxSide);
+    out.push_back(t.boxCorner);
+    // The fourth corner: joined by a construction line to both the anchor and the far corner.
+    auto ends = [&](Id p) {
+        std::vector<Id> others;
+        for (const auto& [id, e] : s.entities()) {
+            if (const auto* l = std::get_if<Line>(&e.geom); l && e.construction) {
+                if (l->p1 == p) {
+                    others.push_back(l->p2);
+                }
+                else if (l->p2 == p) {
+                    others.push_back(l->p1);
+                }
+            }
+        }
+        return others;
+    };
+    const std::vector<Id> fromAnchor = ends(t.anchor), fromCorner = ends(t.boxCorner);
+    for (Id p : fromAnchor) {
+        if (p != t.boxSide && std::ranges::find(fromCorner, p) != fromCorner.end()) {
+            out.push_back(p);
+            break;
+        }
+    }
+    return out;
+}
+
 Point textToWorld(const Point& anchor, double angleDeg, const Point& local)
 {
     const double a = angleDeg * std::numbers::pi / 180.0;
@@ -899,6 +957,11 @@ void checkText(const Sketch& s, const Text& t)
     }
     if (!std::isfinite(t.angle) || !std::isfinite(t.spacing)) {
         throw SketchError("text: the angle and spacing must be numbers");
+    }
+    for (Id corner : {t.boxSide, t.boxCorner}) {
+        if (corner != kNoId && (!s.hasEntity(corner) || s.entity(corner).kind() != EntityKind::Point)) {
+            throw SketchError("text: its box corners must be points");
+        }
     }
     if (t.path != kNoId) {
         if (!s.hasEntity(t.path) || s.entity(t.path).kind() == EntityKind::Point || s.isReference(t.path)) {

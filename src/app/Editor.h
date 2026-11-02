@@ -92,6 +92,8 @@ public:
     core::Id fill(core::Vec2 at, const core::Color& color);
     // Text at t.anchor (an existing point); its letter shapes are made here from its settings.
     core::Id text(core::Text t);
+    // Text in a box: a construction rectangle between two corner points, made here.
+    core::Id textBox(core::Text t, core::Id corner, core::Id opposite);
     void setText(core::Text t);  // by t.id: new settings (and shape)
 
     // Unchecked (inference while drawing); Document::addConstraint is the checked version.

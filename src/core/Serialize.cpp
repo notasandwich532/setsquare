@@ -190,6 +190,9 @@ std::string toJson(const Sketch& sketch, bool compact, const std::vector<std::st
             if (t.path != kNoId) {
                 j["path"] = t.path;
             }
+            if (t.inBox()) {
+                j["box"] = {t.boxSide, t.boxCorner};
+            }
             if (t.hasColor) {
                 j["color"] = t.color.hex();
             }
@@ -281,6 +284,10 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
             t.flipH = j.value("flip_h", false);
             t.flipV = j.value("flip_v", false);
             t.path = j.value("path", Id{kNoId});
+            if (j.contains("box")) {
+                t.boxSide = j.at("box").at(0).get<Id>();
+                t.boxCorner = j.at("box").at(1).get<Id>();
+            }
             if (!textAlignFromString(j.value("align", std::string("left")), t.align)
                 || !textVAlignFromString(j.value("valign", std::string("baseline")), t.valign)) {
                 throw SketchError("unknown text alignment");

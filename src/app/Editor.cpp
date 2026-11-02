@@ -511,7 +511,7 @@ QString textArgs(const core::Text& t)
     QStringList args;
     args << QStringLiteral("height=") + Editor::number(t.height);
     args << QStringLiteral("font=") + pyString(t.font);
-    if (t.angle != 0.0) {
+    if (t.angle != 0.0 && !t.inBox() && t.path == core::kNoId) {  // (a box or path sets its own)
         args << QStringLiteral("angle=") + Editor::number(t.angle);
     }
     if (t.bold) {
@@ -554,6 +554,41 @@ Id Editor::text(core::Text t)
     const Id id = m_sketch.addText(t);
     const QString where = t.path != core::kNoId ? QStringLiteral("path=") + name(m_sketch, t.path) : name(m_sketch, t.anchor);
     log(QStringLiteral("%1 = s.text(%2, %3, %4)").arg(name(m_sketch, id), pyString(t.text), where, textArgs(t)));
+    return id;
+}
+
+Id Editor::textBox(core::Text t, Id corner, Id opposite)
+{
+    // The box: a construction rectangle between the two corners (level and upright, so it can be
+    // dimensioned; take those constraints off to turn it, and the text turns with it).
+    const QString a = name(m_sketch, corner), b = name(m_sketch, opposite);
+    const build::Rectangle r = build::rectangle(m_sketch, corner, opposite);
+    for (Id side : r.sides) {
+        m_sketch.entity(side).construction = true;
+    }
+    // Its corners by where they are: the text runs along the bottom, from the left.
+    auto at = [&](Id p) { return m_sketch.point(p); };
+    double x0 = 1e300, y0 = 1e300;
+    for (Id p : r.corners) {
+        x0 = std::min(x0, at(p).x);
+        y0 = std::min(y0, at(p).y);
+    }
+    for (Id p : r.corners) {
+        const bool left = std::abs(at(p).x - x0) < 1e-9, bottom = std::abs(at(p).y - y0) < 1e-9;
+        if (left && bottom) {
+            t.anchor = p;
+        }
+        else if (!left && bottom) {
+            t.boxSide = p;
+        }
+        else if (!left && !bottom) {
+            t.boxCorner = p;
+        }
+    }
+    t.path = core::kNoId;
+    textshapes::update(t, &m_sketch);
+    const Id id = m_sketch.addText(t);
+    log(QStringLiteral("%1 = s.text(%2, box=(%3, %4), %5)").arg(name(m_sketch, id), pyString(t.text), a, b, textArgs(t)));
     return id;
 }
 

@@ -855,6 +855,49 @@ QPainterPath layoutAlongPath(const core::Text& t, const core::Sketch& s, const Q
     return path;
 }
 
+// A box text's box, from its corners: which way its bottom side runs (degrees) and its size.
+struct Box
+{
+    double angle = 0, width = 0, height = 0;
+};
+Box boxOf(const core::Sketch& s, const core::Text& t)
+{
+    const core::Point& a = s.point(t.anchor);
+    const core::Point& b = s.point(t.boxSide);
+    const core::Point& c = s.point(t.boxCorner);
+    const double ux = b.x - a.x, uy = b.y - a.y;
+    const double len = std::hypot(ux, uy);
+    Box box;
+    if (len <= 0) {
+        return box;
+    }
+    box.angle = std::atan2(uy, ux) * 180.0 / std::numbers::pi;
+    box.width = len;
+    box.height = (-(uy / len) * (c.x - a.x) + (ux / len) * (c.y - a.y));  // across, to the left
+    return box;
+}
+
+// The letters in a box (same units; the anchor, the box's corner, at 0, 0): each line against
+// its left side, middle or right side, the block against its top, middle or bottom.
+QPainterPath layoutInBox(const core::Text& t, const core::Sketch& s, const QFont& font, double capHeight,
+                         double mmPerPixel)
+{
+    const Box box = boxOf(s, t);
+    core::Text placed = t;
+    // A block hanging from the top, centred on the middle, or sitting on the bottom (a baseline
+    // alignment means the bottom, in a box).
+    if (placed.valign == core::TextVAlign::Baseline) {
+        placed.valign = core::TextVAlign::Bottom;
+    }
+    QPainterPath path = layoutLines(placed, font, capHeight);
+    const double x = t.align == core::TextAlign::Left ? 0.0 : t.align == core::TextAlign::Center ? box.width / 2 : box.width;
+    const double y = placed.valign == core::TextVAlign::Top ? box.height
+        : placed.valign == core::TextVAlign::Middle         ? box.height / 2
+                                                            : 0.0;
+    path.translate(x / mmPerPixel, -y / mmPerPixel);  // (font pixels, y down)
+    return path;
+}
+
 // A fingerprint of what a path text's curve is now (its points and size), to skip remaking.
 std::size_t curveKey(const core::Sketch& s, core::Id curve)
 {
@@ -892,6 +935,7 @@ std::vector<std::vector<core::Point>> make(const core::Text& t, const core::Sket
     const double mmPerPixel = t.height / capHeight;
 
     QPainterPath path = t.path != core::kNoId && sketch ? layoutAlongPath(t, *sketch, font, capHeight, mmPerPixel)
+        : t.inBox() && sketch                           ? layoutInBox(t, *sketch, font, capHeight, mmPerPixel)
                                                         : layoutLines(t, font, capHeight);
     switch (t.outline) {
         case core::TextOutline::AsDesigned: break;
@@ -921,20 +965,43 @@ std::vector<std::vector<core::Point>> make(const core::Text& t, const core::Sket
     return out;
 }
 
+// What a linked text (along a path, or in a box) depends on now, to skip remaking it if unchanged.
+std::size_t linkKey(const core::Sketch& s, const core::Text& t)
+{
+    if (t.path != core::kNoId) {
+        return s.hasEntity(t.path) ? curveKey(s, t.path) : 0;
+    }
+    if (t.inBox()) {
+        std::size_t key = 17;
+        for (core::Id p : {t.anchor, t.boxSide, t.boxCorner}) {
+            if (!s.hasEntity(p)) {
+                return 0;
+            }
+            key = key * 1000003u ^ std::hash<long long>{}(std::llround(s.point(p).x * 1e6));
+            key = key * 1000003u ^ std::hash<long long>{}(std::llround(s.point(p).y * 1e6));
+        }
+        return key;
+    }
+    return 0;
+}
+
 void update(core::Text& text, const core::Sketch* sketch)
 {
     if (text.path != core::kNoId) {
         text.angle = 0.0;  // (the curve sets the letters' directions)
     }
+    if (text.inBox() && sketch) {
+        text.angle = boxOf(*sketch, text).angle;  // turned with its box
+    }
     text.shape = make(text, sketch);
-    text.layoutKey = text.path != core::kNoId && sketch && sketch->hasEntity(text.path) ? curveKey(*sketch, text.path) : 0;
+    text.layoutKey = sketch ? linkKey(*sketch, text) : 0;
 }
 
 void refreshPathTexts(core::Sketch& sketch)
 {
     std::vector<core::Text> changed;
     for (const auto& [id, t] : sketch.texts()) {
-        if (t.path != core::kNoId && sketch.hasEntity(t.path) && curveKey(sketch, t.path) != t.layoutKey) {
+        if ((t.path != core::kNoId || t.inBox()) && linkKey(sketch, t) != t.layoutKey) {
             changed.push_back(t);
         }
     }

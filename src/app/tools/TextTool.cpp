@@ -13,9 +13,38 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPlainTextEdit>
+#include <QSignalBlocker>
+
+#include <algorithm>
+#include <cmath>
 
 using core::Id;
 using core::kNoId;
+
+namespace
+{
+// The vertical choices, as offered for each kind (in a box: against its top, middle or bottom).
+void fillVertical(QComboBox* box, bool inBox, core::TextVAlign current)
+{
+    const QSignalBlocker block(box);
+    box->clear();
+    if (inBox) {
+        box->addItem(QObject::tr("Top"), int(core::TextVAlign::Top));
+        box->addItem(QObject::tr("Middle"), int(core::TextVAlign::Middle));
+        box->addItem(QObject::tr("Bottom"), int(core::TextVAlign::Bottom));
+        if (current == core::TextVAlign::Baseline) {
+            current = core::TextVAlign::Bottom;
+        }
+    }
+    else {
+        box->addItem(QObject::tr("Baseline"), int(core::TextVAlign::Baseline));
+        box->addItem(QObject::tr("Top"), int(core::TextVAlign::Top));
+        box->addItem(QObject::tr("Middle"), int(core::TextVAlign::Middle));
+        box->addItem(QObject::tr("Bottom"), int(core::TextVAlign::Bottom));
+    }
+    box->setCurrentIndex(std::max(0, box->findData(int(current))));
+}
+}  // namespace
 
 void TextTool::buildPanel()
 {
@@ -30,20 +59,28 @@ void TextTool::buildPanel()
     t.outline = static_cast<core::TextOutline>(o.textOutline);
     t.minThickness = o.textMinThickness;
     t.spacing = o.textSpacing;
+    t.valign = core::TextVAlign::Top;
     if (m_editing != kNoId && s.hasText(m_editing)) {
         t = s.text(m_editing);
     }
     else {
         m_editing = kNoId;
     }
+    const bool pointText = m_editing != kNoId && !t.inBox() && t.path == kNoId;
 
-    m_type = panel()->addChoice(QObject::tr("Type"), "type", {QObject::tr("Text"), QObject::tr("Along a path")},
-                                t.path != kNoId ? 1 : 0);
-    m_position = addPick(QObject::tr("Position"), "position",
-                         QObject::tr("click where the text goes (or a point to anchor it to)"),
+    QStringList kinds{QObject::tr("Text box"), QObject::tr("Along a path")};
+    if (pointText) {
+        kinds << QObject::tr("At a point");
+    }
+    m_type = panel()->addChoice(QObject::tr("Type"), "type", kinds, pointText ? 2 : t.path != kNoId ? 1 : 0);
+    m_corner = addPick(QObject::tr("Corner"), "corner", QObject::tr("click a corner of the text's box"),
+                       [this](Id id) { return isPoint(id); }, false);
+    m_opposite = addPick(QObject::tr("Opposite corner"), "opposite", QObject::tr("click the opposite corner of the box"),
                          [this](Id id) { return isPoint(id); }, false);
     m_path = addPick(QObject::tr("Path"), "path", QObject::tr("click the line, arc or circle to set the text along"),
                      [this](Id id) { return isCurve(id); }, false);
+    m_position = addPick(QObject::tr("Position"), "position", QObject::tr("click where the text goes"),
+                         [this](Id id) { return isPoint(id); }, false);
     m_text = new QPlainTextEdit(QString::fromStdString(t.text));
     m_text->setObjectName(QStringLiteral("text"));
     m_text->setFixedHeight(64);
@@ -66,9 +103,8 @@ void TextTool::buildPanel()
     m_align = panel()->addChoice(QObject::tr("Alignment"), "align",
                                  {QObject::tr("Left"), QObject::tr("Centre"), QObject::tr("Right")},
                                  static_cast<int>(t.align));
-    m_valign = panel()->addChoice(QObject::tr("Vertical"), "valign",
-                                  {QObject::tr("Baseline"), QObject::tr("Top"), QObject::tr("Middle"), QObject::tr("Bottom")},
-                                  static_cast<int>(t.valign));
+    m_valign = panel()->addChoice(QObject::tr("Vertical"), "valign", {});
+    fillVertical(m_valign, kind() == Kind::Box, t.valign);
     m_flipH = panel()->addCheck(QObject::tr("Flip horizontally"), "flipH", t.flipH);
     m_flipV = panel()->addCheck(QObject::tr("Flip vertically"), "flipV", t.flipV);
     m_outline = panel()->addChoice(QObject::tr("Outline"), "outline",
@@ -82,21 +118,29 @@ void TextTool::buildPanel()
     m_thickness->setSpecialValueText(QObject::tr("Off"));
 
     if (m_editing != kNoId) {
-        if (t.path != kNoId) {
+        if (t.inBox()) {
+            setPicked(m_corner, {t.anchor});
+            setPicked(m_opposite, {t.boxCorner});
+        }
+        else if (t.path != kNoId) {
             setPicked(m_path, {t.path});
         }
         else {
             setPicked(m_position, {t.anchor});
         }
-        setPickEnabled(m_position, false);
-        setPickEnabled(m_path, false);
+        for (int pick : {m_corner, m_opposite, m_path, m_position}) {
+            setPickEnabled(pick, false);
+        }
         m_type->setEnabled(false);
     }
 }
 
-bool TextTool::alongPath() const
+TextTool::Kind TextTool::kind() const
 {
-    return m_type && m_type->currentIndex() == 1;
+    if (!m_type) {
+        return Kind::Box;
+    }
+    return static_cast<Kind>(m_type->currentIndex());
 }
 
 core::Text TextTool::settings() const
@@ -104,69 +148,113 @@ core::Text TextTool::settings() const
     core::Text t;
     const core::Sketch& s = doc().sketch();
     if (m_editing != kNoId && s.hasText(m_editing)) {
-        t = s.text(m_editing);  // (keeps its id, anchor, path and colour)
+        t = s.text(m_editing);  // (keeps its id, anchor, box, path and colour)
     }
     t.text = m_text->toPlainText().toStdString();
     t.font = m_font->family().toStdString();
     t.height = m_height->value();
-    t.angle = alongPath() ? 0.0 : m_angle->value();
+    if (kind() == Kind::Point) {
+        t.angle = m_angle->value();
+    }
     t.bold = m_bold->isChecked();
     t.italic = m_italic->isChecked();
     t.spacing = m_spacing->value();
     t.align = static_cast<core::TextAlign>(m_align->currentIndex());
-    t.valign = static_cast<core::TextVAlign>(m_valign->currentIndex());
+    t.valign = static_cast<core::TextVAlign>(m_valign->currentData().toInt());
     t.flipH = m_flipH->isChecked();
     t.flipV = m_flipV->isChecked();
     t.outline = static_cast<core::TextOutline>(m_outline->currentIndex());
     t.minThickness = m_thickness->value();
-    if (alongPath() && !picked(m_path).empty()) {
+    if (kind() == Kind::Path && !picked(m_path).empty()) {
         t.path = picked(m_path).front();
         t.anchor = s.definingPoints(t.path).front();
     }
-    else if (!alongPath()) {
-        t.path = kNoId;
-    }
     return t;
+}
+
+bool TextTool::corners(core::Vec2& a, core::Vec2& b) const
+{
+    const core::Sketch& s = doc().sketch();
+    auto corner = [&](int input, int k, core::Vec2& out) {
+        if (!picked(input).empty()) {
+            const core::Point& p = s.point(picked(input).front());
+            out = {p.x, p.y};
+            return true;
+        }
+        if (m_hasCorner[k]) {
+            out = m_cornerAt[k].pos;
+            return true;
+        }
+        return false;
+    };
+    if (!corner(m_corner, 0, a)) {
+        return false;
+    }
+    if (!corner(m_opposite, 1, b)) {
+        b = mouse();  // following the cursor until it's placed
+    }
+    return true;
 }
 
 bool TextTool::where(core::Vec2& at) const
 {
     const core::Sketch& s = doc().sketch();
-    if (alongPath()) {
-        if (picked(m_path).empty()) {
-            return false;
+    switch (kind()) {
+        case Kind::Box: {
+            core::Vec2 b;
+            return corners(at, b);
         }
-        const core::Point& p = s.point(s.definingPoints(picked(m_path).front()).front());
-        at = {p.x, p.y};
-        return true;
-    }
-    if (!picked(m_position).empty()) {
-        const core::Point& p = s.point(picked(m_position).front());
-        at = {p.x, p.y};
-        return true;
-    }
-    if (m_hasLocation) {
-        at = m_location.pos;
-        return true;
+        case Kind::Path: {
+            if (picked(m_path).empty()) {
+                return false;
+            }
+            const core::Point& p = s.point(s.definingPoints(picked(m_path).front()).front());
+            at = {p.x, p.y};
+            return true;
+        }
+        case Kind::Point:
+            if (!picked(m_position).empty()) {
+                const core::Point& p = s.point(picked(m_position).front());
+                at = {p.x, p.y};
+                return true;
+            }
+            if (m_hasLocation) {
+                at = m_location.pos;
+                return true;
+            }
+            return false;
     }
     return false;
 }
 
 bool TextTool::pickLocation(int input, const Snap& snap)
 {
-    if (input != m_position) {
-        return false;
+    if (input == m_corner || input == m_opposite) {
+        const int k = input == m_corner ? 0 : 1;
+        m_cornerAt[k] = snap;
+        m_hasCorner[k] = true;
+        setCurrentPick(k == 0 && picked(m_opposite).empty() && !m_hasCorner[1] ? m_opposite : -1);
+        return true;
     }
-    m_location = snap;
-    m_hasLocation = true;
-    setCurrentPick(-1);
-    return true;
+    if (input == m_position) {
+        m_location = snap;
+        m_hasLocation = true;
+        setCurrentPick(-1);
+        return true;
+    }
+    return false;
 }
 
 bool TextTool::ready() const
 {
+    if (m_text->toPlainText().isEmpty()) {
+        return false;
+    }
+    if (kind() == Kind::Box && m_editing == kNoId) {
+        return (!picked(m_corner).empty() || m_hasCorner[0]) && (!picked(m_opposite).empty() || m_hasCorner[1]);
+    }
     core::Vec2 at;
-    return where(at) && !m_text->toPlainText().isEmpty();
+    return where(at);
 }
 
 void TextTool::changed()
@@ -174,28 +262,29 @@ void TextTool::changed()
     if (!m_thickness) {
         return;
     }
-    const bool path = alongPath();
-    panel()->setRowVisible(pickButton(m_position)->parentWidget(), !path);
-    panel()->setRowVisible(pickButton(m_path)->parentWidget(), path);
-    panel()->setRowVisible(m_angle, !path);
-    if (path && picked(m_path).empty()) {
-        setCurrentPick(m_path);
+    const Kind k = kind();
+    for (int pick : {m_corner, m_opposite}) {
+        panel()->setRowVisible(pickButton(pick)->parentWidget(), k == Kind::Box);
     }
-    else if (!path && picked(m_position).empty() && !m_hasLocation) {
-        setCurrentPick(m_position);
-    }
-    // Remade only when something that shapes the letters changed.
-    const core::Text t = settings();
-    const std::string key = t.text + '\n' + t.font + '\n' + std::to_string(t.height) + (t.bold ? "b" : "")
-        + (t.italic ? "i" : "") + std::to_string(static_cast<int>(t.outline)) + ':' + std::to_string(t.minThickness)
-        + ':' + std::to_string(t.spacing) + ':' + std::to_string(static_cast<int>(t.align))
-        + std::to_string(static_cast<int>(t.valign)) + (t.flipH ? "h" : "") + (t.flipV ? "v" : "") + ':'
-        + std::to_string(t.path);
-    if (key != m_shapeKey) {
-        m_shapeKey = key;
-        m_shape = (path && t.path == kNoId) ? decltype(m_shape){} : textshapes::make(t, &doc().sketch());
+    panel()->setRowVisible(pickButton(m_path)->parentWidget(), k == Kind::Path);
+    panel()->setRowVisible(pickButton(m_position)->parentWidget(), k == Kind::Point);
+    panel()->setRowVisible(m_angle, k == Kind::Point);
+    // The vertical choices for the kind (a box has no baseline to sit on).
+    const bool boxChoices = m_valign->findData(int(core::TextVAlign::Baseline)) < 0;
+    if (boxChoices != (k == Kind::Box)) {
+        fillVertical(m_valign, k == Kind::Box, static_cast<core::TextVAlign>(m_valign->currentData().toInt()));
     }
     if (m_editing == kNoId) {
+        if (k == Kind::Path && picked(m_path).empty()) {
+            setCurrentPick(m_path);
+        }
+        else if (k == Kind::Box && picked(m_corner).empty() && !m_hasCorner[0]) {
+            setCurrentPick(m_corner);
+        }
+    }
+    m_shapeKey.clear();  // (remade on the next paint, for the box as it is then)
+    if (m_editing == kNoId) {
+        const core::Text t = settings();
         SketchView::ModifyOptions& o = view().modifyOptions();
         o.textFont = QString::fromStdString(t.font);
         o.textHeight = t.height;
@@ -209,39 +298,73 @@ void TextTool::changed()
 
 void TextTool::paintPreview(QPainter& painter)
 {
-    core::Vec2 at;
-    if (!where(at)) {
-        if (alongPath()) {
+    const QColor color = theme::canvas().underConstrained;
+    core::Text t = settings();
+    core::Point origin;  // where the shape's (0, 0) goes, and which way it's turned
+    double angle = t.angle;
+    std::string key;
+    core::Sketch scratch;  // a new box, for laying the text out in before it exists
+
+    if (kind() == Kind::Box && m_editing == kNoId) {
+        core::Vec2 a, b;
+        if (!corners(a, b)) {
+            return;
+        }
+        const double x0 = std::min(a.x, b.x), x1 = std::max(a.x, b.x), y0 = std::min(a.y, b.y), y1 = std::max(a.y, b.y);
+        painter.setPen(QPen(color, 1.0, Qt::DashLine));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawPolygon(QPolygonF({view().toScreen({x0, y0}), view().toScreen({x1, y0}), view().toScreen({x1, y1}),
+                                       view().toScreen({x0, y1})}));
+        t.anchor = scratch.addPoint(x0, y0);
+        t.boxSide = scratch.addPoint(x1, y0);
+        t.boxCorner = scratch.addPoint(x1, y1);
+        origin = {x0, y0};
+        angle = 0.0;
+        key = std::to_string(std::lround((x1 - x0) * 1000)) + 'x' + std::to_string(std::lround((y1 - y0) * 1000));
+    }
+    else if (kind() == Kind::Point && m_editing == kNoId) {
+        core::Vec2 at;
+        if (!where(at)) {
+            at = mouse();
+        }
+        origin = {at.x, at.y};
+    }
+    else {
+        core::Vec2 at;
+        if (!where(at)) {
             return;  // nothing to follow yet
         }
-        at = mouse();  // following the cursor until it's placed
+        if (m_editing != kNoId && t.inBox()) {
+            angle = doc().sketch().text(m_editing).angle;
+        }
+        origin = {at.x, at.y};
     }
-    if (m_shapeKey.empty()) {
-        changed();
+    const core::Sketch& layoutIn = (kind() == Kind::Box && m_editing == kNoId) ? scratch : doc().sketch();
+    // Remade only when something that shapes the letters changed.
+    key += t.text + '\n' + t.font + '\n' + std::to_string(t.height) + (t.bold ? "b" : "") + (t.italic ? "i" : "")
+        + std::to_string(static_cast<int>(t.outline)) + ':' + std::to_string(t.minThickness) + ':'
+        + std::to_string(t.spacing) + ':' + std::to_string(static_cast<int>(t.align))
+        + std::to_string(static_cast<int>(t.valign)) + (t.flipH ? "h" : "") + (t.flipV ? "v" : "") + ':'
+        + std::to_string(t.path) + ':' + std::to_string(static_cast<int>(kind()));
+    if (key != m_shapeKey) {
+        m_shapeKey = key;
+        m_shape = (kind() == Kind::Path && t.path == kNoId) ? decltype(m_shape){} : textshapes::make(t, &layoutIn);
     }
-    const core::Text t = settings();
     QPainterPath path;
     path.setFillRule(Qt::WindingFill);
     for (const auto& contour : m_shape) {
         QPolygonF polygon;
         for (const core::Point& p : contour) {
-            const core::Point w = core::textToWorld({at.x, at.y}, t.angle, p);
+            const core::Point w = core::textToWorld(origin, angle, p);
             polygon << view().toScreen({w.x, w.y});
         }
         path.addPolygon(polygon);
         path.closeSubpath();
     }
-    QColor fill = theme::canvas().underConstrained;
+    QColor fill = color;
     fill.setAlphaF(0.25);
     painter.fillPath(path, fill);
-    painter.strokePath(path, QPen(theme::canvas().underConstrained, 1.0, Qt::DashLine));
-    if (!alongPath()) {
-        // The anchor: a small cross where the text is placed from.
-        const QPointF a = view().toScreen(at);
-        painter.setPen(QPen(theme::canvas().underConstrained, 1.5));
-        painter.drawLine(a - QPointF(6, 0), a + QPointF(6, 0));
-        painter.drawLine(a - QPointF(0, 6), a + QPointF(0, 6));
-    }
+    painter.strokePath(path, QPen(color, 1.0, Qt::DashLine));
 }
 
 bool TextTool::commit()
@@ -251,17 +374,26 @@ bool TextTool::commit()
         emit view().message(QObject::tr("Text: type something first"));
         return false;
     }
-    const std::vector<Id> point = picked(m_position);
-    const Snap location = m_location;
-    const bool path = alongPath();
+    const Kind k = kind();
+    const std::vector<Id> corner = picked(m_corner), opposite = picked(m_opposite), point = picked(m_position);
+    const Snap cornerAt = m_cornerAt[0], oppositeAt = m_cornerAt[1], location = m_location;
     return view().tryEdit(QObject::tr("Text"), [&](Editor& ed) {
         if (m_editing != kNoId) {
             ed.setText(t);
             return;
         }
-        if (!path) {
-            t.anchor = !point.empty() ? point.front() : resolveSnap(ed, location);
+        switch (k) {
+            case Kind::Box: {
+                const Id a = !corner.empty() ? corner.front() : resolveSnap(ed, cornerAt);
+                const Id b = !opposite.empty() ? opposite.front() : resolveSnap(ed, oppositeAt);
+                ed.textBox(t, a, b);
+                break;
+            }
+            case Kind::Path: ed.text(t); break;
+            case Kind::Point:
+                t.anchor = !point.empty() ? point.front() : resolveSnap(ed, location);
+                ed.text(t);
+                break;
         }
-        ed.text(t);
     });
 }

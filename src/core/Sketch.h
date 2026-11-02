@@ -208,6 +208,13 @@ struct Text
     // Text along a curve (a line, arc or circle) instead of in lines: it follows the curve as it
     // moves. Its anchor is then the curve's first point, and the shape is remade as it changes.
     Id path = kNoId;
+    // Text in a box (a construction rectangle): anchor is its corner at the start of the bottom
+    // side, boxSide the other end of that side, boxCorner the corner opposite the anchor. The
+    // text is aligned in it (left/centre/right; top/middle/bottom), turned with it, and remade as
+    // it changes.
+    Id boxSide = kNoId;
+    Id boxCorner = kNoId;
+    bool inBox() const { return boxSide != kNoId && boxCorner != kNoId; }
     std::size_t layoutKey = 0;  // (not saved) what the shape was last made from, to skip remaking
     bool hasColor = false;
     Color color;  // when set: filled in this colour in the drawing (else like plain geometry)
@@ -216,6 +223,10 @@ struct Text
     // up), filled by the non-zero winding rule. Made by the app from the settings above.
     std::vector<std::vector<Point>> shape;
 };
+
+// The points a text sits on: its anchor, and a box text's box corners (all four). Moving them all
+// moves the text; deleting the text deletes its box.
+std::vector<Id> textPoints(const class Sketch& sketch, const Text& text);
 
 // The world position of a point in a text's own space.
 Point textToWorld(const Point& anchor, double angleDeg, const Point& local);

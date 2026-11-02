@@ -707,6 +707,13 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
         .def_property_readonly("valign", [textOf](const TextH& t) { return std::string(core::toString(textOf(t.id).valign)); })
         .def_property_readonly("flip_h", [textOf](const TextH& t) { return textOf(t.id).flipH; })
         .def_property_readonly("flip_v", [textOf](const TextH& t) { return textOf(t.id).flipV; })
+        .def_property_readonly("box", [textOf](const TextH& t) -> py::object {
+            const core::Text& text = textOf(t.id);
+            if (!text.inBox()) {
+                return py::none();
+            }
+            return wrapAll(core::textPoints(sketch(), text));
+        }, "A box text's box corners (from the one its text starts from), else None.")
         .def_property_readonly("path", [textOf](const TextH& t) -> py::object {
             const core::Text& text = textOf(t.id);
             return text.path != kNoId ? wrap(text.path) : py::none();
@@ -990,7 +997,8 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
             Call call;
             call.target().edit(QStringLiteral("Delete"), [&](Editor& ed) {
                 for (Id id : ids) {
-                    if (ed.sketch().hasEntity(id) || ed.sketch().hasConstraint(id) || ed.sketch().hasFill(id)) {
+                    const core::Sketch& s = ed.sketch();
+                    if (s.hasEntity(id) || s.hasConstraint(id) || s.hasFill(id) || s.hasText(id)) {
                         ed.remove(id);
                     }
                 }
@@ -1133,13 +1141,14 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
            "Raises ValueError if `at` isn't enclosed: see loose_ends().")
         .def("text", [](const SketchH&, const std::string& text, py::object at, double height, py::object font,
                         double angle, bool bold, bool italic, const std::string& outline, double minThickness,
-                        py::object color, double spacing, const std::string& align, const std::string& valign,
-                        bool flipH, bool flipV, py::object path) {
+                        py::object color, double spacing, const std::string& align, py::object valign,
+                        bool flipH, bool flipV, py::object path, py::object box) {
             core::Text t;
             t.spacing = spacing;
             t.flipH = flipH;
             t.flipV = flipV;
-            if (!core::textAlignFromString(align, t.align) || !core::textVAlignFromString(valign, t.valign)) {
+            const std::string vertical = !valign.is_none() ? valign.cast<std::string>() : box.is_none() ? "baseline" : "top";
+            if (!core::textAlignFromString(align, t.align) || !core::textVAlignFromString(vertical, t.valign)) {
                 throw py::value_error("align: 'left', 'center' or 'right'; valign: 'baseline', 'top', 'middle' or 'bottom'");
             }
             if (!path.is_none()) {
@@ -1148,9 +1157,10 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
                     throw py::value_error("path: a line, arc or circle");
                 }
             }
-            else if (at.is_none()) {
-                throw py::value_error("give where it goes (at=), or a curve to follow (path=)");
+            else if (at.is_none() && box.is_none()) {
+                throw py::value_error("give where it goes (at=, or a box=(corner, opposite)), or a curve to follow (path=)");
             }
+
             t.text = text;
             t.font = font.is_none() ? textshapes::defaultFamily().toStdString() : font.cast<std::string>();
             t.height = height;
@@ -1165,21 +1175,34 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
                 t.hasColor = true;
                 t.color = colorArg(color);
             }
-            return wrap(editReturningId("Text", [&](Editor& ed) {
+            if (!box.is_none()) {
+                const py::sequence corners = box.cast<py::sequence>();
+                if (corners.size() != 2) {
+                    throw py::value_error("box: (corner, opposite corner)");
+                }
+                return wrap(editReturningId("Text", [&](Editor& ed) {
+                    const Id a = pointArg(ed, corners[0]);
+                    const Id b = pointArg(ed, corners[1]);
+                    return ed.textBox(t, a, b);
+                }));
+            }            return wrap(editReturningId("Text", [&](Editor& ed) {
                 t.anchor = t.path != kNoId ? ed.sketch().definingPoints(t.path).front() : pointArg(ed, at);
                 return ed.text(t);
             }));
         }, py::arg("text"), py::arg("at") = py::none(), py::arg("height") = 10.0, py::arg("font") = py::none(),
            py::arg("angle") = 0.0, py::arg("bold") = false, py::arg("italic") = false,
            py::arg("outline") = "as_designed", py::arg("min_thickness") = 0.0, py::arg("color") = py::none(),
-           py::arg("spacing") = 0.0, py::arg("align") = "left", py::arg("valign") = "baseline",
+           py::arg("spacing") = 0.0, py::arg("align") = "left", py::arg("valign") = py::none(),
            py::arg("flip_h") = false, py::arg("flip_v") = false, py::arg("path") = py::none(),
+           py::arg("box") = py::none(),
            "Text with its baseline starting at `at` (a point, or (x, y) for a new one). height: capital letters, "
            "mm. outline: 'as_designed', 'merged' (overlaps joined) or 'silhouette' (outside edge only). "
            "min_thickness: thicken any part narrower than this (mm). color: fill it in the drawing. Lines split "
            "at \\n. spacing: extra between letters, % of the size. align/valign: which part sits on `at`. "
-           "flip_h/flip_v: mirrored. path=curve: set along a line, arc or circle instead (align: start/middle/end "
-           "of it; valign: standing on it, centred, or hanging below; flip_h: the other way round).")
+           "flip_h/flip_v: mirrored. box=(corner, opposite): in a box (a construction rectangle made between them; "
+           "align: against its left/centre/right, valign: top (the default)/middle/bottom). path=curve: set along a "
+           "line, arc or circle instead (align: start/middle/end of it; valign: standing on it, centred, or hanging "
+           "below; flip_h: the other way round).")
         .def("edit_text", [](const SketchH&, py::handle text, py::object str, py::object height, py::object font,
                              py::object angle, py::object bold, py::object italic, py::object outline,
                              py::object minThickness, py::object color, py::object spacing, py::object align,

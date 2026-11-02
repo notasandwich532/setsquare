@@ -135,12 +135,14 @@ TEST_CASE("Minimum thickness widens narrow strokes to it, and leaves wide enough
     CHECK(thick.y1 - thick.y0 < 10.0 + 3.0);  // the ends grow less than the full width
 }
 
-TEST_CASE("Text tool: click a place, type, search for a font, OK", "[text][tool]")
+TEST_CASE("Text tool: drag out a box, type, search for a font, OK", "[text][tool]")
 {
     Fixture f;
     f.view.setTool(ToolKind::Text);
-    QTest::mouseMove(&f.view, f.at(10, 20));
-    QTest::mouseClick(&f.view, Qt::LeftButton, {}, f.at(10, 20));
+    QTest::mouseMove(&f.view, f.at(10, 40));
+    QTest::mouseClick(&f.view, Qt::LeftButton, {}, f.at(10, 40));  // a corner (top left)
+    QTest::mouseMove(&f.view, f.at(70, 20));
+    QTest::mouseClick(&f.view, Qt::LeftButton, {}, f.at(70, 20));  // the opposite one
     auto* text = f.field<QPlainTextEdit>("text");
     text->selectAll();
     QTest::keyClicks(text, "Hi there");
@@ -167,11 +169,66 @@ TEST_CASE("Text tool: click a place, type, search for a font, OK", "[text][tool]
     CHECK(QString::fromStdString(t.font) == family);
     CHECK(t.height == Approx(8.0));
     CHECK_FALSE(t.shape.empty());
+    // In its box: the box's bottom-left corner first, the text in its top left.
+    REQUIRE(t.inBox());
     const Point& anchor = f.doc.sketch().point(t.anchor);
+    const Point& far = f.doc.sketch().point(t.boxCorner);
     CHECK(anchor.x == Approx(10.0).margin(0.5));
     CHECK(anchor.y == Approx(20.0).margin(0.5));
+    CHECK(far.x == Approx(70.0).margin(0.5));
+    CHECK(far.y == Approx(40.0).margin(0.5));
+    const Bounds b = boundsOf(t.shape);
+    CHECK(anchor.y + b.y1 == Approx(40.0).margin(0.3));  // caps up against the top
+    CHECK(anchor.x + b.x0 == Approx(10.0).margin(1.0));  // and against the left side
     REQUIRE_FALSE(f.recorded.isEmpty());
-    CHECK(f.recorded.last().contains("s.text(\"Hi there\""));
+    CHECK(f.recorded.last().contains("s.text(\"Hi there\", box=("));
+}
+
+TEST_CASE("Box text: aligned in its box, which it follows; dragged and deleted whole", "[text][box]")
+{
+    Document doc;
+    Id id = kNoId;
+    doc.edit("text", [&](Editor& ed) {
+        Sketch& s = const_cast<Sketch&>(ed.sketch());
+        Text t = sample("Mid");
+        t.align = TextAlign::Center;
+        t.valign = TextVAlign::Middle;
+        id = ed.textBox(t, s.addPoint(0, 0), s.addPoint(60, 30));
+    });
+    const Sketch& s = doc.sketch();
+    auto centre = [&] {
+        const Text& t = s.text(id);
+        const Bounds b = boundsOf(t.shape);
+        const Point c = textToWorld(s.point(t.anchor), t.angle, {(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2});
+        return c;
+    };
+    CHECK(centre().x == Approx(30.0).margin(0.8));
+    CHECK(centre().y == Approx(15.0).margin(0.8));
+    REQUIRE(textPoints(s, s.text(id)).size() == 4);
+
+    // Make the box bigger: the text stays in its middle.
+    doc.beginDrag({s.text(id).boxCorner});
+    doc.dragTo(40, 20);
+    doc.endDrag();
+    CHECK(centre().x == Approx(50.0).margin(0.8));
+    CHECK(centre().y == Approx(25.0).margin(0.8));
+
+    // Drag the whole of it (as dragging its letters does): box and text move together.
+    const std::vector<Id> all = textPoints(s, s.text(id));
+    doc.beginDrag(all);
+    doc.dragTo(100, 0);
+    doc.endDrag();
+    CHECK(s.point(s.text(id).anchor).x == Approx(100.0).margin(1e-6));
+    CHECK(s.point(s.text(id).boxCorner).x == Approx(200.0).margin(1e-6));
+    CHECK(centre().x == Approx(150.0).margin(0.8));
+
+    // Saved and loaded in its box; deleting it takes the box.
+    const Sketch back = fromJson(toJson(s));
+    CHECK(back.text(id).inBox());
+    const size_t lines = std::ranges::count_if(s.entities(), [](const auto& kv) { return kv.second.kind() == EntityKind::Line; });
+    doc.edit("delete", [&](Editor& ed) { ed.remove(id); });
+    const size_t after = std::ranges::count_if(s.entities(), [](const auto& kv) { return kv.second.kind() == EntityKind::Line; });
+    CHECK(lines - after == 4);
 }
 
 TEST_CASE("Text: drag it by its letters; double-click to edit; Delete removes it", "[text][tool]")
