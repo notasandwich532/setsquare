@@ -694,7 +694,9 @@ Id Editor::fill(core::Vec2 at, const core::Color& color)
     Id id = core::kNoId;
     for (const auto& [fid, f] : m_sketch.fills()) {
         const auto there = core::regions::resolve(arrangement, f);
-        if (there && there->boundary == region->boundary && there->area == region->area) {
+        // (Outlines, not just curves and area: two equal circles overlapping make two crescents
+        // with the same curves and the same area.)
+        if (there && there->boundary == region->boundary && std::ranges::equal(there->outer, region->outer, [](core::Vec2 a, core::Vec2 b) { return a.x == b.x && a.y == b.y; })) {
             id = fid;
         }
     }

@@ -41,3 +41,17 @@ assert f.broken and f.exists  # waits for its outline
 s.delete(f)
 assert not f.exists
 print("ok")
+
+# Two overlapping circles: three areas with the same two boundary curves (the crescents even have
+# the same area), each filled separately and found again after a move.
+doc.new()
+a = s.circle((0, 0), 10)
+b = s.circle((15, 0), 10)
+left = s.fill(at=(-5, 0), color="#ff0000")
+lens = s.fill(at=(7.5, 0), color="#00ff00")
+right = s.fill(at=(20, 0), color="#0000ff")
+assert len(s.fills) == 3
+assert isclose(lens.area, 45.3, rel_tol=0.02) and isclose(left.area, pi * 100 - lens.area, rel_tol=0.01)
+s.move([b], dx=2)
+assert lens.area < 30 and left.area > 285 and right.area > 285
+assert s.fill(at=(21, 0), color="#ffffff") == right and len(s.fills) == 3 and left.color == "#ff0000"

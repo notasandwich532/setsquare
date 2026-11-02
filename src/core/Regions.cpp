@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <numbers>
 #include <numeric>
@@ -411,13 +412,31 @@ std::optional<Region> Arrangement::regionAt(Vec2 p) const
     return std::nullopt;
 }
 
-std::optional<Region> Arrangement::regionBounded(const std::vector<Id>& boundary) const
+std::optional<Region> Arrangement::regionBounded(const std::vector<Id>& boundary, Vec2 near) const
 {
+    // Among the areas with this outline: one around `near` (the smallest, should they nest), else
+    // the one whose outline passes closest to it.
+    auto distance = [&](const Cycle& c) {
+        if (pointInPolygon(c.polygon, near)) {
+            return 0.0;
+        }
+        double d = std::numeric_limits<double>::infinity();
+        for (size_t k = 0; k < c.polygon.size(); ++k) {
+            d = std::min(d, segmentDistance(near, c.polygon[k], c.polygon[(k + 1) % c.polygon.size()]));
+        }
+        return d;
+    };
     std::optional<size_t> best;
+    double bestDistance = 0.0;
     for (size_t i = 0; i < m_cycles.size(); ++i) {
         const Cycle& c = m_cycles[i];
-        if (c.area > 1e-12 && c.curves == boundary && (!best || c.area < m_cycles[*best].area)) {
+        if (c.area <= 1e-12 || c.curves != boundary) {
+            continue;
+        }
+        const double d = distance(c);
+        if (!best || d < bestDistance || (d == bestDistance && c.area < m_cycles[*best].area)) {
             best = i;
+            bestDistance = d;
         }
     }
     if (best) {
@@ -434,7 +453,7 @@ std::vector<Vec2> Arrangement::looseEnds() const
 std::optional<Region> resolve(const Arrangement& arrangement, const Fill& fill)
 {
     if (!fill.boundary.empty()) {
-        if (auto r = arrangement.regionBounded(fill.boundary)) {
+        if (auto r = arrangement.regionBounded(fill.boundary, {fill.seed.x, fill.seed.y})) {
             return r;
         }
     }

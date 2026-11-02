@@ -33,8 +33,10 @@ public:
 
     // The smallest closed area around p, or nothing if p isn't enclosed.
     std::optional<Region> regionAt(Vec2 p) const;
-    // The area outlined by exactly these curves (sorted ids), if there is one.
-    std::optional<Region> regionBounded(const std::vector<Id>& boundary) const;
+    // The area outlined by exactly these curves (sorted ids), if there is one. Several areas can
+    // share the same curves (two overlapping circles make three), so the one around `near`, or
+    // else the closest to it.
+    std::optional<Region> regionBounded(const std::vector<Id>& boundary, Vec2 near) const;
     // Curve ends that don't meet anything: where an outline may be open.
     std::vector<Vec2> looseEnds() const;
 
