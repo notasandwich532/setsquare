@@ -305,15 +305,31 @@ bool Document::commitChecked(core::Sketch working, QString* error, const std::ve
         }
         return out;
     };
-    if (result.conflicting.size() > m_result.conflicting.size()) {
+    // Judged by the layer being edited: other layers are solved apart, and what's amiss there
+    // (or how their solver counts it) isn't this edit's doing.
+    const core::Id layer = working.activeLayer();
+    auto mine = [layer](const core::Sketch& s, const std::vector<core::Id>& ids) {
+        std::vector<core::Id> out;
+        for (core::Id id : ids) {
+            if (s.layerOf(id) == layer) {
+                out.push_back(id);
+            }
+        }
+        return out;
+    };
+    const std::vector<core::Id> conflictingNow = mine(working, result.conflicting);
+    const std::vector<core::Id> conflictingBefore = mine(m_sketch, m_result.conflicting);
+    const std::vector<core::Id> redundantNow = mine(working, result.redundant);
+    const std::vector<core::Id> redundantBefore = mine(m_sketch, m_result.redundant);
+    if (conflictingNow.size() > conflictingBefore.size()) {
         problem = tr("That would conflict with existing constraints");
-        blamed = newOnes(result.conflicting, m_result.conflicting);
+        blamed = newOnes(conflictingNow, conflictingBefore);
     }
-    else if (result.redundant.size() > m_result.redundant.size()) {
+    else if (redundantNow.size() > redundantBefore.size()) {
         problem = tr("That would over-constrain the sketch");
-        blamed = newOnes(result.redundant, m_result.redundant);
+        blamed = newOnes(redundantNow, redundantBefore);
     }
-    else if (!result.ok) {
+    else if (result.failedLayers.contains(layer)) {
         problem = tr("The sketch can't be solved like that");
         blamed = edited;  // (nothing else to go on: what holds it still is linked to it)
     }
@@ -394,7 +410,7 @@ void Document::beginDrag(const std::vector<core::Id>& points)
     m_dragIsMove = false;
     m_dragAngle = 0.0;
     m_dragAbout = {};
-    m_dragSolver = std::make_unique<core::Solver>(m_sketch);
+    m_dragSolver = std::make_unique<core::Solver>(m_sketch, m_sketch.activeLayer());
     m_dragSolver->beginDrag(points);
 }
 
@@ -408,7 +424,7 @@ void Document::beginDragEdge(core::Id roundEntity, double x, double y)
     m_dragGrabY = y;
     m_dragDx = m_dragDy = 0.0;
     m_dragIsMove = false;
-    m_dragSolver = std::make_unique<core::Solver>(m_sketch);
+    m_dragSolver = std::make_unique<core::Solver>(m_sketch, m_sketch.activeLayer());
     m_dragSolver->beginDragEdge(roundEntity, x, y);
 }
 

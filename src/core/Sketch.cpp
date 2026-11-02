@@ -1271,6 +1271,7 @@ void Sketch::rebindPoint(Id curve, Id oldPoint, Id newPoint)
     if (kindOf(newPoint) != EntityKind::Point) {
         throw SketchError("rebind: not a point");
     }
+    requireLayer({newPoint}, layerOf(curve));
     Entity& e = entity(curve);
     bool found = false;
     auto swap = [&](Id& slot) {

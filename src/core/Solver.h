@@ -19,6 +19,7 @@ struct SolveResult
     std::vector<Id> redundant;           // constraint ids that are implied by others
     std::vector<Id> partiallyRedundant;  // constraint ids partly implied by others
     std::set<Id> fullyConstrained;       // entity ids with no remaining freedom
+    std::set<Id> failedLayers;           // layers that couldn't be solved (or conflict)
 };
 
 // Maps a Sketch onto a PlaneGCS system. The system is built once from a snapshot of the sketch;
@@ -28,6 +29,9 @@ class Solver
 {
 public:
     explicit Solver(const Sketch& sketch);
+    // Just one layer's geometry and constraints (with the origin and axes; projections in it are
+    // fixed). kNoId, or a sketch with one layer: all of it.
+    Solver(const Sketch& sketch, Id layer);
     ~Solver();
     Solver(const Solver&) = delete;
     Solver& operator=(const Solver&) = delete;
@@ -54,7 +58,9 @@ private:
     std::unique_ptr<Impl> d;
 };
 
-// Convenience: build, solve, and write back when the solve succeeded.
+// Convenience: build, solve, and write back when the solve succeeded. Layers are solved one by
+// one (each on its own: nothing ties them but projections), those projected from first, each
+// written back if it solved; the result is all of theirs together.
 SolveResult solve(Sketch& sketch);
 
 // Like solve, but where the sketch has freedom left, the given points stay put if they can

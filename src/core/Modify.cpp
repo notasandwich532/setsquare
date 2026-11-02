@@ -171,7 +171,9 @@ std::vector<Vec2> rawIntersect(const Geo& g1, const Geo& g2)
 bool isCutter(const Sketch& s, Id id, Id except)
 {
     const Entity& e = s.entity(id);
-    return id != except && e.kind() != EntityKind::Point && !e.construction && !s.isReference(id);
+    // (only curves in the same layer: other layers' geometry can't be referred to)
+    return id != except && e.kind() != EntityKind::Point && !e.construction && !s.isReference(id)
+        && (except == kNoId || s.layerOf(id) == s.layerOf(except));
 }
 
 struct Cut
@@ -317,7 +319,7 @@ std::vector<Crossing> crossings(const Sketch& s, Vec2 a, Vec2 b)
     path.b = b;
     std::vector<std::pair<double, Crossing>> found;
     for (const auto& [id, e] : s.entities()) {
-        if (e.kind() == EntityKind::Point || s.isReference(id)) {
+        if (e.kind() == EntityKind::Point || s.isReference(id) || s.layerOf(id) != s.activeLayer()) {
             continue;
         }
         const Geo g = geoOf(s, id);

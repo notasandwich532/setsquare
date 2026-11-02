@@ -902,10 +902,76 @@ void Solver::Impl::addOffsetSide(const Sketch& sketch, const Constraint& c, cons
 
 // ---------------------------------------------------------------------------------------------
 
+namespace
+{
+// The part of a sketch in one layer, plus the origin and axes, to solve on its own.
+Sketch layerPart(const Sketch& s, Id layer)
+{
+    Sketch part;
+    std::vector<const Entity*> curves;
+    for (const auto& [id, e] : s.entities()) {
+        if (!s.isReference(id) && s.layerOf(id) != layer) {
+            continue;
+        }
+        if (e.kind() == EntityKind::Point) {
+            part.insertEntity(e);
+        }
+        else {
+            curves.push_back(&e);
+        }
+    }
+    // (Anything that would reach outside the layer is left out rather than break the solve.)
+    for (const Entity* e : curves) {
+        const std::vector<Id> on = s.definingPoints(e->id);
+        if (std::ranges::all_of(on, [&](Id p) { return p == e->id || part.hasEntity(p); })) {
+            part.insertEntity(*e);
+        }
+    }
+    for (const auto& [id, c] : s.constraints()) {
+        if (s.layerOf(id) == layer && std::ranges::all_of(c.refs, [&](Id r) { return part.hasEntity(r); })) {
+            part.insertConstraint(c);
+        }
+    }
+    return part;
+}
+
+// Layers in the order to solve them: each after those it projects from.
+std::vector<Id> solveOrder(const Sketch& s)
+{
+    std::vector<Id> todo;
+    for (auto it = s.layers().rbegin(); it != s.layers().rend(); ++it) {
+        todo.push_back(it->id);
+    }
+    std::vector<Id> order;
+    while (!todo.empty()) {
+        auto ready = std::ranges::find_if(todo, [&](Id l) {
+            return std::ranges::none_of(todo, [&](Id other) { return other != l && s.dependsOn(l, other); });
+        });
+        if (ready == todo.end()) {
+            ready = todo.begin();  // (a circle, which projecting refuses to make)
+        }
+        order.push_back(*ready);
+        todo.erase(ready);
+    }
+    return order;
+}
+}  // namespace
+
 Solver::Solver(const Sketch& sketch)
     : d(std::make_unique<Impl>())
 {
     d->build(sketch);
+}
+
+Solver::Solver(const Sketch& sketch, Id layer)
+    : d(std::make_unique<Impl>())
+{
+    if (layer == kNoId || sketch.layers().size() == 1) {
+        d->build(sketch);
+    }
+    else {
+        d->build(layerPart(sketch, layer));
+    }
 }
 
 Solver::~Solver() = default;
@@ -1075,19 +1141,39 @@ SolveResult solve(Sketch& sketch)
     // Layers share no unknowns (projections are fixed copies), so one solve does them all; but a
     // projection is a constant there, so when its original moves, it's moved and solved again
     // (once per layer it passes through, at most).
-    sketch.syncProjections();
-    SolveResult result;
-    for (size_t pass = 0; pass <= sketch.layers().size(); ++pass) {
+    if (sketch.layers().size() == 1) {
+        sketch.syncProjections();  // (only unlinked ones can be here: they stay put)
         Solver solver(sketch);
-        result = solver.solve();
+        SolveResult result = solver.solve();
         if (result.ok) {
             solver.writeBack(sketch);
         }
-        if (!result.ok || !sketch.syncProjections()) {
-            break;
+        else {
+            result.failedLayers.insert(sketch.layers().front().id);
         }
+        return result;
     }
-    return result;
+    SolveResult total;
+    total.ok = true;
+    for (Id layer : solveOrder(sketch)) {
+        sketch.syncProjections(layer);
+        Solver solver(sketch, layer);
+        SolveResult r = solver.solve();
+        if (r.ok) {
+            solver.writeBack(sketch);
+        }
+        else {
+            total.failedLayers.insert(layer);
+        }
+        total.ok = total.ok && r.ok;
+        total.dof += r.dof;
+        total.conflicting.insert(total.conflicting.end(), r.conflicting.begin(), r.conflicting.end());
+        total.redundant.insert(total.redundant.end(), r.redundant.begin(), r.redundant.end());
+        total.partiallyRedundant.insert(total.partiallyRedundant.end(), r.partiallyRedundant.begin(),
+                                        r.partiallyRedundant.end());
+        total.fullyConstrained.insert(r.fullyConstrained.begin(), r.fullyConstrained.end());
+    }
+    return total;
 }
 
 SolveResult solveHolding(Sketch& sketch, const std::vector<Id>& points)
@@ -1095,7 +1181,7 @@ SolveResult solveHolding(Sketch& sketch, const std::vector<Id>& points)
     Sketch held = sketch;
     held.syncProjections();
     {
-        Solver solver(held);
+        Solver solver(held, points.empty() ? kNoId : held.layerOf(points.front()));
         solver.beginDrag(points);  // pulled softly towards where they are now
         if (solver.dragTo(0.0, 0.0)) {
             solver.writeBack(held);

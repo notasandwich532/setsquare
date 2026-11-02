@@ -1,6 +1,6 @@
 # Layers through the API: each is its own sketch; geometry from another layer can only be used by
 # projecting it (a linked, fixed, construction copy that follows the original); fills are per layer.
-import os, tempfile
+import math, os, tempfile
 from math import isclose
 
 base = s.layer
@@ -86,3 +86,24 @@ s.delete_layer("Layer 1")
 assert [l.name for l in s.layers] == ["Top"]
 assert all(not c.linked for c in s.entities if c.projected)
 assert s.solve().ok
+
+# Trimming only cuts at this layer's curves: another layer's lines crossing (or ending on) a
+# circle here don't cut it, and nothing here gets tied to them.
+doc.new()
+star = s.rectangle((0, 0), (20, 20))
+for side in star:
+    side.fixed = True
+moon = s.add_layer("Moon")
+a = s.circle((20, 10), 6)      # crosses the square's right side, and passes its corners' level
+b = s.circle((24, 4), math.sqrt(32))  # through the square's corner (20, 0)
+bc = b.center  # (the circle becomes arcs; its centre stays)
+s.trim(b, near=(30, 10), construction=True)
+for k in s.constraints:
+    assert k.layer != moon or all(r.layer in (None, moon) for r in k.refs), k
+for e in s.entities:
+    if e.layer == moon:
+        assert not e.fixed, e
+# The moon still moves freely.
+d = s.distance(a.center, bc, value=5)
+d.value = 7
+assert isclose(math.dist(a.center.pos, bc.pos), 7)

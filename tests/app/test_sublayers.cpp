@@ -210,3 +210,26 @@ TEST_CASE("Other layers can't be picked or snapped to; Project brings them in", 
     const core::Line& l = f.sketch().line(copy);
     CHECK(std::abs(f.sketch().point(l.p1).x - 15) < 1e-6);
 }
+
+TEST_CASE("Another layer's trouble doesn't block edits here", "[layers]")
+{
+    Fixture f;
+    // A layer whose constraints conflict (put in unchecked, as an old file might have them).
+    Id line = kNoId;
+    f.doc.edit("line", [&](Editor& ed) { line = Fixture::lineAt(ed, 10, 10); });
+    f.doc.modify("conflict", [&](core::Sketch& s) {
+        s.addConstraint(core::ConstraintType::Distance, {line}, 20.0);
+        s.addConstraint(core::ConstraintType::Distance, {line}, 30.0);
+    });
+    REQUIRE_FALSE(f.doc.solveResult().ok);
+
+    f.browser.addLayer();
+    Id circle = kNoId;
+    f.doc.edit("circle", [&](Editor& ed) { circle = ed.circle(ed.point(50, 50), 5); });
+    QString error;
+    const Id radius = f.doc.addConstraint(core::ConstraintType::Radius, {circle}, 5.0, &error);
+    REQUIRE(radius != kNoId);
+    CHECK(f.doc.setDimensionValue(radius, 8.0, &error));
+    CHECK(error.isEmpty());
+    CHECK(std::abs(f.sketch().circle(circle).radius - 8.0) < 1e-9);
+}
