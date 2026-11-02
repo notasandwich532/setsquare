@@ -337,9 +337,10 @@ void thin(std::vector<std::uint8_t>& img, int w, int h)
     }
 }
 
-// Thinning leaves 2-pixel staircases on diagonals, whose corner pixels have three neighbours and
-// would look like forks. Removes every pixel that has three or more neighbours all connected to
-// each other (8-connected: its Yokoi connectivity number is 1); real forks and ends stay.
+// Thinning leaves 2-pixel staircases and little detours on diagonals, whose pixels would look like
+// forks (or make tiny loops). Removes every pixel whose two or more neighbours are all connected
+// to each other without it (8-connected: its Yokoi connectivity number is 1), so it's redundant;
+// real forks, lines and their ends stay.
 void tidySkeleton(std::vector<std::uint8_t>& skel, int w, int h)
 {
     // Ring from east, anticlockwise on screen: E, NE, N, NW, W, SW, S, SE (y down).
@@ -362,8 +363,8 @@ void tidySkeleton(std::vector<std::uint8_t>& skel, int w, int h)
                     count += v[k];
                 }
                 v[8] = v[0];
-                if (count < 3) {
-                    continue;
+                if (count < 2) {
+                    continue;  // (a line's end stays)
                 }
                 int pieces = 0;  // Yokoi (8-connectivity): sum over E, N, W, S of !a - !a !b !c
                 for (int k = 0; k < 8; k += 2) {
@@ -539,9 +540,13 @@ QPainterPath thicken(const QPainterPath& shape, double width)
                     || degree[static_cast<size_t>(end)] != 1) {
                     continue;
                 }
-                const double rise = depthAt(fork) - depthAt(end);
-                const double length = double(b.pixels.size());
-                if (rise >= 0.5 * length - 1.5) {
+                // The rise near the tip (the first half-width of it): further in, the depth
+                // depends on what the spur runs into, not on the corner.
+                const size_t steps = std::min(b.pixels.size() - 1, std::max<size_t>(3, static_cast<size_t>(r)));
+                const int tipPixel = side == 0 ? b.pixels.back() : b.pixels.front();
+                const int inPixel = side == 0 ? b.pixels[b.pixels.size() - 1 - steps] : b.pixels[steps];
+                const double rise = depthAt(inPixel) - depthAt(tipPixel);
+                if (steps == 0 || rise >= 0.5 * double(steps) - 1.0) {
                     forkOut = fork;
                     return true;
                 }
@@ -681,7 +686,8 @@ QPainterPath thicken(const QPainterPath& shape, double width)
     std::vector<float> toCentre = distanceSquared(centres, w, h);
     for (float& d : toCentre) {
         d = std::sqrt(d);
-    }    std::vector<float> field(inside.size());
+    }
+    std::vector<float> field(inside.size());
     for (int y = 0; y < h; ++y) {
         const uchar* row = image.constScanLine(y);
         for (int x = 0; x < w; ++x) {
@@ -689,7 +695,8 @@ QPainterPath thicken(const QPainterPath& shape, double width)
             const float coverage = (127.5f - float(row[x])) / 255.0f;  // about -0.5 inside to 0.5 out
             field[i] = std::min(coverage, toCentre[i] - r);
         }
-    }    QPainterPath out;
+    }
+    QPainterPath out;
     out.setFillRule(Qt::WindingFill);
     const QTransform back = toGrid.inverted();
     for (const QPolygonF& loop : traceZero(field, w, h)) {
