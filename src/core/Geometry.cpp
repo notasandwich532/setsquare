@@ -185,7 +185,8 @@ Id pick(const Sketch& sketch, Vec2 p, const PickOptions& options)
     // original) are equally near: then the solid one is meant.
     const double same = 1e-9 + 1e-6 * options.tolerance;
     for (const auto& [id, e] : sketch.entities()) {
-        if (options.exclude.contains(id) || sketch.isHiddenReference(id) || sketch.isAxis(id)) {
+        if (options.exclude.contains(id) || sketch.isHiddenReference(id) || sketch.isAxis(id) || !sketch.isShown(id)
+            || (options.sublayer != kNoId && e.sublayer != kNoId && e.sublayer != options.sublayer)) {
             continue;
         }
         const bool isPoint = e.kind() == EntityKind::Point;
@@ -263,13 +264,16 @@ std::vector<Vec2> sample(const Sketch& sketch, Id id, int segments)
     return out;
 }
 
-std::vector<Id> boxSelect(const Sketch& sketch, Vec2 c1, Vec2 c2, bool crossing)
+std::vector<Id> boxSelect(const Sketch& sketch, Vec2 c1, Vec2 c2, bool crossing, Id sublayer)
 {
     const Box box{std::min(c1.x, c2.x), std::min(c1.y, c2.y), std::max(c1.x, c2.x), std::max(c1.y, c2.y)};
     std::vector<Id> out;
     for (const auto& [id, e] : sketch.entities()) {
         if (sketch.isReference(id)) {
             continue;  // origin and axes aren't box-selected (they'd only get in the way)
+        }
+        if (!sketch.isShown(id) || (sublayer != kNoId && e.sublayer != sublayer)) {
+            continue;
         }
         const std::vector<Vec2> pts = sample(sketch, id);
         bool hit = false;

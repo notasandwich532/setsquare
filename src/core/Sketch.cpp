@@ -86,6 +86,7 @@ Id Sketch::ensureOrigin()
     if (m_origin == kNoId) {
         m_origin = addPoint(0.0, 0.0);
         m_entities.at(m_origin).fixed = true;
+        m_entities.at(m_origin).sublayer = kNoId;  // (in every sublayer)
     }
     if (m_axes[0] == kNoId) {
         for (int i = 0; i < 2; ++i) {
@@ -94,9 +95,169 @@ Id Sketch::ensureOrigin()
             m_axes[i] = addLine(m_origin, m_axisEnds[i]);
             m_entities.at(m_axes[i]).fixed = true;
             m_entities.at(m_axes[i]).construction = true;
+            m_entities.at(m_axisEnds[i]).sublayer = m_entities.at(m_axes[i]).sublayer = kNoId;
         }
     }
     return m_origin;
+}
+
+// --- sublayers ---
+
+bool Sketch::hasSublayer(Id id) const
+{
+    return std::ranges::any_of(m_sublayers, [&](const Sublayer& l) { return l.id == id; });
+}
+
+const Sublayer& Sketch::sublayer(Id id) const
+{
+    for (const Sublayer& l : m_sublayers) {
+        if (l.id == id) {
+            return l;
+        }
+    }
+    throw SketchError("unknown sublayer " + std::to_string(id));
+}
+
+void Sketch::setActiveSublayer(Id id)
+{
+    sublayer(id);  // (throws if unknown)
+    m_activeSublayer = id;
+}
+
+Id Sketch::addSublayer(const std::string& name)
+{
+    Id id = 1;
+    for (const Sublayer& l : m_sublayers) {
+        id = std::max(id, l.id + 1);
+    }
+    m_sublayers.push_back({id, name, true});
+    return id;
+}
+
+void Sketch::renameSublayer(Id id, const std::string& name)
+{
+    for (Sublayer& l : m_sublayers) {
+        if (l.id == id) {
+            l.name = name;
+            return;
+        }
+    }
+    throw SketchError("unknown sublayer " + std::to_string(id));
+}
+
+void Sketch::setSublayerVisible(Id id, bool visible)
+{
+    for (Sublayer& l : m_sublayers) {
+        if (l.id == id) {
+            l.visible = visible;
+            return;
+        }
+    }
+    throw SketchError("unknown sublayer " + std::to_string(id));
+}
+
+void Sketch::moveSublayer(Id id, size_t index)
+{
+    auto it = std::ranges::find_if(m_sublayers, [&](const Sublayer& l) { return l.id == id; });
+    if (it == m_sublayers.end()) {
+        throw SketchError("unknown sublayer " + std::to_string(id));
+    }
+    const Sublayer moved = *it;
+    m_sublayers.erase(it);
+    m_sublayers.insert(m_sublayers.begin() + static_cast<std::ptrdiff_t>(std::min(index, m_sublayers.size())), moved);
+}
+
+void Sketch::removeSublayer(Id id)
+{
+    sublayer(id);
+    if (m_sublayers.size() == 1) {
+        throw SketchError("the last sublayer can't be deleted");
+    }
+    // Its contents: texts and constraints, then geometry (whatever depends on it goes too).
+    std::erase_if(m_constraints, [&](const auto& kv) { return kv.second.sublayer == id; });
+    std::vector<Id> doomed;
+    for (const auto& [tid, t] : m_texts) {
+        if (t.sublayer == id) {
+            doomed.push_back(tid);
+        }
+    }
+    for (const auto& [eid, e] : m_entities) {
+        if (e.sublayer == id && e.kind() != EntityKind::Point) {
+            doomed.push_back(eid);
+        }
+    }
+    for (const auto& [eid, e] : m_entities) {
+        if (e.sublayer == id && e.kind() == EntityKind::Point) {
+            doomed.push_back(eid);
+        }
+    }
+    for (Id d : doomed) {
+        if ((hasEntity(d) && !isReference(d)) || hasText(d)) {
+            remove(d);
+        }
+    }
+    const auto it = std::ranges::find_if(m_sublayers, [&](const Sublayer& l) { return l.id == id; });
+    const size_t at = static_cast<size_t>(it - m_sublayers.begin());
+    m_sublayers.erase(it);
+    if (m_activeSublayer == id) {
+        m_activeSublayer = m_sublayers[std::min(at, m_sublayers.size() - 1)].id;
+    }
+}
+
+Id Sketch::sublayerOf(Id item) const
+{
+    if (auto e = m_entities.find(item); e != m_entities.end()) {
+        return e->second.sublayer;
+    }
+    if (auto c = m_constraints.find(item); c != m_constraints.end()) {
+        return c->second.sublayer;
+    }
+    if (auto t = m_texts.find(item); t != m_texts.end()) {
+        return t->second.sublayer;
+    }
+    return kNoId;
+}
+
+void Sketch::setSublayerOf(Id item, Id sublayerId)
+{
+    sublayer(sublayerId);
+    if (auto e = m_entities.find(item); e != m_entities.end()) {
+        if (!isReference(item)) {
+            e->second.sublayer = sublayerId;
+        }
+    }
+    else if (auto c = m_constraints.find(item); c != m_constraints.end()) {
+        c->second.sublayer = sublayerId;
+    }
+    else if (auto t = m_texts.find(item); t != m_texts.end()) {
+        t->second.sublayer = sublayerId;
+    }
+    else {
+        throw SketchError("unknown item " + std::to_string(item));
+    }
+}
+
+bool Sketch::isShown(Id item) const
+{
+    const Id l = sublayerOf(item);
+    if (l == kNoId) {
+        return true;
+    }
+    for (const Sublayer& s : m_sublayers) {
+        if (s.id == l) {
+            return s.visible;
+        }
+    }
+    return true;
+}
+
+void Sketch::setSublayers(std::vector<Sublayer> sublayers, Id active)
+{
+    if (sublayers.empty()) {
+        throw SketchError("a sketch needs a sublayer");
+    }
+    m_sublayers = std::move(sublayers);
+    m_activeSublayer = hasSublayer(active) ? active : m_sublayers.front().id;
 }
 
 bool Sketch::isReference(Id id) const
@@ -197,7 +358,9 @@ void Sketch::insertConstraint(const Constraint& c)
 Id Sketch::addPoint(double x, double y)
 {
     const Id id = nextId();
-    m_entities.emplace(id, Entity{id, Point{x, y}});
+    Entity e{id, Point{x, y}};
+    e.sublayer = m_activeSublayer;
+    m_entities.emplace(id, std::move(e));
     return id;
 }
 
@@ -210,7 +373,9 @@ Id Sketch::addLine(Id p1, Id p2)
         throw SketchError("line endpoints must be different points");
     }
     const Id id = nextId();
-    m_entities.emplace(id, Entity{id, Line{p1, p2}});
+    Entity line{id, Line{p1, p2}};
+    line.sublayer = m_activeSublayer;
+    m_entities.emplace(id, std::move(line));
     return id;
 }
 
@@ -230,7 +395,9 @@ Id Sketch::addCircle(Id center, double radius)
         throw SketchError("circle radius must be positive");
     }
     const Id id = nextId();
-    m_entities.emplace(id, Entity{id, Circle{center, radius}});
+    Entity circle{id, Circle{center, radius}};
+    circle.sublayer = m_activeSublayer;
+    m_entities.emplace(id, std::move(circle));
     return id;
 }
 
@@ -253,7 +420,9 @@ Id Sketch::addArc(Id center, Id start, Id end)
         throw SketchError("arc centre, start and end must be different points");
     }
     const Id id = nextId();
-    m_entities.emplace(id, Entity{id, Arc{center, start, end}});
+    Entity arc{id, Arc{center, start, end}};
+    arc.sublayer = m_activeSublayer;
+    m_entities.emplace(id, std::move(arc));
     return id;
 }
 
@@ -281,6 +450,7 @@ Id Sketch::addConstraint(ConstraintType type, std::vector<Id> refs, double value
     const Id id = nextId();
     Constraint c{id, type, std::move(refs), value};
     c.params = std::move(params);
+    c.sublayer = m_activeSublayer;
     m_constraints.emplace(id, std::move(c));
     return id;
 }
@@ -979,6 +1149,7 @@ Id Sketch::addText(const Text& text)
     checkText(*this, text);
     Text t = text;
     t.id = nextId();
+    t.sublayer = m_activeSublayer;
     m_texts.emplace(t.id, std::move(t));
     return m_nextId - 1;
 }
@@ -1042,6 +1213,8 @@ void Sketch::clear()
     m_strokes.clear();
     m_fills.clear();
     m_texts.clear();
+    m_sublayers = {{1, "Sublayer 1", true}};
+    m_activeSublayer = 1;
     m_origin = kNoId;
     m_axes = {kNoId, kNoId};
     m_axisEnds = {kNoId, kNoId};

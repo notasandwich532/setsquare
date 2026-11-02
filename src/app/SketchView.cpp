@@ -36,6 +36,7 @@ constexpr double kPickPixels = 7.0;
 constexpr double kSnapPixels = 10.0;
 constexpr double kCurveWidth = 1.6;
 constexpr double kHighlightWidth = 2.6;
+constexpr double kOtherSublayerAlpha = 0.3;  // geometry in sublayers other than the active one
 constexpr double kPointRadius = 2.6;
 constexpr double kRadToDeg = 180.0 / std::numbers::pi;
 const QColor kConstrainedPink(0xff, 0x2b, 0xd6);  // geometry of the selected constraints
@@ -320,11 +321,14 @@ QPolygonF SketchView::textBox(const core::Text& t) const
     return box;
 }
 
-core::Id SketchView::textAt(QPointF screen) const
+core::Id SketchView::textAt(QPointF screen, bool editable) const
 {
     const core::Sketch& s = m_doc.sketch();
     core::Id found = core::kNoId;
     for (const auto& [id, t] : s.texts()) {  // the topmost (last) wins
+        if (!s.isShown(id) || (editable && t.sublayer != s.activeSublayer())) {
+            continue;
+        }
         if (s.hasEntity(t.anchor) && textBox(t).containsPoint(screen, Qt::OddEvenFill)) {
             found = id;
         }
@@ -391,7 +395,15 @@ void SketchView::refreshTool()
 // Picking and selection
 // ---------------------------------------------------------------------------------------------
 
-core::Id SketchView::pickAt(QPointF screen, bool annotations) const
+core::PickOptions SketchView::editableOptions(double pixels) const
+{
+    core::PickOptions options;
+    options.tolerance = pixels / m_zoom;
+    options.sublayer = m_doc.sketch().activeSublayer();
+    return options;
+}
+
+core::Id SketchView::pickAt(QPointF screen, bool annotations, bool editable) const
 {
     if (annotations && !m_presentation) {  // (not drawn in presentation view)
         // Topmost (last drawn) first.
@@ -413,8 +425,11 @@ core::Id SketchView::pickAt(QPointF screen, bool annotations) const
             }
         }
     }
+    if (editable && !m_presentation) {
+        options.sublayer = m_doc.sketch().activeSublayer();
+    }
     const core::Id hit = core::pick(m_doc.sketch(), toWorld(screen), options);
-    return hit != core::kNoId ? hit : textAt(screen);  // geometry first, then text under it
+    return hit != core::kNoId ? hit : textAt(screen, editable);  // geometry first, then text under it
 }
 
 Snap SketchView::snap(QPointF screen) const
@@ -432,7 +447,7 @@ Snap SketchView::snap(QPointF screen) const
 
     // Line midpoints.
     for (const auto& [id, e] : sketch.entities()) {
-        if (const auto* l = std::get_if<core::Line>(&e.geom); l && !sketch.isAxis(id)) {
+        if (const auto* l = std::get_if<core::Line>(&e.geom); l && !sketch.isAxis(id) && sketch.isShown(id)) {
             const core::Point& a = sketch.point(l->p1);
             const core::Point& b = sketch.point(l->p2);
             const core::Vec2 m{(a.x + b.x) / 2, (a.y + b.y) / 2};
@@ -785,9 +800,16 @@ void SketchView::drawSketch(QPainter& painter) const
             color = colors.hover;
             width = kHighlightWidth;
         }
+        // Other sublayers: faded, as references (not while being pointed at or picked).
+        if (!m_presentation && e.sublayer != core::kNoId && e.sublayer != sketch.activeSublayer()
+            && width == kCurveWidth) {
+            color.setAlphaF(color.alphaF() * kOtherSublayerAlpha);
+        }
         QPen pen(color, width, e.construction ? Qt::DashLine : Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
         return pen;
     };
+    // Hidden sublayers aren't drawn while sketching (presentation view shows the whole drawing).
+    auto hidden = [&](core::Id id) { return !m_presentation && !sketch.isShown(id); };
 
     // The axes are drawn with the grid; here they only light up when hovered or selected.
     for (core::Id axis : {sketch.xAxis(), sketch.yAxis()}) {
@@ -849,7 +871,7 @@ void SketchView::drawSketch(QPainter& painter) const
     painter.setBrush(Qt::NoBrush);
     std::set<core::Id> decorated;
     for (const auto& [id, style] : sketch.strokes()) {
-        if (!sketch.hasEntity(id) || sketch.entity(id).construction) {
+        if (!sketch.hasEntity(id) || sketch.entity(id).construction || hidden(id)) {
             continue;
         }
         QPen pen = strokePen(style);
@@ -866,7 +888,7 @@ void SketchView::drawSketch(QPainter& painter) const
     // Texts: filled faintly with an outline while sketching (in their anchor's colour, or their
     // own), solid in presentation view.
     for (const auto& [id, t] : sketch.texts()) {
-        if (!sketch.hasEntity(t.anchor)) {
+        if (!sketch.hasEntity(t.anchor) || hidden(id)) {
             continue;
         }
         const QPainterPath path = textPath(t);
@@ -882,6 +904,9 @@ void SketchView::drawSketch(QPainter& painter) const
             }
             continue;
         }
+        if (t.sublayer != sketch.activeSublayer() && !m_selection.contains(id) && id != m_hovered) {
+            color.setAlphaF(color.alphaF() * kOtherSublayerAlpha);
+        }
         QColor faint = color;
         faint.setAlphaF(faint.alphaF() * 0.3);
         painter.fillPath(path, faint);
@@ -892,7 +917,7 @@ void SketchView::drawSketch(QPainter& painter) const
 
     // Curves first, points on top.
     for (const auto& [id, e] : sketch.entities()) {
-        if (sketch.isAxis(id) || e.kind() == core::EntityKind::Point) {
+        if (sketch.isAxis(id) || e.kind() == core::EntityKind::Point || hidden(id)) {
             continue;
         }
         if (m_presentation && e.construction) {
@@ -919,7 +944,7 @@ void SketchView::drawSketch(QPainter& painter) const
     drawAnnotations(painter);
 
     for (const auto& [id, e] : sketch.entities()) {
-        if (e.kind() != core::EntityKind::Point || sketch.isHiddenReference(id)) {
+        if (e.kind() != core::EntityKind::Point || sketch.isHiddenReference(id) || hidden(id)) {
             continue;
         }
         const core::Point& p = std::get<core::Point>(e.geom);

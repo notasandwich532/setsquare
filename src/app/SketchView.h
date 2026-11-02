@@ -53,8 +53,12 @@ public:
     // --- picking ---
     // Constraint symbols and dimension labels first (when annotations is true), then points,
     // then curves.
-    core::Id pickAt(QPointF screen, bool annotations = true) const;
-    core::Id textAt(QPointF screen) const;  // a text whose box is under the cursor, or none
+    // What's under the cursor. Hidden sublayers are never picked; `editable`: only what's in the
+    // active sublayer (to select, drag, delete or change), not the others shown as references.
+    core::Id pickAt(QPointF screen, bool annotations = true, bool editable = false) const;
+    core::Id textAt(QPointF screen, bool editable = false) const;  // a text whose box is under the cursor
+    // Pick options for changing things: only the active sublayer.
+    core::PickOptions editableOptions(double pixels) const;
     // Where a drawing tool should put a point: an existing point, a line midpoint, a spot on a
     // curve, or free space (in that order of preference).
     Snap snap(QPointF screen) const;

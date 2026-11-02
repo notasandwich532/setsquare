@@ -219,6 +219,23 @@ s.delete(f)
 `s.angle(s.x_axis, l, value=30)`, `s.distance(p, s.y_axis, value=5)`, `s.coincident(p, s.x_axis)`.
 They aren't included in `s.entities` and the other lists.
 
+### Sublayers
+Everything (geometry, constraints, dimensions, texts) belongs to a sublayer; new items go to the
+active one. All sublayers are solved together, so an item in one can be constrained to items in
+another, and fills see the curves of every sublayer. In the app only the active sublayer is
+selectable and editable; the others show faded, for snapping and constraining to (the Browser dock
+on the left switches, hides, renames, reorders and deletes them).
+```python
+s.sublayers                       # in order: Sublayer handles
+s.sublayer                        # the active one; s.sublayer = "Walls" (or a handle) switches
+l = s.add_sublayer("Walls")       # becomes active; names are kept unique
+l.name = "Outer"  l.visible = False  l.active  l.items
+s.rename_sublayer("Outer", "Walls")   s.show_sublayer("Walls", False)
+s.move_sublayer("Walls", 0)           # to that place in the order
+s.move_to_sublayer([c, l2], "Walls")  # curves take their points; constraints wholly on them come too
+s.delete_sublayer("Walls")            # and everything in it (not the last one)
+item.sublayer
+```
 ### Reading
 ```python
 s.origin, s[12], s.points, s.lines, s.circles, s.arcs, s.entities, s.constraints, s.dimensions

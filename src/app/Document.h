@@ -70,6 +70,12 @@ public:
     // values the solver can't satisfy. A feature's source geometry stays put.
     bool setDimensionValue(core::Id dimension, double value, QString* error = nullptr);
 
+    // Sublayers: which one is being edited, and which are shown. Not undo steps (like scrolling
+    // the view), but saved with the drawing. (Adding, renaming, deleting and moving things between
+    // sublayers are edits: see Editor.)
+    void setActiveSublayer(core::Id sublayer);
+    void setSublayerVisible(core::Id sublayer, bool visible);
+
     // Moving a dimension label (no solve); one undo step per drag.
     void beginLabelDrag();
     void moveLabel(core::Id dimension, double dx, double dy);

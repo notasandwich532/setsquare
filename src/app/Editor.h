@@ -90,6 +90,16 @@ public:
     // Fills the closed area around `at` (a fill already there is recoloured). Throws
     // SketchError, saying how many loose ends there are, if `at` isn't enclosed.
     core::Id fill(core::Vec2 at, const core::Color& color);
+
+    // Sublayers (named uniquely; scripts refer to them by name). A new one becomes the active one.
+    core::Id addSublayer(const QString& name);
+    void renameSublayer(core::Id sublayer, const QString& name);
+    void removeSublayer(core::Id sublayer);  // and everything in it
+    void moveSublayer(core::Id sublayer, int index);
+    void moveToSublayer(const std::vector<core::Id>& items, core::Id sublayer);
+    // A name not yet taken: `wanted`, or it numbered.
+    static QString uniqueSublayerName(const core::Sketch& sketch, const QString& wanted, core::Id except = core::kNoId);
+    static QString sublayerName(const core::Sketch& sketch, core::Id sublayer);  // as a Python string
     // Text at t.anchor (an existing point); its letter shapes are made here from its settings.
     core::Id text(core::Text t);
     // Text in a box: a construction rectangle between two corner points, made here.

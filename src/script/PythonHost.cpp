@@ -111,6 +111,11 @@ struct FillH : Item
 {};
 struct TextH : Item
 {};
+// A sublayer, by its own id (sublayers have their own id space).
+struct SublayerH
+{
+    Id id = kNoId;
+};
 
 const core::Entity& entity(Id id)
 {
@@ -254,6 +259,25 @@ Id pointArg(Editor& ed, py::handle h)
     }
     const auto [x, y] = pairOf(h, "a point");
     return ed.point(x, y);
+}
+
+// A sublayer argument: a Sublayer handle, or a name.
+Id sublayerArg(py::handle h)
+{
+    if (py::isinstance<SublayerH>(h)) {
+        const Id id = h.cast<SublayerH&>().id;
+        if (!sketch().hasSublayer(id)) {
+            throw py::value_error("that sublayer no longer exists");
+        }
+        return id;
+    }
+    const std::string name = h.cast<std::string>();
+    for (const core::Sublayer& l : sketch().sublayers()) {
+        if (l.name == name) {
+            return l.id;
+        }
+    }
+    throw py::value_error("no sublayer called '" + name + "'");
 }
 
 template<typename F>
@@ -445,10 +469,64 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
         .def_property_readonly("name", [](const Item& i) { return itemName(i.id); },
                                "The name used in recorded scripts, e.g. 'l7'.")
         .def_property_readonly("exists", [](const Item& i) {
-            return sketch().hasEntity(i.id) || sketch().hasConstraint(i.id) || sketch().hasFill(i.id);
+            return sketch().hasEntity(i.id) || sketch().hasConstraint(i.id) || sketch().hasFill(i.id) || sketch().hasText(i.id);
         })
+        .def_property_readonly("sublayer", [](const Item& i) -> py::object {
+            const Id l = sketch().sublayerOf(i.id);
+            return l != kNoId ? py::cast(SublayerH{l}) : py::none();
+        }, "The sublayer it's in (None for the origin, axes and fills).")
         .def("__eq__", [](const Item& a, py::handle b) { return py::isinstance<Item>(b) && a.id == b.cast<Item&>().id; })
         .def("__hash__", [](const Item& i) { return py::hash(py::int_(i.id)); });
+
+    py::class_<SublayerH>(m, "Sublayer",
+                          "A part of the drawing edited on its own (see Sketch.sublayers). Set name/visible to change.")
+        .def_property(
+            "name", [](const SublayerH& l) { return sketch().sublayer(l.id).name; },
+            [](const SublayerH& l, const std::string& name) {
+                const Id id = sublayerArg(py::cast(l));
+                editReturningId("Rename sublayer", [&](Editor& ed) {
+                    ed.renameSublayer(id, QString::fromStdString(name));
+                    return id;
+                });
+            })
+        .def_property(
+            "visible", [](const SublayerH& l) { return sketch().sublayer(l.id).visible; },
+            [](const SublayerH& l, bool visible) {
+                Call call;
+                call.target().setSublayerVisible(sublayerArg(py::cast(l)), visible);
+            })
+        .def_property_readonly("active", [](const SublayerH& l) { return sketch().activeSublayer() == l.id; })
+        .def_property_readonly("items", [](const SublayerH& l) {
+            std::vector<Id> ids;
+            for (const auto& [id, e] : sketch().entities()) {
+                if (e.sublayer == l.id) {
+                    ids.push_back(id);
+                }
+            }
+            for (const auto& [id, c] : sketch().constraints()) {
+                if (c.sublayer == l.id) {
+                    ids.push_back(id);
+                }
+            }
+            for (const auto& [id, t] : sketch().texts()) {
+                if (t.sublayer == l.id) {
+                    ids.push_back(id);
+                }
+            }
+            return wrapAll(ids);
+        }, "Its geometry, constraints and texts.")
+        .def("__eq__", [](const SublayerH& a, py::handle b) {
+            return py::isinstance<SublayerH>(b) && a.id == b.cast<SublayerH&>().id;
+        })
+        .def("__hash__", [](const SublayerH& l) { return py::hash(py::int_(l.id)); })
+        .def("__repr__", [](const SublayerH& l) {
+            if (!sketch().hasSublayer(l.id)) {
+                return std::string("<Sublayer (deleted)>");
+            }
+            const core::Sublayer& s = sketch().sublayer(l.id);
+            return "<Sublayer \"" + s.name + "\"" + (sketch().activeSublayer() == l.id ? " active" : "")
+                + (s.visible ? "" : " hidden") + ">";
+        });
 
     auto entityProps = [](auto& cls) {
         using T = typename std::remove_reference_t<decltype(cls)>::type;
@@ -1256,6 +1334,60 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
             }
             return wrapAll(ids);
         })
+        .def_property_readonly("sublayers", [](const SketchH&) {
+            py::list out;
+            for (const core::Sublayer& l : sketch().sublayers()) {
+                out.append(SublayerH{l.id});
+            }
+            return out;
+        }, "Its sublayers, in order.")
+        .def_property(
+            "sublayer", [](const SketchH&) { return SublayerH{sketch().activeSublayer()}; },
+            [](const SketchH&, py::handle which) {
+                const Id id = sublayerArg(which);
+                Call call;
+                call.target().setActiveSublayer(id);
+            },
+            "The active sublayer (new things go in it); set it to a Sublayer or a name.")
+        .def("add_sublayer", [](const SketchH&, const std::string& name) {
+            const Id id = editReturningId("New sublayer", [&](Editor& ed) { return ed.addSublayer(QString::fromStdString(name)); });
+            return SublayerH{id};
+        }, py::arg("name") = "Sublayer", "A new sublayer (made the active one; a taken name gets a number).")
+        .def("rename_sublayer", [](const SketchH&, py::handle which, const std::string& name) {
+            const Id id = sublayerArg(which);
+            editReturningId("Rename sublayer", [&](Editor& ed) {
+                ed.renameSublayer(id, QString::fromStdString(name));
+                return id;
+            });
+        }, py::arg("sublayer"), py::arg("name"))
+        .def("delete_sublayer", [](const SketchH&, py::handle which) {
+            const Id id = sublayerArg(which);
+            editReturningId("Delete sublayer", [&](Editor& ed) {
+                ed.removeSublayer(id);
+                return id;
+            });
+        }, py::arg("sublayer"), "Delete a sublayer and everything in it (not the last one).")
+        .def("move_sublayer", [](const SketchH&, py::handle which, int index) {
+            const Id id = sublayerArg(which);
+            editReturningId("Move sublayer", [&](Editor& ed) {
+                ed.moveSublayer(id, index);
+                return id;
+            });
+        }, py::arg("sublayer"), py::arg("index"), "To that place in the order (0 = first).")
+        .def("move_to_sublayer", [](const SketchH&, py::handle items, py::handle which) {
+            const std::vector<Id> ids = itemsOf(items);
+            const Id id = sublayerArg(which);
+            editReturningId("Move to sublayer", [&](Editor& ed) {
+                ed.moveToSublayer(ids, id);
+                return id;
+            });
+        }, py::arg("items"), py::arg("sublayer"),
+           "Move items (curves take their points, and constraints among them come too) to a sublayer.")
+        .def("show_sublayer", [](const SketchH&, py::handle which, bool visible) {
+            const Id id = sublayerArg(which);
+            Call call;
+            call.target().setSublayerVisible(id, visible);
+        }, py::arg("sublayer"), py::arg("visible") = true)
         .def_property_readonly("fills", [](const SketchH&) {
             std::vector<Id> ids;
             for (const auto& [id, f] : sketch().fills()) {

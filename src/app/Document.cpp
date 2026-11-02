@@ -239,6 +239,27 @@ QString Document::describeItem(const core::Sketch& s, core::Id id)
     return Editor::name(s, id);
 }
 
+void Document::setActiveSublayer(core::Id sublayer)
+{
+    if (sublayer == m_sketch.activeSublayer() || !m_sketch.hasSublayer(sublayer)) {
+        return;
+    }
+    m_sketch.setActiveSublayer(sublayer);
+    emit changed();
+    announce(QStringLiteral("s.sublayer = %1").arg(Editor::sublayerName(m_sketch, sublayer)));
+}
+
+void Document::setSublayerVisible(core::Id sublayer, bool visible)
+{
+    if (!m_sketch.hasSublayer(sublayer) || m_sketch.sublayer(sublayer).visible == visible) {
+        return;
+    }
+    m_sketch.setSublayerVisible(sublayer, visible);
+    emit changed();
+    announce(QStringLiteral("s.show_sublayer(%1, %2)")
+                 .arg(Editor::sublayerName(m_sketch, sublayer), visible ? QStringLiteral("True") : QStringLiteral("False")));
+}
+
 bool Document::commitChecked(core::Sketch working, QString* error, const std::vector<core::Id>& hold,
                              const std::vector<core::Id>& edited)
 {

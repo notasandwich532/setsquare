@@ -39,7 +39,7 @@ void SelectTool::press(const ToolEvent& e)
     m_pressWorld = e.world;
     m_additive = e.modifiers & (Qt::ShiftModifier | Qt::ControlModifier);
 
-    const core::Id hit = view().pickAt(e.screen);
+    const core::Id hit = view().pickAt(e.screen, true, true);
     if (hit != core::kNoId) {
         auto selection = view().selection();
         if (m_additive) {
@@ -118,7 +118,7 @@ void SelectTool::move(const ToolEvent& e)
 {
     switch (m_state) {
         case State::Idle:
-            view().setHovered(view().pickAt(e.screen));
+            view().setHovered(view().pickAt(e.screen, true, true));
             return;
 
         case State::PressedOnEntity: {
@@ -160,7 +160,7 @@ void SelectTool::move(const ToolEvent& e)
 
 void SelectTool::doubleClick(const ToolEvent& e)
 {
-    const core::Id hit = view().pickAt(e.screen);
+    const core::Id hit = view().pickAt(e.screen, true, true);
     const core::Sketch& sketch = doc().sketch();
     if (sketch.hasText(hit)) {
         view().editText(hit);
@@ -200,7 +200,7 @@ void SelectTool::release(const ToolEvent& e)
             const core::Vec2 b = view().toWorld(m_boxEnd);
             auto selection = view().selection();
             const core::Sketch& s = doc().sketch();
-            for (core::Id id : core::boxSelect(s, a, b, crossing)) {
+            for (core::Id id : core::boxSelect(s, a, b, crossing, s.activeSublayer())) {
                 // In presentation view only what's shown: no points or construction.
                 if (view().presentation()
                     && (s.entity(id).construction || s.entity(id).kind() == core::EntityKind::Point)) {

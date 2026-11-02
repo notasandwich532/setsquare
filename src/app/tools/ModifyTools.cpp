@@ -50,6 +50,7 @@ QString CurveOpTool::hint() const
 Id CurveOpTool::curveAt(QPointF screen) const
 {
     core::PickOptions options;
+    options.sublayer = doc().sketch().activeSublayer();  // (changes only the active sublayer)
     options.tolerance = kPickPixels / view().zoom();
     options.points = false;
     const Id id = core::pick(doc().sketch(), view().toWorld(screen), options);
@@ -251,12 +252,14 @@ bool CornerTool::candidate(QPointF screen, Vec2 world, Id& a, Vec2& nearA, Id& b
     if (m_first == kNoId) {
         // A corner point: both curves at once.
         core::PickOptions points;
+        points.sublayer = doc().sketch().activeSublayer();  // (changes only the active sublayer)
         points.tolerance = kPickPixels / view().zoom();
         points.curves = false;
         const Id p = core::pick(s, world, points);
         return p != kNoId && modify::cornerAt(s, p, a, nearA, b, nearB);
     }
     core::PickOptions curves;
+    curves.sublayer = doc().sketch().activeSublayer();  // (changes only the active sublayer)
     curves.tolerance = kPickPixels / view().zoom();
     curves.points = false;
     const Id hit = core::pick(s, view().toWorld(screen), curves);
@@ -302,6 +305,7 @@ void CornerTool::press(const ToolEvent& e)
     }
     if (m_first == kNoId) {
         core::PickOptions curves;
+        curves.sublayer = doc().sketch().activeSublayer();  // (changes only the active sublayer)
         curves.tolerance = kPickPixels / view().zoom();
         curves.points = false;
         const Id hit = core::pick(doc().sketch(), e.world, curves);

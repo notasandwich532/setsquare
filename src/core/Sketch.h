@@ -63,12 +63,24 @@ enum class EntityKind
     Arc,
 };
 
+// A part of the drawing edited on its own: its geometry, constraints and text show (and can be
+// changed) while it's the active sublayer; the others show faded, as references that can still be
+// snapped to and constrained against. All of them are solved together, so they can depend on each
+// other, and colours apply to them all as one (fills find their areas across sublayers).
+struct Sublayer
+{
+    Id id = kNoId;  // its own id space (not the items')
+    std::string name;
+    bool visible = true;
+};
+
 struct Entity
 {
     Id id = kNoId;
     std::variant<Point, Line, Circle, Arc> geom;
     bool construction = false;  // reference geometry, not part of the drawing
     bool fixed = false;         // locked in place (Fusion's "Fix")
+    Id sublayer = kNoId;        // which sublayer it's in (none: the origin and axes)
 
     EntityKind kind() const { return static_cast<EntityKind>(geom.index()); }
 };
@@ -140,6 +152,8 @@ struct Constraint
 
     // Features only: settings beyond the value (see ConstraintType).
     std::vector<double> params;
+
+    Id sublayer = kNoId;  // the sublayer it was made in (its symbol shows while that's active)
 };
 
 // A colour filling a closed area of the drawing, as a paint bucket would. The area isn't stored:
@@ -214,6 +228,7 @@ struct Text
     // it changes.
     Id boxSide = kNoId;
     Id boxCorner = kNoId;
+    Id sublayer = kNoId;
     bool inBox() const { return boxSide != kNoId && boxCorner != kNoId; }
     std::size_t layoutKey = 0;  // (not saved) what the shape was last made from, to skip remaking
     bool hasColor = false;
@@ -303,6 +318,28 @@ public:
     const Text& text(Id id) const;
     const std::map<Id, Text>& texts() const { return m_texts; }
 
+    // --- sublayers ---
+    // Always at least one. New items go into the active one.
+    const std::vector<Sublayer>& sublayers() const { return m_sublayers; }
+    bool hasSublayer(Id id) const;
+    const Sublayer& sublayer(Id id) const;
+    Id activeSublayer() const { return m_activeSublayer; }
+    void setActiveSublayer(Id id);
+    Id addSublayer(const std::string& name);  // after the others; returns its id
+    void renameSublayer(Id id, const std::string& name);
+    void setSublayerVisible(Id id, bool visible);
+    void moveSublayer(Id id, size_t index);  // to that place in the order
+    // Deletes a sublayer and everything in it (not the last one).
+    void removeSublayer(Id id);
+    // Which sublayer an item (entity, constraint or text) is in; kNoId for the origin/axes, fills
+    // and anything unknown.
+    Id sublayerOf(Id item) const;
+    void setSublayerOf(Id item, Id sublayer);
+    // Whether an item is in a sublayer that's shown (the origin and axes always are).
+    bool isShown(Id item) const;
+    // Loading: replaces the list (and the active one).
+    void setSublayers(std::vector<Sublayer> sublayers, Id active);
+
     // --- origin and axes ---
     // A fixed point at (0, 0) plus fixed X and Y axis lines through it, which geometry can snap
     // to and be constrained/dimensioned against (e.g. an angle to the X axis). Created on
@@ -375,6 +412,8 @@ private:
     std::map<Id, StrokeStyle> m_strokes;
     std::map<Id, Fill> m_fills;
     std::map<Id, Text> m_texts;
+    std::vector<Sublayer> m_sublayers{{1, "Sublayer 1", true}};
+    Id m_activeSublayer = 1;
     Id m_nextId = 1;
     Id m_origin = kNoId;
     std::array<Id, 2> m_axes{kNoId, kNoId};

@@ -6,6 +6,7 @@
 #include <core/Serialize.h>
 
 #include <format>
+#include <set>
 
 using core::ConstraintType;
 using core::Id;
@@ -597,6 +598,86 @@ void Editor::setText(core::Text t)
     textshapes::update(t, &m_sketch);
     m_sketch.setText(t);
     log(QStringLiteral("s.edit_text(%1, text=%2, %3)").arg(name(m_sketch, t.id), pyString(t.text), textArgs(t)));
+}
+
+QString Editor::uniqueSublayerName(const core::Sketch& s, const QString& wanted, Id except)
+{
+    auto taken = [&](const QString& name) {
+        return std::ranges::any_of(s.sublayers(), [&](const core::Sublayer& l) {
+            return l.id != except && QString::fromStdString(l.name) == name;
+        });
+    };
+    const QString base = wanted.trimmed().isEmpty() ? QStringLiteral("Sublayer") : wanted.trimmed();
+    if (!taken(base)) {
+        return base;
+    }
+    for (int n = 2;; ++n) {
+        const QString name = QStringLiteral("%1 %2").arg(base).arg(n);
+        if (!taken(name)) {
+            return name;
+        }
+    }
+}
+
+QString Editor::sublayerName(const core::Sketch& s, Id sublayer)
+{
+    return pyString(s.hasSublayer(sublayer) ? s.sublayer(sublayer).name : std::string());
+}
+
+Id Editor::addSublayer(const QString& name)
+{
+    const QString unique = uniqueSublayerName(m_sketch, name);
+    const Id id = m_sketch.addSublayer(unique.toStdString());
+    m_sketch.setActiveSublayer(id);
+    log(QStringLiteral("s.add_sublayer(%1)").arg(pyString(unique.toStdString())));
+    return id;
+}
+
+void Editor::renameSublayer(Id sublayer, const QString& name)
+{
+    const QString was = sublayerName(m_sketch, sublayer);
+    const QString unique = uniqueSublayerName(m_sketch, name, sublayer);
+    m_sketch.renameSublayer(sublayer, unique.toStdString());
+    log(QStringLiteral("s.rename_sublayer(%1, %2)").arg(was, pyString(unique.toStdString())));
+}
+
+void Editor::removeSublayer(Id sublayer)
+{
+    const QString was = sublayerName(m_sketch, sublayer);
+    m_sketch.removeSublayer(sublayer);
+    log(QStringLiteral("s.delete_sublayer(%1)").arg(was));
+}
+
+void Editor::moveSublayer(Id sublayer, int index)
+{
+    m_sketch.moveSublayer(sublayer, static_cast<size_t>(std::max(0, index)));
+    log(QStringLiteral("s.move_sublayer(%1, %2)").arg(sublayerName(m_sketch, sublayer)).arg(index));
+}
+
+void Editor::moveToSublayer(const std::vector<Id>& items, Id sublayer)
+{
+    // A curve takes its points along (unless they're another sublayer's curves' too).
+    std::set<Id> moving(items.begin(), items.end());
+    for (Id id : items) {
+        if (m_sketch.hasEntity(id)) {
+            for (Id p : m_sketch.definingPoints(id)) {
+                moving.insert(p);
+            }
+        }
+    }
+    for (Id id : moving) {
+        if (m_sketch.hasEntity(id) || m_sketch.hasConstraint(id) || m_sketch.hasText(id)) {
+            m_sketch.setSublayerOf(id, sublayer);
+        }
+    }
+    // Constraints wholly among what moved go too.
+    for (const auto& [cid, c] : m_sketch.constraints()) {
+        if (std::ranges::all_of(c.refs, [&](Id r) { return moving.contains(r) || m_sketch.isReference(r); })
+            && std::ranges::any_of(c.refs, [&](Id r) { return moving.contains(r); })) {
+            m_sketch.setSublayerOf(cid, sublayer);
+        }
+    }
+    log(QStringLiteral("s.move_to_sublayer(%1, %2)").arg(list(m_sketch, items), sublayerName(m_sketch, sublayer)));
 }
 
 Id Editor::fill(core::Vec2 at, const core::Color& color)

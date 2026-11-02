@@ -44,6 +44,9 @@ json entityToJson(const Entity& e)
     if (e.fixed) {
         j["fixed"] = true;
     }
+    if (e.sublayer != kNoId) {
+        j["sublayer"] = e.sublayer;
+    }
     return j;
 }
 
@@ -69,6 +72,7 @@ Entity entityFromJson(const json& j)
     }
     e.construction = j.value("construction", false);
     e.fixed = j.value("fixed", false);
+    e.sublayer = j.value("sublayer", Id{kNoId});
     return e;
 }
 
@@ -86,6 +90,9 @@ json constraintToJson(const Constraint& c)
         if (c.flip != 0) {
             j["reverse"] = {(c.flip & 1) != 0, (c.flip & 2) != 0};
         }
+    }
+    if (c.sublayer != kNoId) {
+        j["sublayer"] = c.sublayer;
     }
     return j;
 }
@@ -110,6 +117,7 @@ Constraint constraintFromJson(const json& j)
         const auto& r = j.at("reverse");
         c.flip = static_cast<std::uint8_t>((r.at(0).get<bool>() ? 1 : 0) | (r.at(1).get<bool>() ? 2 : 0));
     }
+    c.sublayer = j.value("sublayer", Id{kNoId});
     return c;
 }
 }  // namespace
@@ -193,6 +201,9 @@ std::string toJson(const Sketch& sketch, bool compact, const std::vector<std::st
             if (t.inBox()) {
                 j["box"] = {t.boxSide, t.boxCorner};
             }
+            if (t.sublayer != kNoId) {
+                j["sublayer"] = t.sublayer;
+            }
             if (t.hasColor) {
                 j["color"] = t.color.hex();
             }
@@ -200,6 +211,16 @@ std::string toJson(const Sketch& sketch, bool compact, const std::vector<std::st
         }
         doc["texts"] = std::move(texts);
     }
+    json sublayers = json::array();
+    for (const Sublayer& l : sketch.sublayers()) {
+        json j{{"id", l.id}, {"name", l.name}};
+        if (!l.visible) {
+            j["visible"] = false;
+        }
+        sublayers.push_back(std::move(j));
+    }
+    doc["sublayers"] = std::move(sublayers);
+    doc["active_sublayer"] = sketch.activeSublayer();
     if (history && !history->empty()) {
         doc["history"] = *history;
     }
@@ -220,6 +241,13 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
         }
 
         Sketch sketch;
+        if (doc.contains("sublayers")) {
+            std::vector<Sublayer> sublayers;
+            for (const json& j : doc.at("sublayers")) {
+                sublayers.push_back({j.at("id").get<Id>(), j.value("name", std::string()), j.value("visible", true)});
+            }
+            sketch.setSublayers(std::move(sublayers), doc.value("active_sublayer", Id{kNoId}));
+        }
         // Points first, so curves can refer to them regardless of order in the file.
         std::vector<Entity> curves;
         for (const json& j : doc.at("entities")) {
@@ -284,6 +312,7 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
             t.flipH = j.value("flip_h", false);
             t.flipV = j.value("flip_v", false);
             t.path = j.value("path", Id{kNoId});
+            t.sublayer = j.value("sublayer", Id{kNoId});
             if (j.contains("box")) {
                 t.boxSide = j.at("box").at(0).get<Id>();
                 t.boxCorner = j.at("box").at(1).get<Id>();
@@ -307,6 +336,27 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
                 t.shape.push_back(std::move(points));
             }
             sketch.insertText(t);
+        }
+        // Items from before sublayers (or in one that's gone) go in the first one.
+        const Id first = sketch.sublayers().front().id;
+        std::vector<Id> homeless;
+        for (const auto& [id, e] : sketch.entities()) {
+            if (!sketch.isReference(id) && !sketch.hasSublayer(e.sublayer)) {
+                homeless.push_back(id);
+            }
+        }
+        for (const auto& [id, c] : sketch.constraints()) {
+            if (!sketch.hasSublayer(c.sublayer)) {
+                homeless.push_back(id);
+            }
+        }
+        for (const auto& [id, t] : sketch.texts()) {
+            if (!sketch.hasSublayer(t.sublayer)) {
+                homeless.push_back(id);
+            }
+        }
+        for (Id id : homeless) {
+            sketch.setSublayerOf(id, first);
         }
         if (history) {
             *history = doc.value("history", std::vector<std::string>{});

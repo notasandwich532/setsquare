@@ -43,6 +43,9 @@ struct PickOptions
     bool points = true;
     bool curves = true;
     std::set<Id> exclude;
+    // Sublayers: nothing in a hidden one is picked; with `sublayer` set, only what's in it (to
+    // change: the active one). The origin and axes are in every sublayer.
+    Id sublayer = kNoId;
 };
 
 // Nearest entity within tolerance; points win over curves so endpoints stay grabbable.
@@ -50,7 +53,8 @@ Id pick(const Sketch& sketch, Vec2 p, const PickOptions& options);
 
 // Window selection (crossing = false) takes entities entirely inside the box; crossing
 // selection also takes anything the box touches.
-std::vector<Id> boxSelect(const Sketch& sketch, Vec2 corner1, Vec2 corner2, bool crossing);
+// Hidden sublayers are left out; with `sublayer` set, everything outside it too.
+std::vector<Id> boxSelect(const Sketch& sketch, Vec2 corner1, Vec2 corner2, bool crossing, Id sublayer = kNoId);
 
 // Polyline approximation of an entity (a single vertex for points).
 std::vector<Vec2> sample(const Sketch& sketch, Id entity, int segments = 64);

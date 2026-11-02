@@ -155,6 +155,9 @@ void ConstraintPanel::rebuild()
 
     std::vector<Shown> shown;
     for (const auto& [id, c] : s.constraints()) {
+        if (c.sublayer != core::kNoId && c.sublayer != s.activeSublayer()) {
+            continue;  // (the active sublayer's only, as on the canvas)
+        }
         shown.push_back({id, c.value, c.params, contains(r.conflicting, id), contains(r.redundant, id)});
     }
     if (shown == m_shown) {

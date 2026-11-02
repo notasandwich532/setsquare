@@ -20,6 +20,7 @@ add_library(drawapp_lib STATIC
     CommandPanel.h
     NumberInput.cpp
     NumberInput.h
+    BrowserPanel.cpp
     ConstraintPanel.cpp
     FontPicker.cpp
     FontPicker.h

@@ -39,6 +39,7 @@ add_executable(app_tests
     app/test_scripting.cpp
     app/test_shape_tools.cpp
     app/test_style_tools.cpp
+    app/test_sublayers.cpp
     app/test_text.cpp
     app/test_tools.cpp
     app/test_transform_tools.cpp

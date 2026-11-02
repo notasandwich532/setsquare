@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 #include "NumberInput.h"
 
+#include "BrowserPanel.h"
 #include "ColorBar.h"
 #include "Icons.h"
 #include "ConstraintPanel.h"
@@ -851,6 +852,12 @@ void MainWindow::createActions()
     addDockWidget(Qt::RightDockWidgetArea, constraintsDock);
     resizeDocks({constraintsDock}, {300}, Qt::Horizontal);
 
+    auto* browserDock = new QDockWidget(tr("Browser"), this);
+    browserDock->setObjectName("BrowserDock");
+    browserDock->setWidget(new BrowserPanel(*m_doc, *m_view, browserDock));
+    addDockWidget(Qt::LeftDockWidgetArea, browserDock);
+    resizeDocks({browserDock}, {220}, Qt::Horizontal);
+
     m_console = new ScriptConsole(*m_doc, this);
     m_consoleDock = new QDockWidget(tr("Python"), this);
     m_consoleDock->setObjectName("PythonDock");
@@ -905,6 +912,7 @@ void MainWindow::createActions()
 
     // --- View ---
     auto* viewMenu = menuBar()->addMenu(tr("&View"));
+    viewMenu->addAction(browserDock->toggleViewAction());
     viewMenu->addAction(constraintsDock->toggleViewAction());
     viewMenu->addAction(m_consoleDock->toggleViewAction());
     auto* home = viewMenu->addAction(tr("&Fit All"));

@@ -271,6 +271,9 @@ std::vector<SketchView::Annotation> SketchView::layoutAnnotations() const
 
     std::set<std::pair<Id, QString>> shownOn;  // (entity, symbol) pairs already drawn
     for (const auto& [id, c] : s.constraints()) {
+        if (c.sublayer != kNoId && c.sublayer != s.activeSublayer()) {
+            continue;  // only the active sublayer's constraints and dimensions show
+        }
         if (core::isDimension(c.type)) {
             Annotation a;
             a.id = id;
@@ -360,7 +363,7 @@ std::vector<SketchView::Annotation> SketchView::layoutAnnotations() const
     // Fixed items: a padlock each (selecting it selects the item; F unfixes it).
     if (m_showConstraints) {
         for (const auto& [id, e] : s.entities()) {
-            if (e.fixed && !s.isReference(id)) {
+            if (e.fixed && !s.isReference(id) && e.sublayer == s.activeSublayer()) {
                 Annotation a{id, false, {}, {}, {}, QStringLiteral("fix")};
                 a.rect = QRectF(symbolPos(id) - QPointF(kGlyphSize / 2, kGlyphSize / 2), QSizeF(kGlyphSize, kGlyphSize));
                 out.push_back(std::move(a));
