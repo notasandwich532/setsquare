@@ -244,13 +244,38 @@ Span spanAt(const Sketch& s, Id curve, Vec2 near)
     return sp;
 }
 
-// An existing end point of `cutter` at `at`, or a new point there kept on `cutter`.
-Id pointOn(Sketch& s, Vec2 at, Id cutter)
+// Whether point p is on curve c by construction: one of its ends, or kept on it by a constraint.
+bool keptOn(const Sketch& s, Id p, Id c)
+{
+    const std::vector<Id> own = s.definingPoints(c);
+    if (std::ranges::find(own, p) != own.end()) {
+        return true;
+    }
+    return std::ranges::any_of(s.constraintsOn(p), [&](Id k) {
+        const Constraint& con = s.constraint(k);
+        return con.type == CT::Coincident && std::ranges::find(con.refs, c) != con.refs.end();
+    });
+}
+
+// The point for a cut of `curve` by `cutter` at `at`: one already there that's on either of them
+// (an end of the cutter, or a point an earlier cut kept on one of them), else a new one. It's
+// kept on the cutter.
+Id pointOn(Sketch& s, Vec2 at, Id cutter, Id curve)
 {
     for (Id p : s.definingPoints(cutter)) {
         if (dist(pos(s, p), at) < 10 * kPosEps) {
             return p;
         }
+    }
+    for (const auto& [p, e] : s.entities()) {
+        if (e.kind() != EntityKind::Point || s.isReference(p) || dist(pos(s, p), at) >= 10 * kPosEps
+            || s.layerOf(p) != s.layerOf(curve) || !(keptOn(s, p, cutter) || keptOn(s, p, curve))) {
+            continue;
+        }
+        if (!keptOn(s, p, cutter)) {
+            s.addConstraint(CT::Coincident, {p, cutter});
+        }
+        return p;
     }
     const Id p = s.addPoint(at.x, at.y);
     s.addConstraint(CT::Coincident, {p, cutter});
@@ -261,7 +286,7 @@ Id pointOn(Sketch& s, Vec2 at, Id cutter)
 Id splitLine(Sketch& s, Id line, const Cut& cut)
 {
     const Id oldEnd = s.line(line).p2;
-    const Id p = pointOn(s, cut.at, cut.cutter);
+    const Id p = pointOn(s, cut.at, cut.cutter, line);
     s.rebindPoint(line, oldEnd, p);
     const Id piece = s.addLine(p, oldEnd);
     s.entity(piece).construction = s.entity(line).construction;
@@ -275,7 +300,7 @@ Id splitLine(Sketch& s, Id line, const Cut& cut)
 Id splitArc(Sketch& s, Id arc, const Cut& cut)
 {
     const Arc a = s.arc(arc);
-    const Id p = pointOn(s, cut.at, cut.cutter);
+    const Id p = pointOn(s, cut.at, cut.cutter, arc);
     s.rebindPoint(arc, a.end, p);
     const Id piece = s.addArc(a.center, p, a.end);
     s.entity(piece).construction = s.entity(arc).construction;
@@ -352,42 +377,42 @@ void trim(Sketch& s, Id curve, Vec2 near)
         case Geo::Kind::Line: {
             const Line l = s.line(curve);
             if (!sp.lo) {  // the start, up to the first crossing
-                s.rebindPoint(curve, l.p1, pointOn(s, sp.hi->at, sp.hi->cutter));
+                s.rebindPoint(curve, l.p1, pointOn(s, sp.hi->at, sp.hi->cutter, curve));
                 s.removeIfUnused(l.p1);
             }
             else if (!sp.hi) {  // from the last crossing to the end
-                s.rebindPoint(curve, l.p2, pointOn(s, sp.lo->at, sp.lo->cutter));
+                s.rebindPoint(curve, l.p2, pointOn(s, sp.lo->at, sp.lo->cutter, curve));
                 s.removeIfUnused(l.p2);
             }
             else {  // a middle piece: split off the tail at the upper crossing, then pull this
                     // line's end back to the lower one (the tail keeps the upper point)
                 splitLine(s, curve, *sp.hi);
-                s.rebindPoint(curve, s.line(curve).p2, pointOn(s, sp.lo->at, sp.lo->cutter));
+                s.rebindPoint(curve, s.line(curve).p2, pointOn(s, sp.lo->at, sp.lo->cutter, curve));
             }
             break;
         }
         case Geo::Kind::Arc: {
             const Arc a = s.arc(curve);
             if (!sp.lo) {
-                s.rebindPoint(curve, a.start, pointOn(s, sp.hi->at, sp.hi->cutter));
+                s.rebindPoint(curve, a.start, pointOn(s, sp.hi->at, sp.hi->cutter, curve));
                 s.removeIfUnused(a.start);
             }
             else if (!sp.hi) {
-                s.rebindPoint(curve, a.end, pointOn(s, sp.lo->at, sp.lo->cutter));
+                s.rebindPoint(curve, a.end, pointOn(s, sp.lo->at, sp.lo->cutter, curve));
                 s.removeIfUnused(a.end);
             }
             else {
                 const Id tail = splitArc(s, curve, *sp.hi);
                 const Id cutEnd = s.arc(curve).end;  // the point at the upper crossing
-                s.rebindPoint(curve, cutEnd, pointOn(s, sp.lo->at, sp.lo->cutter));
+                s.rebindPoint(curve, cutEnd, pointOn(s, sp.lo->at, sp.lo->cutter, curve));
                 s.addConstraint(CT::Equal, {curve, tail});  // no longer joined: keep one circle
             }
             break;
         }
         case Geo::Kind::Circle: {
             // Keep the rest of the circle: from the upper crossing round to the lower one.
-            const Id from = pointOn(s, sp.hi->at, sp.hi->cutter);
-            const Id to = pointOn(s, sp.lo->at, sp.lo->cutter);
+            const Id from = pointOn(s, sp.hi->at, sp.hi->cutter, curve);
+            const Id to = pointOn(s, sp.lo->at, sp.lo->cutter, curve);
             circleToArc(s, curve, from, to);
             break;
         }
@@ -445,8 +470,8 @@ std::vector<Id> breakCurve(Sketch& s, Id curve, Vec2 near)
         case Geo::Kind::Line: return chain(splitLine);
         case Geo::Kind::Arc: return chain(splitArc);
         case Geo::Kind::Circle: {
-            const Id lo = pointOn(s, sp.lo->at, sp.lo->cutter);
-            const Id hi = pointOn(s, sp.hi->at, sp.hi->cutter);
+            const Id lo = pointOn(s, sp.lo->at, sp.lo->cutter, curve);
+            const Id hi = pointOn(s, sp.hi->at, sp.hi->cutter, curve);
             const Id centre = s.circle(curve).center;
             const Id clicked = s.addArc(centre, lo, hi);  // shares centre and both ends with the rest
             s.entity(clicked).construction = s.entity(curve).construction;
@@ -533,13 +558,40 @@ std::optional<Extension> findExtension(const Sketch& s, Id curve, Vec2 near)
 }
 }  // namespace
 
+int dropTrivialCoincidences(Sketch& s)
+{
+    std::vector<Id> trivial;
+    for (const auto& [id, c] : s.constraints()) {
+        if (c.type != CT::Coincident || c.refs.size() != 2) {
+            continue;
+        }
+        for (int i = 0; i < 2; ++i) {
+            const Id p = c.refs[static_cast<size_t>(i)], curve = c.refs[static_cast<size_t>(1 - i)];
+            if (!s.hasEntity(p) || !s.hasEntity(curve) || s.entity(p).kind() != EntityKind::Point) {
+                continue;
+            }
+            const Entity& e = s.entity(curve);
+            const bool end = (e.kind() == EntityKind::Line && (s.line(curve).p1 == p || s.line(curve).p2 == p))
+                || (e.kind() == EntityKind::Arc && (s.arc(curve).start == p || s.arc(curve).end == p));
+            if (end) {
+                trivial.push_back(id);
+                break;
+            }
+        }
+    }
+    for (Id id : trivial) {
+        s.remove(id);
+    }
+    return static_cast<int>(trivial.size());
+}
+
 void extend(Sketch& s, Id curve, Vec2 near)
 {
     const auto x = findExtension(s, curve, near);
     if (!x) {
         throw SketchError("extend: nothing to extend to");
     }
-    s.rebindPoint(curve, x->end, pointOn(s, x->target.at, x->target.cutter));
+    s.rebindPoint(curve, x->end, pointOn(s, x->target.at, x->target.cutter, curve));
     s.removeIfUnused(x->end);
 }
 

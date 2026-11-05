@@ -44,6 +44,11 @@ void extend(Sketch& sketch, Id curve, Vec2 near);
 // pieces on the same circle.
 std::vector<Id> breakCurve(Sketch& sketch, Id curve, Vec2 near);
 
+// After cutting: removes "point on curve" constraints whose point has become one of the curve's
+// own ends (a point kept on a circle that was then trimmed there), which say nothing and show as
+// redundant. Returns how many.
+int dropTrivialCoincidences(Sketch& sketch);
+
 // What would happen at `near` (for previews): the part trim would remove, the extension extend
 // would add, or the piece break would separate. Empty when the operation doesn't apply.
 std::vector<Vec2> trimPreview(const Sketch& sketch, Id curve, Vec2 near);

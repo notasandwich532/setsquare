@@ -280,6 +280,57 @@ struct Solver::Impl
     std::map<Id, std::vector<double*>> entityUnknowns;  // per entity, the unknowns that define it
     std::set<Id> fixedEntities;
     std::set<Id> capArcs;  // see addOffset
+    // Per centre: the ends of arcs on it, joined where arcs join them (union-find). Ends joined
+    // this way are on one circle: see build.
+    std::map<Id, std::map<Id, Id>> arcEnds;
+    Id arcRoot(Id centre, Id p)
+    {
+        auto c = arcEnds.find(centre);
+        if (c == arcEnds.end() || !c->second.contains(p)) {
+            return kNoId;
+        }
+        auto& ends = c->second;
+        while (ends[p] != p) {
+            p = ends[p] = ends[ends[p]];
+        }
+        return p;
+    }
+    // Arcs on one circle: same centre, and joined end to end or by equal radii (union-find over
+    // arc ids, extended as equal constraints are added).
+    std::map<Id, Id> circleOf;
+    Id circleRoot(Id arc)
+    {
+        if (!circleOf.contains(arc)) {
+            circleOf[arc] = arc;
+        }
+        while (circleOf[arc] != arc) {
+            arc = circleOf[arc] = circleOf[circleOf[arc]];
+        }
+        return arc;
+    }
+    std::map<std::pair<Id, Id>, Id> chainArc;  // (centre, end chain) -> an arc in it
+    // A constraint the arcs say already (left out, so it isn't reported as redundant; it still
+    // applies once they don't, e.g. when the arc joining them is deleted).
+    bool impliedByArcs(const Sketch& sketch, const Constraint& c);
+
+    // Lines made collinear (pieces of a trimmed line, joined by collinear constraints) lie on one
+    // line: per group (union-find over line ids), the points known to be on it. Constraints are
+    // added in id order, and each consults and extends these, so what's already known on the
+    // line isn't said again (which is redundant, and leaves drags unable to converge).
+    std::map<Id, Id> lineGroup;
+    std::map<Id, std::set<Id>> onLine;  // group root -> points on that line
+    Id groupOf(const Sketch& sketch, Id line)
+    {
+        if (!lineGroup.contains(line)) {
+            lineGroup[line] = line;
+            const Line& l = sketch.line(line);
+            onLine[line] = {l.p1, l.p2};
+        }
+        while (lineGroup[line] != line) {
+            line = lineGroup[line] = lineGroup[lineGroup[line]];
+        }
+        return line;
+    }
 
     GCS::System sys;
     bool dragging = false;
@@ -403,7 +454,6 @@ void Solver::Impl::build(const Sketch& sketch)
         }
     }
 
-    std::set<std::pair<Id, std::pair<Id, Id>>> arcShapes;  // centre and ends of the arcs so far
     for (const auto& [id, e] : sketch.entities()) {
         const bool fixed = e.fixed;
         if (const auto* l = std::get_if<Line>(&e.geom)) {
@@ -443,15 +493,26 @@ void Solver::Impl::build(const Sketch& sketch)
                 declare(ga.endAngle);
             }
             auto [it, _] = arcs.emplace(id, ga);
-            // An arc on the same centre and end points as one already here (the two halves of a
-            // circle trimmed to construction) has its ends on the circle already: the usual arc
-            // rules would say that twice, which leaves drags unable to converge. Like an offset's
-            // caps, its radius and start angle come from its start, and only the angle from its end.
-            const std::pair<Id, std::pair<Id, Id>> key{a->center, std::minmax(a->start, a->end)};
+            // Arcs on one centre chained end to end (a circle trimmed to construction, maybe
+            // several times) go round in a loop: the last one's ends are already on the circle
+            // through the others, so the usual arc rules would say that twice, which leaves drags
+            // unable to converge. Like an offset's caps, an arc closing a loop takes its radius
+            // and start angle from its start, and only the angle from its end.
+            auto& ends = arcEnds[a->center];  // which ends are joined round this centre
+            auto root = [&](Id p) {
+                if (!ends.contains(p)) {
+                    ends[p] = p;
+                }
+                while (ends[p] != p) {
+                    p = ends[p] = ends[ends[p]];
+                }
+                return p;
+            };
+            const Id rootStart = root(a->start), rootEnd = root(a->end);
             if (capArcs.contains(id)) {
                 // (caps get theirs from their offset: see addOffset)
             }
-            else if (!arcShapes.insert(key).second) {
+            else if (rootStart == rootEnd) {
                 GCS::Arc& twin = it->second;
                 sys.addConstraintP2PDistance(twin.center, twin.start, twin.rad, kInternalTag);
                 sys.addConstraintP2PAngle(twin.center, twin.start, twin.startAngle, 0.0, kInternalTag);
@@ -459,6 +520,17 @@ void Solver::Impl::build(const Sketch& sketch)
             }
             else {
                 sys.addConstraintArcRules(it->second, kInternalTag);
+                ends[rootStart] = rootEnd;
+            }
+        }
+    }
+
+    // Arcs joined end to end round a centre are on one circle.
+    for (const auto& [id, e] : sketch.entities()) {
+        if (const auto* a = std::get_if<Arc>(&e.geom)) {
+            const auto key = std::make_pair(a->center, arcRoot(a->center, a->start));
+            if (const auto [it, added] = chainArc.emplace(key, id); !added) {
+                circleOf[circleRoot(id)] = circleRoot(it->second);
             }
         }
     }
@@ -490,8 +562,68 @@ void Solver::Impl::build(const Sketch& sketch)
     sys.declareUnknowns(unknowns);
 }
 
+bool Solver::Impl::impliedByArcs(const Sketch& sketch, const Constraint& c)
+{
+    auto arcOf = [&](Id id) -> const Arc* {
+        return sketch.hasEntity(id) ? std::get_if<Arc>(&sketch.entity(id).geom) : nullptr;
+    };
+    // The circle (see circleOf) a point is on as the end of an arc round `centre`, if any.
+    auto circleAt = [&](Id centre, Id p) -> Id {
+        const Id root = arcRoot(centre, p);
+        const auto it = chainArc.find({centre, root});
+        return root == kNoId || it == chainArc.end() ? kNoId : circleRoot(it->second);
+    };
+    if (c.type == ConstraintType::Coincident && c.refs.size() == 2) {
+        // A point on a line that's known to be on it already (an end of a line collinear with it,
+        // or a point put on it before).
+        for (int i = 0; i < 2; ++i) {
+            const Id p = c.refs[static_cast<size_t>(i)], l = c.refs[static_cast<size_t>(1 - i)];
+            if (sketch.hasEntity(p) && sketch.entity(p).kind() == EntityKind::Point && sketch.hasEntity(l)
+                && sketch.entity(l).kind() == EntityKind::Line) {
+                return !onLine[groupOf(sketch, l)].insert(p).second;
+            }
+        }
+        // A point on an arc that is the end of an arc joined to it round the same centre.
+        for (int i = 0; i < 2; ++i) {
+            const Id p = c.refs[static_cast<size_t>(i)];
+            const Id arcId = c.refs[static_cast<size_t>(1 - i)];
+            if (const Arc* a = arcOf(arcId); a && sketch.hasEntity(p) && sketch.entity(p).kind() == EntityKind::Point) {
+                // (an end of another arc round the same centre: now the two are one circle)
+                const Id circle = circleAt(a->center, p), mine = circleRoot(arcId);
+                if (circle == kNoId) {
+                    return false;
+                }
+                if (circle == mine) {
+                    return true;
+                }
+                circleOf[circle] = mine;
+                return false;
+            }
+        }
+    }
+    if (c.type == ConstraintType::Equal && c.refs.size() == 2) {
+        // Two arcs on the same centre already on one circle (joined end to end, or by other
+        // equal radii); else they are now.
+        const Arc* a = arcOf(c.refs[0]);
+        const Arc* b = arcOf(c.refs[1]);
+        if (!a || !b || a->center != b->center) {
+            return false;
+        }
+        const Id ca = circleRoot(c.refs[0]), cb = circleRoot(c.refs[1]);
+        if (ca == cb) {
+            return true;
+        }
+        circleOf[cb] = ca;
+        return false;
+    }
+    return false;
+}
+
 void Solver::Impl::addConstraint(const Sketch& sketch, const Constraint& c)
 {
+    if (impliedByArcs(sketch, c)) {
+        return;
+    }
     const int tag = static_cast<int>(c.id);
     const auto& r = c.refs;
     auto kind = [&](size_t i) { return sketch.entity(r[i]).kind(); };
@@ -588,15 +720,22 @@ void Solver::Impl::addConstraint(const Sketch& sketch, const Constraint& c)
             break;
 
         case ConstraintType::Collinear: {
-            // The ends of the second line lie on the first. An end the lines share is on it
-            // already (and constraining it anyway is a degenerate, "redundant" equation).
-            const Line& first = sketch.line(r[0]);
+            // The ends of the second line lie on the first. An end known to be on it already (one
+            // they share, or one on a line collinear with it) isn't constrained again: that's a
+            // degenerate, "redundant" equation. Lines already collinear through others: nothing.
+            const Id g1 = groupOf(sketch, r[0]), g2 = groupOf(sketch, r[1]);
+            if (g1 == g2) {
+                break;
+            }
             const Line& second = sketch.line(r[1]);
             for (Id end : {second.p1, second.p2}) {
-                if (end != first.p1 && end != first.p2) {
+                if (!onLine[g1].contains(end)) {
                     sys.addConstraintPointOnLine(pt(end), ln(r[0]), tag);
                 }
             }
+            lineGroup[g2] = g1;
+            onLine[g1].insert(onLine[g2].begin(), onLine[g2].end());
+            onLine.erase(g2);
             break;
         }
 

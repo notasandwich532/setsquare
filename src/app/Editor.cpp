@@ -242,10 +242,12 @@ void Editor::trim(Id curve, core::Vec2 near, bool toConstruction)
     const QString what = name(m_sketch, curve);  // before it changes (it may disappear)
     if (toConstruction) {
         modify::trimToConstruction(m_sketch, curve, near);
+        modify::dropTrivialCoincidences(m_sketch);
         log(QStringLiteral("s.trim(%1, near=%2, construction=True)").arg(what, pair(near)));
     }
     else {
         modify::trim(m_sketch, curve, near);
+        modify::dropTrivialCoincidences(m_sketch);
         log(QStringLiteral("s.trim(%1, near=%2)").arg(what, pair(near)));
     }
 }
@@ -254,6 +256,7 @@ void Editor::extend(Id curve, core::Vec2 near)
 {
     const QString what = name(m_sketch, curve);
     modify::extend(m_sketch, curve, near);
+    modify::dropTrivialCoincidences(m_sketch);
     log(QStringLiteral("s.extend(%1, near=%2)").arg(what, pair(near)));
 }
 
@@ -261,6 +264,7 @@ std::vector<Id> Editor::breakCurve(Id curve, core::Vec2 near)
 {
     const QString what = name(m_sketch, curve);
     std::vector<Id> pieces = modify::breakCurve(m_sketch, curve, near);
+    modify::dropTrivialCoincidences(m_sketch);
     log(QStringLiteral("s.break_curve(%1, near=%2)").arg(what, pair(near)));
     return pieces;
 }
