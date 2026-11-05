@@ -77,7 +77,7 @@ void TextTool::buildPanel()
                        [this](Id id) { return isPoint(id); }, false);
     m_opposite = addPick(QObject::tr("Opposite corner"), "opposite", QObject::tr("click the opposite corner of the box"),
                          [this](Id id) { return isPoint(id); }, false);
-    m_path = addPick(QObject::tr("Path"), "path", QObject::tr("click the line, arc or circle to set the text along"),
+    m_path = addPick(QObject::tr("Path"), "path", QObject::tr("click the curve to set the text along"),
                      [this](Id id) { return isCurve(id); }, false);
     m_position = addPick(QObject::tr("Position"), "position", QObject::tr("click where the text goes"),
                          [this](Id id) { return isPoint(id); }, false);

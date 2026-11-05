@@ -17,7 +17,8 @@
 // sketch and appends the equivalent Python to a log, which is how UI actions get recorded:
 // anything a tool does through an Editor can be replayed as a script.
 //
-// Recorded Python names things by id: p12 (point), l13 (line), c14 (circle), a15 (arc),
+// Recorded Python names things by id: p12 (point), l13 (line), c14 (circle), a15 (arc), e (ellipse),
+// ea (elliptical arc), sp (spline),
 // k16 (constraint), d17 (dimension), s.origin. In the console those names resolve to the live
 // objects, so recorded lines can be pasted back in.
 class Editor

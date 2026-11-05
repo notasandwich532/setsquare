@@ -72,6 +72,9 @@ enum class ToolKind
     Fix,
 
     Project,
+    Ellipse,
+    SplineFit,
+    SplineControl,
 };
 
 struct ToolEvent

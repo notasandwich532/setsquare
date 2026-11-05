@@ -1,5 +1,7 @@
 #include "SketchView.h"
 
+#include <core/Curves.h>
+
 #include "CommandPanel.h"
 #include "Document.h"
 #include "FrameClock.h"
@@ -8,6 +10,7 @@
 #include "tools/ModifyTools.h"
 #include "tools/SelectTool.h"
 #include "tools/ShapeTools.h"
+#include "tools/CurveTools.h"
 #include "tools/ProjectTool.h"
 #include "tools/StyleTools.h"
 #include "tools/TextTool.h"
@@ -190,6 +193,9 @@ void SketchView::setTool(ToolKind kind)
         case ToolKind::StrokeBrush: m_tool = std::make_unique<StrokeBrushTool>(*this); break;
         case ToolKind::Fill: m_tool = std::make_unique<FillTool>(*this); break;
         case ToolKind::Project: m_tool = std::make_unique<ProjectTool>(*this); break;
+        case ToolKind::Ellipse: m_tool = std::make_unique<EllipseTool>(*this); break;
+        case ToolKind::SplineFit: m_tool = std::make_unique<SplineTool>(*this, core::SplineKind::Fit); break;
+        case ToolKind::SplineControl: m_tool = std::make_unique<SplineTool>(*this, core::SplineKind::Control); break;
         case ToolKind::Dimension: m_tool = std::make_unique<DimensionTool>(*this); break;
         default: m_tool = std::make_unique<ConstraintTool>(*this, kind); break;
     }
@@ -746,6 +752,58 @@ void SketchView::drawArcPath(QPainter& painter, const core::ArcShape& arc) const
     painter.drawPath(path);
 }
 
+QPainterPath SketchView::curvePath(const core::Sketch& sketch, core::Id curve) const
+{
+    const core::curve::Path p = core::curve::pathOf(sketch, curve);
+    QPainterPath out;
+    if (p.kind() == core::curve::Path::Kind::Spline) {
+        const std::vector<core::curve::Bezier> pieces = p.beziers();
+        for (size_t i = 0; i < pieces.size(); ++i) {
+            const auto& q = pieces[i].p;
+            if (i == 0) {
+                out.moveTo(toScreen(q[0]));
+            }
+            out.cubicTo(toScreen(q[1]), toScreen(q[2]), toScreen(q[3]));
+        }
+        return out;
+    }
+    // (enough segments that it looks smooth at this zoom)
+    const double size = std::max(p.ellipseShape.a, p.ellipseShape.b) * m_zoom;
+    const int perQuarter = std::clamp(static_cast<int>(size / 4), 8, 256);
+    const std::vector<core::Vec2> pts = p.polyline(perQuarter);
+    for (size_t i = 0; i < pts.size(); ++i) {
+        if (i == 0) {
+            out.moveTo(toScreen(pts[i]));
+        }
+        else {
+            out.lineTo(toScreen(pts[i]));
+        }
+    }
+    return out;
+}
+
+void SketchView::drawControlPolygon(QPainter& painter, const core::Sketch& sketch, core::Id spline) const
+{
+    const core::Spline& sp = sketch.spline(spline);
+    if (sp.kind != core::SplineKind::Control) {
+        return;
+    }
+    QPolygonF poly;
+    for (core::Id p : sp.points) {
+        poly << toScreen({sketch.point(p).x, sketch.point(p).y});
+    }
+    if (sp.closed && !poly.isEmpty()) {
+        poly << poly.front();
+    }
+    QColor faint = theme::canvas().construction;
+    faint.setAlphaF(faint.alphaF() * 0.6);
+    painter.save();
+    painter.setPen(QPen(faint, 1.0, Qt::DotLine));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawPolyline(poly);
+    painter.restore();
+}
+
 void SketchView::drawSketch(QPainter& painter) const
 {
     const auto& colors = theme::canvas();
@@ -873,6 +931,9 @@ void SketchView::drawSketch(QPainter& painter) const
                 break;
             }
             case core::EntityKind::Arc: drawArcPath(painter, core::arcShape(sketch, id)); break;
+            case core::EntityKind::Ellipse:
+            case core::EntityKind::EllipseArc:
+            case core::EntityKind::Spline: painter.drawPath(curvePath(sketch, id)); break;
         }
     };
 
@@ -977,6 +1038,9 @@ void SketchView::drawSketch(QPainter& painter) const
         }
         painter.setPen(styleFor(e));
         drawCurve(id, e);
+        if (e.kind() == core::EntityKind::Spline && !m_presentation && layer == activeLayer) {
+            drawControlPolygon(painter, sketch, id);
+        }
     }
     }  // (layers)
 
@@ -1091,6 +1155,18 @@ void SketchView::drawPreviewSketch(QPainter& painter, const core::Sketch& sketch
                 break;
             }
             case core::EntityKind::Arc: drawArcPath(painter, core::arcShape(sketch, e.id)); break;
+            case core::EntityKind::Ellipse:
+            case core::EntityKind::EllipseArc:
+            case core::EntityKind::Spline:
+                try {
+                    painter.drawPath(curvePath(sketch, e.id));
+                    if (e.kind() == core::EntityKind::Spline) {
+                        drawControlPolygon(painter, sketch, e.id);
+                    }
+                }
+                catch (const core::SketchError&) {
+                }
+                break;
         }
     }
 }

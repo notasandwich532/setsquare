@@ -277,3 +277,98 @@ TEST_CASE("Replaying recorded shape tools reproduces the sketch", "[shapes][reco
         }
     }
 }
+
+TEST_CASE("Ellipse tool: centre, an axis end, then the other axis", "[shapes][curves]")
+{
+    Fixture f;
+    f.view.setTool(ToolKind::Ellipse);
+    f.click(10, 10);
+    f.click(40, 10);
+    f.move(25, 25);
+    f.click(25, 25);  // the other axis: 15 out from the first
+    REQUIRE(f.count(EntityKind::Ellipse) == 1);
+    Id ellipse = kNoId;
+    for (const auto& [id, e] : f.sketch().entities()) {
+        if (e.kind() == EntityKind::Ellipse) {
+            ellipse = id;
+        }
+    }
+    const auto ax = f.sketch().ellipseAxes(ellipse);
+    const Point& c = f.sketch().point(ax[0]);
+    const Point& a = f.sketch().point(ax[1]);
+    const Point& b = f.sketch().point(ax[2]);
+    CHECK(std::hypot(a.x - c.x, a.y - c.y) == Approx(30).margin(0.5));
+    CHECK(std::hypot(b.x - c.x, b.y - c.y) == Approx(15).margin(0.5));
+    f.requireClean(5);
+    CHECK(f.recorded.last().contains("s.ellipse("));
+}
+
+TEST_CASE("Spline tool: click points, Enter to finish; the first point again closes it", "[shapes][curves]")
+{
+    Fixture f;
+    f.view.setTool(ToolKind::SplineFit);
+    f.click(0, 0);
+    f.click(10, 10);
+    f.click(20, 0);
+    f.click(30, 10);
+    QTest::keyClick(&f.view, Qt::Key_Backspace);  // takes (30, 10) back
+    f.click(30, 5);
+    QTest::keyClick(&f.view, Qt::Key_Return);
+    REQUIRE(f.count(EntityKind::Spline) == 1);
+    Id fit = kNoId;
+    for (const auto& [id, e] : f.sketch().entities()) {
+        if (e.kind() == EntityKind::Spline) {
+            fit = id;
+        }
+    }
+    const Spline& sp = f.sketch().spline(fit);
+    CHECK(sp.points.size() == 4);
+    CHECK(sp.kind == SplineKind::Fit);
+    CHECK_FALSE(sp.closed);
+    CHECK(f.sketch().point(sp.points.back()).y == Approx(5));
+    CHECK(f.recorded.last().contains("s.spline("));
+
+    // A closed control-point spline: back to the first point.
+    f.view.setTool(ToolKind::SplineControl);
+    f.click(50, 0);
+    f.click(60, 10);
+    f.click(70, 0);
+    f.click(60, -10);
+    f.click(50, 0);
+    REQUIRE(f.count(EntityKind::Spline) == 2);
+    Id ring = kNoId;
+    for (const auto& [id, e] : f.sketch().entities()) {
+        if (e.kind() == EntityKind::Spline && id != fit) {
+            ring = id;
+        }
+    }
+    CHECK(f.sketch().spline(ring).closed);
+    CHECK(f.sketch().spline(ring).kind == SplineKind::Control);
+    CHECK(f.sketch().spline(ring).points.size() == 4);
+    f.requireClean(11);  // (16, less the origin and three points snapped onto the x axis)
+
+    // Esc throws a spline in progress away.
+    f.view.setTool(ToolKind::SplineFit);
+    f.click(0, 40);
+    f.click(10, 50);
+    QTest::keyClick(&f.view, Qt::Key_Escape);
+    CHECK(f.count(EntityKind::Spline) == 2);
+}
+
+TEST_CASE("Dimension tool on an ellipse: the axis nearer the click", "[shapes][curves]")
+{
+    Fixture f;
+    f.doc.edit("ellipse", [&](Editor& ed) { ed.ellipse(ed.point(0, 0), ed.point(30, 0), ed.point(0, 15)); });
+    f.view.setTool(ToolKind::Dimension);
+    f.click(30 * std::cos(0.35), 15 * std::sin(0.35));  // on the curve, nearer the major axis
+    f.click(45, 10);    // place
+    f.view.setTool(ToolKind::Dimension);
+    f.click(30 * std::cos(1.3), 15 * std::sin(1.3));  // nearer the minor axis
+    f.click(10, 30);
+    std::vector<ConstraintType> types;
+    for (const auto& [id, c] : f.sketch().constraints()) {
+        types.push_back(c.type);
+    }
+    CHECK(std::ranges::count(types, ConstraintType::Radius) == 1);
+    CHECK(std::ranges::count(types, ConstraintType::Distance) == 1);
+}

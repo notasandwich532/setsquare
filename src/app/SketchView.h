@@ -203,6 +203,10 @@ private:
     void drawSketch(QPainter& painter) const;
     void drawAnnotations(QPainter& painter) const;  // constraint symbols + dimensions
     void drawArcPath(QPainter& painter, const core::ArcShape& arc) const;
+    // Ellipses, elliptical arcs and splines (any curve, really), as their path.
+    QPainterPath curvePath(const core::Sketch& sketch, core::Id curve) const;
+    // A control-point spline's control polygon (faint), while sketching.
+    void drawControlPolygon(QPainter& painter, const core::Sketch& sketch, core::Id spline) const;
     ToolEvent makeEvent(const QMouseEvent* event) const;
     void onDocumentChanged();
 

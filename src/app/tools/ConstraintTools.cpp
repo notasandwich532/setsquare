@@ -4,6 +4,7 @@
 #include "../SketchView.h"
 #include "../Theme.h"
 
+#include <core/Curves.h>
 #include <core/Dimensions.h>
 
 #include <QPainter>
@@ -345,7 +346,7 @@ bool ConstraintTool::cancel()
 QString DimensionTool::hint() const
 {
     if (m_picks.empty()) {
-        return QObject::tr("Dimension: pick a line, circle, arc, or two points/lines");
+        return QObject::tr("Dimension: pick a line, circle, arc, ellipse (near the axis to measure), or two points/lines");
     }
     bool incomplete = false;
     if (candidateFor(doc().sketch(), m_picks, m_mouse, &incomplete)) {
@@ -380,6 +381,21 @@ std::optional<DimensionTool::Candidate> DimensionTool::candidateFor(const Sketch
             }
             case EntityKind::Circle: return Candidate{ConstraintType::Diameter, {a}};
             case EntityKind::Arc: return Candidate{ConstraintType::Radius, {a}};
+            case EntityKind::Ellipse:
+            case EntityKind::EllipseArc: {
+                // The semi-axis nearer the mouse: the major one as a radius, the minor one as the
+                // distance from the centre to its point.
+                const core::curve::EllipseFrame f = core::curve::ellipseFrame(s, a);
+                const Vec2 d{mouse.x - f.c.x, mouse.y - f.c.y};
+                const double along = std::abs(d.x * f.u.x + d.y * f.u.y) / std::max(f.a, 1e-9);
+                const double across = std::abs(-d.x * f.u.y + d.y * f.u.x) / std::max(f.b, 1e-9);
+                if (across > along) {
+                    const std::array<Id, 3> ax = s.ellipseAxes(a);
+                    return Candidate{ConstraintType::Distance, {ax[0], ax[2]}};
+                }
+                return Candidate{ConstraintType::Radius, {a}};
+            }
+            case EntityKind::Spline: return std::nullopt;
         }
     }
 

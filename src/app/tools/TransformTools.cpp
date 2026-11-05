@@ -6,6 +6,7 @@
 #include "../Theme.h"
 #include "ShapeTools.h"
 
+#include <core/Curves.h>
 #include <core/Features.h>
 #include <core/Geometry.h>
 #include <core/Solver.h>
@@ -1128,10 +1129,15 @@ bool OffsetTool::frame(Vec2& foot, Vec2& normal) const
         const core::Point& b = s.point(l->p2);
         n = {-(b.y - a.y), b.x - a.x};
     }
-    else {
+    else if (e.kind() == core::EntityKind::Circle || e.kind() == core::EntityKind::Arc) {
         const Id centre = e.kind() == core::EntityKind::Circle ? s.circle(nearest).center : s.arc(nearest).center;
         const core::Point& c = s.point(centre);
         n = {foot.x - c.x, foot.y - c.y};
+    }
+    else {  // (ellipses, splines: square to the curve there)
+        const core::curve::Path path = core::curve::pathOf(s, nearest);
+        const Vec2 d = path.derivative(path.param(foot));
+        n = {-d.y, d.x};
     }
     const double len = norm(n);
     if (len == 0.0) {

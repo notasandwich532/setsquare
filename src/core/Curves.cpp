@@ -301,8 +301,9 @@ Vec2 Path::splineAt(double u, bool deriv) const
             u += n;
         }
     }
-    u = std::clamp(u, 0.0, n);
-    const size_t i = std::min(static_cast<size_t>(u), pieces.size() - 1);
+    // Past an open spline's ends, its end pieces carry on (smoothly: the solver's points kept on
+    // it may be pulled a little past the end on their way, and a clamped curve would stop them).
+    const size_t i = static_cast<size_t>(std::clamp(std::floor(u), 0.0, n - 1));
     const double local = u - static_cast<double>(i);
     return deriv ? pieces[i].derivative(local) : pieces[i].at(local);
 }

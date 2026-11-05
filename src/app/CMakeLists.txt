@@ -42,6 +42,8 @@ add_library(drawapp_lib STATIC
     Theme.h
     tools/ConstraintTools.cpp
     tools/ConstraintTools.h
+    tools/CurveTools.cpp
+    tools/CurveTools.h
     tools/DrawTools.cpp
     tools/ModifyTools.cpp
     tools/ModifyTools.h

@@ -173,6 +173,9 @@ const std::pair<ToolKind, const char*> kToolNames[] = {
     {ToolKind::Symmetric, "symmetric"},
     {ToolKind::Fix, "fix"},
     {ToolKind::Project, "project"},
+    {ToolKind::Ellipse, "ellipse"},
+    {ToolKind::SplineFit, "spline"},
+    {ToolKind::SplineControl, "spline_control"},
 };
 
 QString macrosFolder()
@@ -681,6 +684,12 @@ void MainWindow::createActions()
                     {ToolKind::ArcCenter, tr("Center Point Arc"), QKeySequence(Qt::Key_A)},
                     {ToolKind::Arc3Point, tr("3-Point Arc"), QKeySequence(Qt::SHIFT | Qt::Key_A)},
                     {ToolKind::ArcTangent, tr("Tangent Arc"), {}},
+                });
+    addTools(toolbar, {{ToolKind::Ellipse, tr("Ellipse"), {}}});
+    addDropdown(toolbar, tr("Spline"),
+                {
+                    {ToolKind::SplineFit, tr("Fit Point Spline"), {}},
+                    {ToolKind::SplineControl, tr("Control Point Spline"), {}},
                 });
     addDropdown(toolbar, tr("Polygon"),
                 {

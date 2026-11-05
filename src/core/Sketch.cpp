@@ -1637,7 +1637,7 @@ void checkText(const Sketch& s, const Text& t)
     }
     if (t.path != kNoId) {
         if (!s.hasEntity(t.path) || s.entity(t.path).kind() == EntityKind::Point || s.isReference(t.path)) {
-            throw SketchError("text: the path must be a line, arc or circle");
+            throw SketchError("text: the path must be a curve");
         }
         if (s.definingPoints(t.path).front() != t.anchor) {
             throw SketchError("text: text along a path is anchored at the path's first point");

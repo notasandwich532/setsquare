@@ -389,6 +389,44 @@ def icon_point():
     return finish("point")
 
 
+def icon_ellipse():
+    """A grey ellipse; blue clicks at its centre and the ends of its two axes."""
+    start()
+    e = stroke(s.ellipse((12, 12), (22, 12), 6.5), GREY)
+    pin(e.center, 12, 12)
+    s.horizontal(e.center, e.major)
+    s.distance(e.center, e.major, value=10)
+    s.distance(e.center, e.minor, value=6.5)
+    for p in (e.center, e.major, e.minor):
+        marker(p)
+    return finish("ellipse")
+
+
+def icon_spline():
+    """A grey S-curve through four blue points."""
+    start()
+    pts = [(3, 5), (9, 17), (15, 7), (21, 19)]
+    sp = stroke(s.spline(pts), GREY)
+    for p, (x, y) in zip(sp.points, pts):
+        pin(p, x, y)
+        marker(p)
+    return finish("spline")
+
+
+def icon_spline_control():
+    """A grey curve pulled by four blue control points, joined by dotted guides."""
+    start()
+    pts = [(3, 4), (6, 20), (18, 20), (21, 4)]
+    sp = stroke(s.spline(pts, kind="control"), GREY)
+    for p, (x, y) in zip(sp.points, pts):
+        pin(p, x, y)
+    for a, b in zip(sp.points, sp.points[1:]):
+        guide(a, b)
+    for p in sp.points:
+        marker(p)
+    return finish("spline_control")
+
+
 def icon_rectangle():
     start()
     r = stroke(s.rectangle((3, 5), (21, 19)), GREY)
@@ -1045,7 +1083,7 @@ ICONS = {
 }
 ICONS.update({
     f.__name__.removeprefix("icon_"): f
-    for f in [icon_select, icon_text, icon_project, icon_line, icon_point, icon_rectangle, icon_rectangle_3point, icon_rectangle_center, icon_circle,
+    for f in [icon_select, icon_text, icon_project, icon_ellipse, icon_spline, icon_spline_control, icon_line, icon_point, icon_rectangle, icon_rectangle_3point, icon_rectangle_center, icon_circle,
               icon_circle_2point, icon_circle_3point, icon_circle_tangent2, icon_circle_tangent3, icon_arc, icon_arc3,
               icon_arc_tangent, icon_polygon_inscribed, icon_polygon_circumscribed, icon_polygon_edge, icon_slot,
               icon_slot_overall, icon_slot_center_point, icon_arc_slot, icon_arc_slot_3point, icon_trim,

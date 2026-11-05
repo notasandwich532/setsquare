@@ -1,0 +1,797 @@
+{
+  "active_sublayer": 1,
+  "axes": [
+    3,
+    5
+  ],
+  "constraints": [
+    {
+      "id": 13,
+      "refs": [
+        9
+      ],
+      "sublayer": 1,
+      "type": "horizontal"
+    },
+    {
+      "id": 14,
+      "refs": [
+        10
+      ],
+      "sublayer": 1,
+      "type": "vertical"
+    },
+    {
+      "id": 15,
+      "refs": [
+        11
+      ],
+      "sublayer": 1,
+      "type": "horizontal"
+    },
+    {
+      "id": 16,
+      "refs": [
+        12
+      ],
+      "sublayer": 1,
+      "type": "vertical"
+    },
+    {
+      "id": 17,
+      "refs": [
+        9
+      ],
+      "sublayer": 1,
+      "type": "distance",
+      "value": 24.0
+    },
+    {
+      "id": 18,
+      "refs": [
+        12
+      ],
+      "sublayer": 1,
+      "type": "distance",
+      "value": 24.0
+    },
+    {
+      "id": 23,
+      "refs": [
+        1,
+        19
+      ],
+      "sublayer": 1,
+      "type": "horizontalDistance",
+      "value": 12.0
+    },
+    {
+      "id": 24,
+      "refs": [
+        1,
+        19
+      ],
+      "sublayer": 1,
+      "type": "verticalDistance",
+      "value": 12.0
+    },
+    {
+      "id": 25,
+      "refs": [
+        19,
+        20
+      ],
+      "sublayer": 1,
+      "type": "horizontal"
+    },
+    {
+      "id": 26,
+      "refs": [
+        19,
+        20
+      ],
+      "sublayer": 1,
+      "type": "distance",
+      "value": 10.0
+    },
+    {
+      "id": 27,
+      "refs": [
+        19,
+        21
+      ],
+      "sublayer": 1,
+      "type": "distance",
+      "value": 6.5
+    },
+    {
+      "id": 36,
+      "refs": [
+        32
+      ],
+      "sublayer": 1,
+      "type": "horizontal"
+    },
+    {
+      "id": 37,
+      "refs": [
+        33
+      ],
+      "sublayer": 1,
+      "type": "vertical"
+    },
+    {
+      "id": 38,
+      "refs": [
+        34
+      ],
+      "sublayer": 1,
+      "type": "horizontal"
+    },
+    {
+      "id": 39,
+      "refs": [
+        35
+      ],
+      "sublayer": 1,
+      "type": "vertical"
+    },
+    {
+      "id": 42,
+      "refs": [
+        19,
+        40
+      ],
+      "sublayer": 1,
+      "type": "midpoint"
+    },
+    {
+      "id": 43,
+      "refs": [
+        32
+      ],
+      "sublayer": 1,
+      "type": "distance",
+      "value": 2.5
+    },
+    {
+      "id": 44,
+      "refs": [
+        33
+      ],
+      "sublayer": 1,
+      "type": "distance",
+      "value": 2.5
+    },
+    {
+      "id": 54,
+      "refs": [
+        50
+      ],
+      "sublayer": 1,
+      "type": "horizontal"
+    },
+    {
+      "id": 55,
+      "refs": [
+        51
+      ],
+      "sublayer": 1,
+      "type": "vertical"
+    },
+    {
+      "id": 56,
+      "refs": [
+        52
+      ],
+      "sublayer": 1,
+      "type": "horizontal"
+    },
+    {
+      "id": 57,
+      "refs": [
+        53
+      ],
+      "sublayer": 1,
+      "type": "vertical"
+    },
+    {
+      "id": 60,
+      "refs": [
+        20,
+        58
+      ],
+      "sublayer": 1,
+      "type": "midpoint"
+    },
+    {
+      "id": 61,
+      "refs": [
+        50
+      ],
+      "sublayer": 1,
+      "type": "distance",
+      "value": 2.5
+    },
+    {
+      "id": 62,
+      "refs": [
+        51
+      ],
+      "sublayer": 1,
+      "type": "distance",
+      "value": 2.5
+    },
+    {
+      "id": 72,
+      "refs": [
+        68
+      ],
+      "sublayer": 1,
+      "type": "horizontal"
+    },
+    {
+      "id": 73,
+      "refs": [
+        69
+      ],
+      "sublayer": 1,
+      "type": "vertical"
+    },
+    {
+      "id": 74,
+      "refs": [
+        70
+      ],
+      "sublayer": 1,
+      "type": "horizontal"
+    },
+    {
+      "id": 75,
+      "refs": [
+        71
+      ],
+      "sublayer": 1,
+      "type": "vertical"
+    },
+    {
+      "id": 78,
+      "refs": [
+        21,
+        76
+      ],
+      "sublayer": 1,
+      "type": "midpoint"
+    },
+    {
+      "id": 79,
+      "refs": [
+        68
+      ],
+      "sublayer": 1,
+      "type": "distance",
+      "value": 2.5
+    },
+    {
+      "id": 80,
+      "refs": [
+        69
+      ],
+      "sublayer": 1,
+      "type": "distance",
+      "value": 2.5
+    }
+  ],
+  "entities": [
+    {
+      "fixed": true,
+      "id": 1,
+      "type": "point",
+      "x": 0.0,
+      "y": 0.0
+    },
+    {
+      "fixed": true,
+      "id": 2,
+      "type": "point",
+      "x": 1.0,
+      "y": 0.0
+    },
+    {
+      "construction": true,
+      "fixed": true,
+      "id": 3,
+      "p1": 1,
+      "p2": 2,
+      "type": "line"
+    },
+    {
+      "fixed": true,
+      "id": 4,
+      "type": "point",
+      "x": 0.0,
+      "y": 1.0
+    },
+    {
+      "construction": true,
+      "fixed": true,
+      "id": 5,
+      "p1": 1,
+      "p2": 4,
+      "type": "line"
+    },
+    {
+      "id": 6,
+      "sublayer": 1,
+      "type": "point",
+      "x": 24.0,
+      "y": 24.0
+    },
+    {
+      "id": 7,
+      "sublayer": 1,
+      "type": "point",
+      "x": 24.0,
+      "y": 0.0
+    },
+    {
+      "id": 8,
+      "sublayer": 1,
+      "type": "point",
+      "x": 0.0,
+      "y": 24.0
+    },
+    {
+      "construction": true,
+      "id": 9,
+      "p1": 1,
+      "p2": 7,
+      "sublayer": 1,
+      "type": "line"
+    },
+    {
+      "construction": true,
+      "id": 10,
+      "p1": 7,
+      "p2": 6,
+      "sublayer": 1,
+      "type": "line"
+    },
+    {
+      "construction": true,
+      "id": 11,
+      "p1": 6,
+      "p2": 8,
+      "sublayer": 1,
+      "type": "line"
+    },
+    {
+      "construction": true,
+      "id": 12,
+      "p1": 8,
+      "p2": 1,
+      "sublayer": 1,
+      "type": "line"
+    },
+    {
+      "id": 19,
+      "sublayer": 1,
+      "type": "point",
+      "x": 12.0,
+      "y": 12.0
+    },
+    {
+      "id": 20,
+      "sublayer": 1,
+      "type": "point",
+      "x": 22.0,
+      "y": 12.0
+    },
+    {
+      "id": 21,
+      "sublayer": 1,
+      "type": "point",
+      "x": 12.0,
+      "y": 18.5
+    },
+    {
+      "center": 19,
+      "id": 22,
+      "major": 20,
+      "minor": 21,
+      "sublayer": 1,
+      "type": "ellipse"
+    },
+    {
+      "id": 28,
+      "sublayer": 1,
+      "type": "point",
+      "x": 10.75,
+      "y": 10.75
+    },
+    {
+      "id": 29,
+      "sublayer": 1,
+      "type": "point",
+      "x": 13.25,
+      "y": 10.75
+    },
+    {
+      "id": 30,
+      "sublayer": 1,
+      "type": "point",
+      "x": 13.25,
+      "y": 13.25
+    },
+    {
+      "id": 31,
+      "sublayer": 1,
+      "type": "point",
+      "x": 10.75,
+      "y": 13.25
+    },
+    {
+      "id": 32,
+      "p1": 28,
+      "p2": 29,
+      "sublayer": 1,
+      "type": "line"
+    },
+    {
+      "id": 33,
+      "p1": 29,
+      "p2": 30,
+      "sublayer": 1,
+      "type": "line"
+    },
+    {
+      "id": 34,
+      "p1": 30,
+      "p2": 31,
+      "sublayer": 1,
+      "type": "line"
+    },
+    {
+      "id": 35,
+      "p1": 31,
+      "p2": 28,
+      "sublayer": 1,
+      "type": "line"
+    },
+    {
+      "construction": true,
+      "id": 40,
+      "p1": 28,
+      "p2": 30,
+      "sublayer": 1,
+      "type": "line"
+    },
+    {
+      "construction": true,
+      "id": 41,
+      "p1": 29,
+      "p2": 31,
+      "sublayer": 1,
+      "type": "line"
+    },
+    {
+      "id": 46,
+      "sublayer": 1,
+      "type": "point",
+      "x": 20.75,
+      "y": 10.75
+    },
+    {
+      "id": 47,
+      "sublayer": 1,
+      "type": "point",
+      "x": 23.25,
+      "y": 10.75
+    },
+    {
+      "id": 48,
+      "sublayer": 1,
+      "type": "point",
+      "x": 23.25,
+      "y": 13.25
+    },
+    {
+      "id": 49,
+      "sublayer": 1,
+      "type": "point",
+      "x": 20.75,
+      "y": 13.25
+    },
+    {
+      "id": 50,
+      "p1": 46,
+      "p2": 47,
+      "sublayer": 1,
+      "type": "line"
+    },
+    {
+      "id": 51,
+      "p1": 47,
+      "p2": 48,
+      "sublayer": 1,
+      "type": "line"
+    },
+    {
+      "id": 52,
+      "p1": 48,
+      "p2": 49,
+      "sublayer": 1,
+      "type": "line"
+    },
+    {
+      "id": 53,
+      "p1": 49,
+      "p2": 46,
+      "sublayer": 1,
+      "type": "line"
+    },
+    {
+      "construction": true,
+      "id": 58,
+      "p1": 46,
+      "p2": 48,
+      "sublayer": 1,
+      "type": "line"
+    },
+    {
+      "construction": true,
+      "id": 59,
+      "p1": 47,
+      "p2": 49,
+      "sublayer": 1,
+      "type": "line"
+    },
+    {
+      "id": 64,
+      "sublayer": 1,
+      "type": "point",
+      "x": 10.75,
+      "y": 17.25
+    },
+    {
+      "id": 65,
+      "sublayer": 1,
+      "type": "point",
+      "x": 13.25,
+      "y": 17.25
+    },
+    {
+      "id": 66,
+      "sublayer": 1,
+      "type": "point",
+      "x": 13.25,
+      "y": 19.75
+    },
+    {
+      "id": 67,
+      "sublayer": 1,
+      "type": "point",
+      "x": 10.75,
+      "y": 19.75
+    },
+    {
+      "id": 68,
+      "p1": 64,
+      "p2": 65,
+      "sublayer": 1,
+      "type": "line"
+    },
+    {
+      "id": 69,
+      "p1": 65,
+      "p2": 66,
+      "sublayer": 1,
+      "type": "line"
+    },
+    {
+      "id": 70,
+      "p1": 66,
+      "p2": 67,
+      "sublayer": 1,
+      "type": "line"
+    },
+    {
+      "id": 71,
+      "p1": 67,
+      "p2": 64,
+      "sublayer": 1,
+      "type": "line"
+    },
+    {
+      "construction": true,
+      "id": 76,
+      "p1": 64,
+      "p2": 66,
+      "sublayer": 1,
+      "type": "line"
+    },
+    {
+      "construction": true,
+      "id": 77,
+      "p1": 65,
+      "p2": 67,
+      "sublayer": 1,
+      "type": "line"
+    }
+  ],
+  "fills": [
+    {
+      "boundary": [
+        32,
+        33,
+        34,
+        35
+      ],
+      "color": "#4da3ff",
+      "id": 45,
+      "layer": 1,
+      "seed": [
+        12.0,
+        12.0
+      ]
+    },
+    {
+      "boundary": [
+        22,
+        50,
+        51,
+        52
+      ],
+      "color": "#4da3ff",
+      "id": 63,
+      "layer": 1,
+      "seed": [
+        22.0,
+        12.0
+      ]
+    },
+    {
+      "boundary": [
+        22,
+        69,
+        70,
+        71
+      ],
+      "color": "#4da3ff",
+      "id": 81,
+      "layer": 1,
+      "seed": [
+        12.0,
+        18.5
+      ]
+    }
+  ],
+  "format": "drawing_app.sketch",
+  "history": [
+    "p6 = s.point(24, 24)\ns.rectangle(s.origin, p6)",
+    "l9.construction = True",
+    "l10.construction = True",
+    "l11.construction = True",
+    "l12.construction = True",
+    "d17 = s.distance(l9, value=24)",
+    "d18 = s.distance(l12, value=24)",
+    "p19 = s.point(12, 12)\np20 = s.point(22, 12)\np21 = s.point(12, 18.5)\ne22 = s.ellipse(p19, p20, p21)",
+    "s.stroke([e22], color=\"#d5d9de\", width=2.5, dash=\"solid\")",
+    "d23 = s.horizontal_distance(s.origin, p19, value=12)",
+    "d24 = s.vertical_distance(s.origin, p19, value=12)",
+    "k25 = s.horizontal(p19, p20)",
+    "d26 = s.distance(p19, p20, value=10)",
+    "d27 = s.distance(p19, p21, value=6.5)",
+    "s.rectangle_center(p19, (13.25, 13.25))",
+    "s.stroke([l32, l33, l34, l35], color=\"#4da3ff\", width=2.5, dash=\"solid\")",
+    "d43 = s.distance(l32, value=2.5)",
+    "d44 = s.distance(l33, value=2.5)",
+    "f45 = s.fill(at=(12, 12), color=\"#4da3ff\")",
+    "s.rectangle_center(p20, (23.25, 13.25))",
+    "s.stroke([l50, l51, l52, l53], color=\"#4da3ff\", width=2.5, dash=\"solid\")",
+    "d61 = s.distance(l50, value=2.5)",
+    "d62 = s.distance(l51, value=2.5)",
+    "f63 = s.fill(at=(22, 12), color=\"#4da3ff\")",
+    "s.rectangle_center(p21, (13.25, 19.75))",
+    "s.stroke([l68, l69, l70, l71], color=\"#4da3ff\", width=2.5, dash=\"solid\")",
+    "d79 = s.distance(l68, value=2.5)",
+    "d80 = s.distance(l69, value=2.5)",
+    "f81 = s.fill(at=(12, 18.5), color=\"#4da3ff\")"
+  ],
+  "layers": [
+    {
+      "active_sublayer": 1,
+      "id": 1,
+      "name": "Layer 1"
+    }
+  ],
+  "origin": 1,
+  "strokes": [
+    {
+      "color": "#d5d9de",
+      "curve": 22,
+      "dash": "solid",
+      "width": 2.5
+    },
+    {
+      "color": "#4da3ff",
+      "curve": 32,
+      "dash": "solid",
+      "width": 2.5
+    },
+    {
+      "color": "#4da3ff",
+      "curve": 33,
+      "dash": "solid",
+      "width": 2.5
+    },
+    {
+      "color": "#4da3ff",
+      "curve": 34,
+      "dash": "solid",
+      "width": 2.5
+    },
+    {
+      "color": "#4da3ff",
+      "curve": 35,
+      "dash": "solid",
+      "width": 2.5
+    },
+    {
+      "color": "#4da3ff",
+      "curve": 50,
+      "dash": "solid",
+      "width": 2.5
+    },
+    {
+      "color": "#4da3ff",
+      "curve": 51,
+      "dash": "solid",
+      "width": 2.5
+    },
+    {
+      "color": "#4da3ff",
+      "curve": 52,
+      "dash": "solid",
+      "width": 2.5
+    },
+    {
+      "color": "#4da3ff",
+      "curve": 53,
+      "dash": "solid",
+      "width": 2.5
+    },
+    {
+      "color": "#4da3ff",
+      "curve": 68,
+      "dash": "solid",
+      "width": 2.5
+    },
+    {
+      "color": "#4da3ff",
+      "curve": 69,
+      "dash": "solid",
+      "width": 2.5
+    },
+    {
+      "color": "#4da3ff",
+      "curve": 70,
+      "dash": "solid",
+      "width": 2.5
+    },
+    {
+      "color": "#4da3ff",
+      "curve": 71,
+      "dash": "solid",
+      "width": 2.5
+    }
+  ],
+  "sublayers": [
+    {
+      "id": 1,
+      "layer": 1,
+      "name": "Sublayer 1"
+    }
+  ],
+  "version": 1
+}

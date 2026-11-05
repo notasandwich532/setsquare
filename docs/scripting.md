@@ -39,7 +39,8 @@ d16.value = 40
 s.drag([p7], 0, 10)
 ```
 
-Items are named by id: `p` point, `l` line, `c` circle, `a` arc, `k` constraint, `d` dimension.
+Items are named by id: `p` point, `l` line, `c` circle, `a` arc, `e` ellipse, `ea` elliptical arc,
+`sp` spline, `k` constraint, `d` dimension, `f` fill, `t` text.
 In the console those names always resolve to the live item, so you can paste recorded lines back
 in. Macros → Save Recording as Macro… writes the session out as a `.py` file.
 
@@ -53,9 +54,20 @@ p = s.point(10, 5)
 l = s.line(s.origin, (40, 0))            # returns a Line
 c = s.circle((20, 20), 5)
 a = s.arc(center, start, end)            # counter-clockwise from start to end
-bottom, right, top, left = s.rectangle((0, 0), (30, 20))   # sides come H/V constrained
+e = s.ellipse(center, (40, 0), 10)       # centre, one axis end, the other axis end (or its length)
+e.center, e.major, e.minor               # points (the axes are kept at right angles)
+e.major_radius, e.minor_radius, e.angle  # s.radius(e, value=30): the major semi-axis
+sp = s.spline([(0, 0), (10, 10), (20, 0)])                    # through the points
+sp = s.spline([p1, p2, p3, p4], kind="control", closed=True)  # pulled by them
+sp.points, sp.kind, sp.closed, sp.lengthbottom, right, top, left = s.rectangle((0, 0), (30, 20))   # sides come H/V constrained
 s.delete(l, c)                           # and whatever depends on them
 ```
+
+Ellipses and splines work like the other curves: points can be kept on them (`s.coincident`),
+they can be tangent to any curve (`s.tangent`, also where they join end to end), they close
+areas for fills, cut and can be trimmed or broken (an ellipse becomes an elliptical arc,
+`s.ellipse_arc`; a spline a piece of itself with `start` and `end` points), and copy, mirror
+and pattern. Text can run along them. Not yet: fillets, chamfers, offsets and extend.
 
 Shapes come with their constraints, and each returns its outline curves:
 

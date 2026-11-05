@@ -6,6 +6,7 @@
 #include "SketchView.h"
 #include "Theme.h"
 
+#include <core/Curves.h>
 #include <core/Features.h>
 
 #include <QFocusEvent>
@@ -264,6 +265,19 @@ std::vector<SketchView::Annotation> SketchView::layoutAnnotations() const
                 const QPointF radial(std::cos(mid), -std::sin(mid));  // screen y is down
                 const QPointF tangent(-radial.y(), radial.x());
                 return toScreen(a.center) + radial * (a.radius * m_zoom + kGlyphOffset) + tangent * (k * kGlyphGap);
+            }
+            case core::EntityKind::Ellipse:
+            case core::EntityKind::EllipseArc:
+            case core::EntityKind::Spline: {
+                // Beside the middle of the curve, stacked along it.
+                const core::curve::Path p = core::curve::pathOf(s, entity);
+                const double mid = p.end() / 2;
+                const core::Vec2 d = p.derivative(mid);
+                QPointF along(d.x, -d.y);  // screen y is down
+                const double len = std::hypot(along.x(), along.y());
+                along = len > 0 ? along / len : QPointF(1, 0);
+                const QPointF normal(along.y(), -along.x());
+                return toScreen(p.at(mid)) + normal * kGlyphOffset + along * (k * kGlyphGap);
             }
         }
         return {};

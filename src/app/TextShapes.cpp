@@ -765,9 +765,13 @@ QPainterPath layoutAlongPath(const core::Text& t, const core::Sketch& s, const Q
     // read left to right over the top; a circle from its top (so centred text is centred there).
     const core::Point& anchor = s.point(t.anchor);
     const core::Entity& e = s.entity(t.path);
-    const bool closed = e.kind() == core::EntityKind::Circle;
+    const core::EntityKind kind = e.kind();
+    const auto* spline = std::get_if<core::Spline>(&e.geom);
+    // (whole ellipses and closed splines go round too; elliptical curves run clockwise, as arcs)
+    const bool closed = kind == core::EntityKind::Circle || kind == core::EntityKind::Ellipse
+        || (spline && spline->closed && !spline->isPiece());
     std::vector<core::Vec2> world;
-    if (closed) {
+    if (kind == core::EntityKind::Circle) {
         const core::Circle& c = s.circle(t.path);
         const core::Point& o = s.point(c.center);
         constexpr int kSteps = 720;
@@ -778,8 +782,15 @@ QPainterPath layoutAlongPath(const core::Text& t, const core::Sketch& s, const Q
     }
     else {
         world = core::sample(s, t.path, 720);
-        if (e.kind() == core::EntityKind::Arc) {
+        if (kind == core::EntityKind::Arc || kind == core::EntityKind::Ellipse || kind == core::EntityKind::EllipseArc) {
             std::ranges::reverse(world);  // (arcs run anticlockwise)
+        }
+        if (kind == core::EntityKind::Ellipse && world.size() > 2) {
+            // From its top, as a circle (so centred text is centred there).
+            world.pop_back();  // (the start, again)
+            const auto top = std::ranges::max_element(world, {}, &core::Vec2::y);
+            std::ranges::rotate(world, top);
+            world.push_back(world.front());
         }
     }
     std::vector<QPointF> curve;
