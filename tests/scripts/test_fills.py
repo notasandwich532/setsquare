@@ -55,3 +55,16 @@ assert isclose(lens.area, 45.3, rel_tol=0.02) and isclose(left.area, pi * 100 - 
 s.move([b], dx=2)
 assert lens.area < 30 and left.area > 285 and right.area > 285
 assert s.fill(at=(21, 0), color="#ffffff") == right and len(s.fills) == 3 and left.color == "#ff0000"
+
+# Curves drawn on top of each other (a side drawn twice, as an old fillet bug left them) are one
+# edge: the area they close still fills.
+doc.new()
+sq = s.rectangle((0, 0), (20, 20))
+twice = s.line(sq[1].p2, sq[1].p1)            # the right side again, between the same points
+f = s.fill(at=(10, 10), color="#ff0000")
+assert isclose(f.area, 400, rel_tol=1e-6), f.area
+part = s.line(sq[0].p1, (12, 0))               # the bottom side again, part way along
+s.horizontal(part)
+g = s.fill(at=(5, 5), color="#00ff00")
+assert g == f and isclose(f.area, 400, rel_tol=1e-6), f.area
+assert not s.loose_ends() or all(abs(y) < 1e-6 for _, y in s.loose_ends())

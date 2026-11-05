@@ -257,6 +257,7 @@ Arrangement::Arrangement(const Sketch& s, Id layer, double arcStep)
     };
     std::vector<HalfEdge> edges;
     size_t pieces = 0;
+    std::map<std::pair<int, int>, std::vector<Vec2>> piecesBetween;  // (vertices) -> midpoints of pieces
     for (size_t i = 0; i < curves.size(); ++i) {
         const Curve& c = curves[i];
         std::vector<double> t = cuts[i];
@@ -298,6 +299,15 @@ Arrangement::Arrangement(const Sketch& s, Id layer, double arcStep)
             const int v0 = vertexAt(pts.front()), v1 = vertexAt(pts.back());
             pts.front() = vertices[static_cast<size_t>(v0)];
             pts.back() = vertices[static_cast<size_t>(v1)];
+            // A piece lying on top of one already here (curves drawn twice over each other, e.g.
+            // a side left doubled by an old fillet) is the same edge: kept twice, it would make
+            // zero-width slivers that break the faces around it.
+            const Vec2 middle = c.at(t0 + (t1 - t0) / 2);
+            auto& alongside = piecesBetween[{std::min(v0, v1), std::max(v0, v1)}];
+            if (std::ranges::any_of(alongside, [&](Vec2 m) { return norm(sub(m, middle)) <= 100 * tol; })) {
+                continue;
+            }
+            alongside.push_back(middle);
             HalfEdge fwd{v0, v1, static_cast<int>(edges.size()) + 1, pieces, c.id, pts, 0.0};
             std::vector<Vec2> back(pts.rbegin(), pts.rend());
             HalfEdge bwd{v1, v0, static_cast<int>(edges.size()), pieces, c.id, back, 0.0};
