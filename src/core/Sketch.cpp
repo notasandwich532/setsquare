@@ -17,8 +17,29 @@ const char* toString(EntityKind kind)
         case EntityKind::Line: return "line";
         case EntityKind::Circle: return "circle";
         case EntityKind::Arc: return "arc";
+        case EntityKind::Ellipse: return "ellipse";
+        case EntityKind::EllipseArc: return "ellipse_arc";
+        case EntityKind::Spline: return "spline";
     }
     return "?";
+}
+
+const char* toString(SplineKind kind)
+{
+    return kind == SplineKind::Control ? "control" : "fit";
+}
+
+bool splineKindFromString(const std::string& name, SplineKind& out)
+{
+    if (name == "fit") {
+        out = SplineKind::Fit;
+        return true;
+    }
+    if (name == "control") {
+        out = SplineKind::Control;
+        return true;
+    }
+    return false;
 }
 
 const char* toString(ConstraintType type)
@@ -669,18 +690,56 @@ void Sketch::checkGeometry(const Entity& e) const
             else if constexpr (std::is_same_v<T, Arc>) {
                 return {g.center, g.start, g.end};
             }
+            else if constexpr (std::is_same_v<T, Ellipse>) {
+                return {g.center, g.major, g.minor};
+            }
+            else if constexpr (std::is_same_v<T, EllipseArc>) {
+                return {g.center, g.major, g.minor, g.start, g.end};
+            }
+            else if constexpr (std::is_same_v<T, Spline>) {
+                std::vector<Id> all = g.points;
+                if (g.isPiece()) {
+                    all.push_back(g.start);
+                    all.push_back(g.end);
+                }
+                return all;
+            }
             else {
                 return {};
             }
         },
         e.geom);
+    if (const auto* sp = std::get_if<Spline>(&e.geom)) {
+        if (sp->points.size() < (sp->closed ? 3u : 2u)) {
+            throw SketchError(std::string("spline ") + std::to_string(e.id) + " needs at least "
+                              + (sp->closed ? "three points (closed)" : "two points"));
+        }
+        if ((sp->start == kNoId) != (sp->end == kNoId)) {
+            throw SketchError("spline " + std::to_string(e.id) + ": a piece needs both ends");
+        }
+    }
     for (Id p : points) {
         if (!hasEntity(p) || kindOf(p) != EntityKind::Point) {
             throw SketchError(std::string(toString(e.kind())) + " " + std::to_string(e.id) + " refers to missing point "
                               + std::to_string(p));
         }
     }
-    if (std::set<Id>(points.begin(), points.end()).size() != points.size()) {
+    // (An elliptical arc may end on its own axis points: they're on the ellipse.)
+    std::vector<Id> mustDiffer = points;
+    if (const auto* spl = std::get_if<Spline>(&e.geom)) {
+        // (a piece may end on one of its points: one it passes through, or the first or last)
+        mustDiffer = spl->points;
+        if (spl->isPiece() && spl->start == spl->end) {
+            throw SketchError("spline " + std::to_string(e.id) + ": a piece's ends must differ");
+        }
+    }
+    if (const auto* ea = std::get_if<EllipseArc>(&e.geom)) {
+        mustDiffer = {ea->center, ea->major, ea->minor};
+        if (ea->start == ea->end || ea->start == ea->center || ea->end == ea->center) {
+            throw SketchError("elliptical arc " + std::to_string(e.id) + " repeats a point");
+        }
+    }
+    if (std::set<Id>(mustDiffer.begin(), mustDiffer.end()).size() != mustDiffer.size()) {
         throw SketchError(std::string(toString(e.kind())) + " " + std::to_string(e.id) + " repeats a point");
     }
     if (const auto* c = std::get_if<Circle>(&e.geom); c && !(c->radius > 0.0)) {
@@ -788,6 +847,57 @@ Id Sketch::addArc(Id center, Id start, Id end)
     arc.sublayer = m_activeSublayer;
     m_entities.emplace(id, std::move(arc));
     return id;
+}
+
+Id Sketch::addEllipse(Id center, Id major, Id minor)
+{
+    requireLayer({center, major, minor}, activeLayer());
+    Entity e{nextId(), Ellipse{center, major, minor}};
+    e.sublayer = m_activeSublayer;
+    try {
+        checkGeometry(e);
+    }
+    catch (...) {
+        --m_nextId;
+        throw;
+    }
+    m_entities.emplace(e.id, e);
+    return e.id;
+}
+
+Id Sketch::addEllipseArc(Id center, Id major, Id minor, Id start, Id end)
+{
+    requireLayer({center, major, minor, start, end}, activeLayer());
+    Entity e{nextId(), EllipseArc{center, major, minor, start, end}};
+    e.sublayer = m_activeSublayer;
+    try {
+        checkGeometry(e);
+    }
+    catch (...) {
+        --m_nextId;
+        throw;
+    }
+    m_entities.emplace(e.id, e);
+    return e.id;
+}
+
+Id Sketch::addSpline(const Spline& spline)
+{
+    std::vector<Id> on = spline.points;
+    on.push_back(spline.start);
+    on.push_back(spline.end);
+    requireLayer(on, activeLayer());
+    Entity e{nextId(), spline};
+    e.sublayer = m_activeSublayer;
+    try {
+        checkGeometry(e);
+    }
+    catch (...) {
+        --m_nextId;
+        throw;
+    }
+    m_entities.emplace(e.id, e);
+    return e.id;
 }
 
 Id Sketch::addArc(double cx, double cy, double radius, double startDeg, double endDeg)
@@ -955,11 +1065,15 @@ void Sketch::validate(ConstraintType type, const std::vector<Id>& refs, double v
                 fail("expects (line, line)");
             }
             break;
-        case ConstraintType::Tangent:
-            if (!((refs.size() == 2 && kindOf(refs[0]) == K::Line && isRound(refs[1])) || roundPair())) {
-                fail("expects (line, circle|arc) or (circle|arc, circle|arc)");
+        case ConstraintType::Tangent: {
+            // Lines, circles and arcs as PlaneGCS has them; ellipses and splines with any curve.
+            auto fancy = [&](Id r) { return !isRound(r) && kindOf(r) != K::Line; };  // ellipse or spline
+            const bool curvy = refs.size() == 2 && isCurve(refs[0]) && isCurve(refs[1]) && (fancy(refs[0]) || fancy(refs[1]));
+            if (!((refs.size() == 2 && kindOf(refs[0]) == K::Line && isRound(refs[1])) || roundPair() || curvy)) {
+                fail("expects two curves, not both lines");
             }
             break;
+        }
         case ConstraintType::Equal:
             if (!(kinds({K::Line, K::Line}) || roundPair())) {
                 fail("expects (line, line) or (circle|arc, circle|arc)");
@@ -1007,8 +1121,8 @@ void Sketch::validate(ConstraintType type, const std::vector<Id>& refs, double v
             break;
         case ConstraintType::Radius:
         case ConstraintType::Diameter:
-            if (!(refs.size() == 1 && isRound(refs[0]))) {
-                fail("expects (circle|arc)");
+            if (!(refs.size() == 1 && (isRound(refs[0]) || isElliptic(refs[0])))) {
+                fail("expects (circle|arc|ellipse)");  // (an ellipse's: its major semi-axis)
             }
             if (!(value > 0.0)) {
                 fail("value must be positive");
@@ -1291,6 +1405,25 @@ void Sketch::rebindPoint(Id curve, Id oldPoint, Id newPoint)
     }
     else if (auto* c = std::get_if<Circle>(&e.geom)) {
         swap(c->center);
+    }
+    else if (auto* el = std::get_if<Ellipse>(&e.geom)) {
+        swap(el->center);
+        swap(el->major);
+        swap(el->minor);
+    }
+    else if (auto* ea = std::get_if<EllipseArc>(&e.geom)) {
+        swap(ea->center);
+        swap(ea->major);
+        swap(ea->minor);
+        swap(ea->start);
+        swap(ea->end);
+    }
+    else if (auto* sp = std::get_if<Spline>(&e.geom)) {
+        for (Id& p : sp->points) {
+            swap(p);
+        }
+        swap(sp->start);
+        swap(sp->end);
     }
     if (!found) {
         throw SketchError("rebind: the curve doesn't use that point");
@@ -1641,6 +1774,25 @@ const Line& Sketch::line(Id id) const { return geomAs<Line>(entity(id), "line");
 const Circle& Sketch::circle(Id id) const { return geomAs<Circle>(entity(id), "circle"); }
 Circle& Sketch::circle(Id id) { return const_cast<Circle&>(std::as_const(*this).circle(id)); }
 const Arc& Sketch::arc(Id id) const { return geomAs<Arc>(entity(id), "arc"); }
+const Ellipse& Sketch::ellipse(Id id) const { return geomAs<Ellipse>(entity(id), "ellipse"); }
+const EllipseArc& Sketch::ellipseArc(Id id) const { return geomAs<EllipseArc>(entity(id), "elliptical arc"); }
+const Spline& Sketch::spline(Id id) const { return geomAs<Spline>(entity(id), "spline"); }
+
+bool Sketch::isElliptic(Id id) const
+{
+    const EntityKind k = kindOf(id);
+    return k == EntityKind::Ellipse || k == EntityKind::EllipseArc;
+}
+
+std::array<Id, 3> Sketch::ellipseAxes(Id id) const
+{
+    const Entity& e = entity(id);
+    if (const auto* el = std::get_if<Ellipse>(&e.geom)) {
+        return {el->center, el->major, el->minor};
+    }
+    const EllipseArc& ea = geomAs<EllipseArc>(e, "ellipse");
+    return {ea.center, ea.major, ea.minor};
+}
 
 std::vector<Id> Sketch::definingPoints(Id id) const
 {
@@ -1655,6 +1807,23 @@ std::vector<Id> Sketch::definingPoints(Id id) const
         case EntityKind::Arc: {
             const auto& a = std::get<Arc>(e.geom);
             return {a.center, a.start, a.end};
+        }
+        case EntityKind::Ellipse: {
+            const auto& el = std::get<Ellipse>(e.geom);
+            return {el.center, el.major, el.minor};
+        }
+        case EntityKind::EllipseArc: {
+            const auto& ea = std::get<EllipseArc>(e.geom);
+            return {ea.center, ea.major, ea.minor, ea.start, ea.end};
+        }
+        case EntityKind::Spline: {
+            const auto& sp = std::get<Spline>(e.geom);
+            std::vector<Id> all = sp.points;
+            if (sp.isPiece()) {
+                all.push_back(sp.start);
+                all.push_back(sp.end);
+            }
+            return all;
         }
     }
     return {};

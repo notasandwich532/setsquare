@@ -1,5 +1,6 @@
 #include "Export.h"
 
+#include "Curves.h"
 #include "Geometry.h"
 #include "Regions.h"
 
@@ -266,6 +267,36 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
             const Point& centre = s.point(c->center);
             out << indent << "  <circle cx=\"" << X(centre.x) << "\" cy=\"" << Y(centre.y) << "\" r=\"" << num(c->radius)
                 << '"' << style << "/>\n";
+        }
+        else if (s.isElliptic(item.curve)) {
+            // Elliptical arc commands (two halves for a whole ellipse). Counter-clockwise with y up
+            // is clockwise with y down (sweep-flag 0), and angles turn the other way.
+            const curve::Path p = curve::pathOf(s, item.curve);
+            const curve::EllipseFrame& f = p.ellipseShape;
+            const std::string radii = num(f.a) + ',' + num(f.b) + ' ' + num(-std::atan2(f.u.y, f.u.x) * 180 / kPi);
+            const Vec2 a = p.at(0);
+            std::string d = "M" + X(a.x) + ',' + Y(a.y);
+            const int halves = p.closed() ? 2 : 1;
+            for (int h = 1; h <= halves; ++h) {
+                const double to = p.end() * h / halves;
+                const Vec2 b = p.at(to);
+                d += " A" + radii + ' ' + (p.end() / halves > kPi ? "1" : "0") + ",0 " + X(b.x) + ',' + Y(b.y);
+            }
+            out << indent << "  <path d=\"" << d << (p.closed() ? " Z" : "") << '"' << style << "/>\n";
+        }
+        else if (e.kind() == EntityKind::Spline) {
+            const curve::Path p = curve::pathOf(s, item.curve);
+            const std::vector<curve::Bezier> pieces = p.beziers();
+            std::string d;
+            for (size_t i = 0; i < pieces.size(); ++i) {
+                const auto& q = pieces[i].p;
+                if (i == 0) {
+                    d += "M" + X(q[0].x) + ',' + Y(q[0].y);
+                }
+                d += " C" + X(q[1].x) + ',' + Y(q[1].y) + ' ' + X(q[2].x) + ',' + Y(q[2].y) + ' ' + X(q[3].x) + ','
+                    + Y(q[3].y);
+            }
+            out << indent << "  <path d=\"" << d << (p.closed() ? " Z" : "") << '"' << style << "/>\n";
         }
         else {
             // Counter-clockwise with y up is clockwise with y down: SVG's sweep-flag 0.
@@ -644,6 +675,25 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
             w.real(11, b.x);
             w.real(21, b.y);
             w.real(31, 0.0);
+        }
+        else if (s.isElliptic(item.curve) || e.kind() == EntityKind::Spline) {
+            // R12 has no ellipses or splines: a fine polyline (a tenth of a degree's worth).
+            const std::vector<Vec2> pts = curve::pathOf(s, item.curve).polyline(90);
+            common("POLYLINE");
+            w.pair(66, 1);  // vertices follow
+            w.real(10, 0.0);
+            w.real(20, 0.0);
+            w.real(30, 0.0);
+            w.pair(70, 0);
+            for (const Vec2& q : pts) {
+                w.pair(0, "VERTEX");
+                w.pair(8, item.layer);
+                w.real(10, q.x);
+                w.real(20, q.y);
+                w.real(30, 0.0);
+            }
+            w.pair(0, "SEQEND");
+            w.pair(8, item.layer);
         }
         else if (const auto* c = std::get_if<Circle>(&e.geom)) {
             const Point& centre = s.point(c->center);

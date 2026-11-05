@@ -46,6 +46,9 @@ QString Editor::name(const core::Sketch& s, Id id)
             case core::EntityKind::Line: return QStringLiteral("l%1").arg(id);
             case core::EntityKind::Circle: return QStringLiteral("c%1").arg(id);
             case core::EntityKind::Arc: return QStringLiteral("a%1").arg(id);
+            case core::EntityKind::Ellipse: return QStringLiteral("e%1").arg(id);
+            case core::EntityKind::EllipseArc: return QStringLiteral("ea%1").arg(id);
+            case core::EntityKind::Spline: return QStringLiteral("sp%1").arg(id);
         }
     }
     return QStringLiteral("s[%1]").arg(id);
@@ -110,6 +113,41 @@ Id Editor::arc(Id center, Id start, Id end)
     const Id id = m_sketch.addArc(center, start, end);
     log(QStringLiteral("%1 = s.arc(%2, %3, %4)")
             .arg(name(m_sketch, id), name(m_sketch, center), name(m_sketch, start), name(m_sketch, end)));
+    return id;
+}
+
+Id Editor::ellipse(Id center, Id major, Id minor)
+{
+    const Id id = m_sketch.addEllipse(center, major, minor);
+    log(QStringLiteral("%1 = s.ellipse(%2, %3, %4)")
+            .arg(name(m_sketch, id), name(m_sketch, center), name(m_sketch, major), name(m_sketch, minor)));
+    return id;
+}
+
+Id Editor::ellipseArc(Id center, Id major, Id minor, Id start, Id end)
+{
+    const Id id = m_sketch.addEllipseArc(center, major, minor, start, end);
+    log(QStringLiteral("%1 = s.ellipse_arc(%2, %3, %4, %5, %6)")
+            .arg(name(m_sketch, id), name(m_sketch, center), name(m_sketch, major), name(m_sketch, minor),
+                 name(m_sketch, start), name(m_sketch, end)));
+    return id;
+}
+
+Id Editor::spline(const std::vector<Id>& points, core::SplineKind kind, bool closed)
+{
+    core::Spline sp;
+    sp.points = points;
+    sp.kind = kind;
+    sp.closed = closed;
+    const Id id = m_sketch.addSpline(sp);
+    QString args = list(m_sketch, points);
+    if (kind == core::SplineKind::Control) {
+        args += QStringLiteral(", kind=\"control\"");
+    }
+    if (closed) {
+        args += QStringLiteral(", closed=True");
+    }
+    log(QStringLiteral("%1 = s.spline(%2)").arg(name(m_sketch, id), args));
     return id;
 }
 

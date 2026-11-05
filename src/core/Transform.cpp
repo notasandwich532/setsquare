@@ -158,6 +158,27 @@ std::map<Id, Id> copy(const Sketch& from, Sketch& to, const std::vector<Id>& sel
             made = t.mirrors() ? to.addArc(map.at(a->center), map.at(a->end), map.at(a->start))
                                : to.addArc(map.at(a->center), map.at(a->start), map.at(a->end));
         }
+        else if (const auto* el = std::get_if<Ellipse>(&e.geom)) {
+            made = to.addEllipse(map.at(el->center), map.at(el->major), map.at(el->minor));
+        }
+        else if (const auto* ea = std::get_if<EllipseArc>(&e.geom)) {
+            // (mirrored, counter-clockwise runs the other way: the ends swap, as for arcs)
+            made = t.mirrors() ? to.addEllipseArc(map.at(ea->center), map.at(ea->major), map.at(ea->minor),
+                                                  map.at(ea->end), map.at(ea->start))
+                               : to.addEllipseArc(map.at(ea->center), map.at(ea->major), map.at(ea->minor),
+                                                  map.at(ea->start), map.at(ea->end));
+        }
+        else if (const auto* sp = std::get_if<Spline>(&e.geom)) {
+            Spline copied = *sp;
+            for (Id& p : copied.points) {
+                p = map.at(p);
+            }
+            if (copied.isPiece()) {
+                copied.start = map.at(sp->start);
+                copied.end = map.at(sp->end);
+            }
+            made = to.addSpline(copied);
+        }
         if (made != kNoId) {
             to.entity(made).construction = e.construction;
             map[id] = made;
@@ -360,6 +381,30 @@ std::map<Id, Id> mirror(Sketch& s, const std::vector<Id>& selection, Id line)
                 continue;
             }
             made = s.addArc(map.at(arc->center), map.at(arc->end), map.at(arc->start));
+        }
+        else if (std::get_if<Ellipse>(&e.geom) || std::get_if<EllipseArc>(&e.geom) || std::get_if<Spline>(&e.geom)) {
+            const std::vector<Id> own = s.definingPoints(id);
+            if (std::ranges::all_of(own, [&](Id p) { return map.at(p) == p; })) {
+                continue;  // lies on the mirror line
+            }
+            if (const auto* el = std::get_if<Ellipse>(&e.geom)) {
+                made = s.addEllipse(map.at(el->center), map.at(el->major), map.at(el->minor));
+            }
+            else if (const auto* ea = std::get_if<EllipseArc>(&e.geom)) {
+                made = s.addEllipseArc(map.at(ea->center), map.at(ea->major), map.at(ea->minor), map.at(ea->end),
+                                       map.at(ea->start));
+            }
+            else {
+                Spline copied = std::get<Spline>(e.geom);
+                for (Id& p : copied.points) {
+                    p = map.at(p);
+                }
+                if (copied.isPiece()) {
+                    copied.start = map.at(copied.start);
+                    copied.end = map.at(copied.end);
+                }
+                made = s.addSpline(copied);
+            }
         }
         if (made != kNoId) {
             s.entity(made).construction = e.construction;

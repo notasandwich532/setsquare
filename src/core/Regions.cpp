@@ -1,5 +1,6 @@
 #include "Regions.h"
 
+#include "Curves.h"
 #include "Modify.h"
 
 #include <algorithm>
@@ -28,21 +29,32 @@ struct Curve
         Line,
         Arc,
         Circle,
+        Other,  // ellipse, elliptical arc, spline: by its path
     } kind = Kind::Line;
     Id id = kNoId;
     Vec2 a, b;  // line
     Vec2 c;     // arc / circle
     double r = 0.0, start = 0.0, sweep = kTwoPi;
+    curve::Path path;  // other
+
+    bool closed() const { return kind == Kind::Circle || (kind == Kind::Other && path.closed()); }
+    double end() const { return kind == Kind::Line ? 1.0 : kind == Kind::Other ? path.end() : sweep; }
 
     Vec2 at(double t) const
     {
         if (kind == Kind::Line) {
             return {a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t};
         }
+        if (kind == Kind::Other) {
+            return path.at(t);
+        }
         return {c.x + r * std::cos(start + t), c.y + r * std::sin(start + t)};
     }
     double param(Vec2 p) const
     {
+        if (kind == Kind::Other) {
+            return path.param(p);
+        }
         if (kind == Kind::Line) {
             const Vec2 d = sub(b, a);
             const double l2 = d.x * d.x + d.y * d.y;
@@ -60,6 +72,16 @@ struct Curve
     }
     double spanLength(double t0, double t1) const
     {
+        if (kind == Kind::Other) {
+            double total = 0;
+            Vec2 prev = at(t0);
+            for (int i = 1; i <= 8; ++i) {
+                const Vec2 q = at(t0 + (t1 - t0) * i / 8);
+                total += norm(sub(q, prev));
+                prev = q;
+            }
+            return t1 >= t0 ? total : -total;
+        }
         return kind == Kind::Line ? norm(sub(b, a)) * (t1 - t0) : r * (t1 - t0);
     }
 };
@@ -177,13 +199,17 @@ Arrangement::Arrangement(const Sketch& s, Id layer, double arcStep)
             c.c = {s.point(circle->center).x, s.point(circle->center).y};
             c.r = circle->radius;
         }
-        else {
+        else if (e.kind() == EntityKind::Arc) {
             const ArcShape shape = arcShape(s, id);
             c.kind = Curve::Kind::Arc;
             c.c = shape.center;
             c.r = shape.radius;
             c.start = shape.startAngle;
             c.sweep = shape.sweep;
+        }
+        else {
+            c.kind = Curve::Kind::Other;
+            c.path = curve::pathOf(s, id);
         }
         curves.push_back(c);
     }
@@ -199,6 +225,14 @@ Arrangement::Arrangement(const Sketch& s, Id layer, double arcStep)
         if (c.kind == Curve::Kind::Line) {
             cuts[i] = {0.0, 1.0};
             extent = std::max({extent, std::abs(c.a.x), std::abs(c.a.y), std::abs(c.b.x), std::abs(c.b.y)});
+        }
+        else if (c.kind == Curve::Kind::Other) {
+            if (!c.closed()) {
+                cuts[i] = {0.0, c.end()};
+            }
+            for (const Vec2& q : c.path.polyline(8)) {
+                extent = std::max({extent, std::abs(q.x), std::abs(q.y)});
+            }
         }
         else {
             if (c.kind == Curve::Kind::Arc) {
@@ -221,10 +255,10 @@ Arrangement::Arrangement(const Sketch& s, Id layer, double arcStep)
     // line ending where it just touches a circle: a double root, which rounding can lose.
     for (size_t i = 0; i < curves.size(); ++i) {
         const Curve& c = curves[i];
-        if (c.kind == Curve::Kind::Circle) {
+        if (c.closed()) {
             continue;
         }
-        for (const Vec2 end : {c.at(0.0), c.at(c.kind == Curve::Kind::Line ? 1.0 : c.sweep)}) {
+        for (const Vec2 end : {c.at(0.0), c.at(c.end())}) {
             for (size_t j = 0; j < curves.size(); ++j) {
                 if (j != i) {
                     const double t = curves[j].param(end);
@@ -269,15 +303,16 @@ Arrangement::Arrangement(const Sketch& s, Id layer, double arcStep)
             }
         }
         std::vector<std::pair<double, double>> spans;
-        if (c.kind == Curve::Kind::Circle) {
+        if (c.closed()) {
+            const double round = c.end();  // (2pi for a circle or ellipse)
             if (unique.empty()) {
                 unique.push_back(0.0);
             }
-            if (unique.size() > 1 && c.spanLength(unique.back(), unique.front() + kTwoPi) <= tol) {
+            if (unique.size() > 1 && c.spanLength(unique.back(), unique.front() + round) <= tol) {
                 unique.pop_back();  // the last cut is the first one again
             }
             for (size_t k = 0; k < unique.size(); ++k) {
-                spans.push_back({unique[k], k + 1 < unique.size() ? unique[k + 1] : unique.front() + kTwoPi});
+                spans.push_back({unique[k], k + 1 < unique.size() ? unique[k + 1] : unique.front() + round});
             }
         }
         else {
@@ -290,9 +325,11 @@ Arrangement::Arrangement(const Sketch& s, Id layer, double arcStep)
                 continue;
             }
             std::vector<Vec2> pts;
-            const int n = c.kind == Curve::Kind::Line
-                ? 1
-                : std::max(2, static_cast<int>(std::ceil((t1 - t0) / arcStep)));
+            // (splines: a parameter unit is a whole Bezier piece, about a quarter turn's worth)
+            const double perUnit = c.kind == Curve::Kind::Other && c.path.kind() == curve::Path::Kind::Spline
+                ? (std::numbers::pi / 2) / arcStep
+                : 1.0 / arcStep;
+            const int n = c.kind == Curve::Kind::Line ? 1 : std::max(2, static_cast<int>(std::ceil((t1 - t0) * perUnit)));
             for (int k = 0; k <= n; ++k) {
                 pts.push_back(c.at(t0 + (t1 - t0) * k / n));
             }

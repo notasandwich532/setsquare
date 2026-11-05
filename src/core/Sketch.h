@@ -55,12 +55,57 @@ struct Arc
     Id end = kNoId;
 };
 
+// An ellipse: its centre, the end of one semi-axis (`major`, which sets its direction) and the
+// end of the other (`minor`), which the solver keeps at right angles to it. (Either can be the
+// longer: they're named for the order they're drawn in.)
+struct Ellipse
+{
+    Id center = kNoId;
+    Id major = kNoId;
+    Id minor = kNoId;
+};
+
+// Part of an ellipse, counter-clockwise from start to end (both kept on it by the solver).
+struct EllipseArc
+{
+    Id center = kNoId;
+    Id major = kNoId;
+    Id minor = kNoId;
+    Id start = kNoId;
+    Id end = kNoId;
+};
+
+enum class SplineKind
+{
+    Fit,      // passes through its points (a centripetal Catmull-Rom curve)
+    Control,  // pulled towards its points, through the first and last (a cubic B-spline)
+};
+const char* toString(SplineKind kind);
+bool splineKindFromString(const std::string& name, SplineKind& out);
+
+// A smooth curve defined by its points (at least two; three for a closed one). A piece of one
+// (left by a trim) keeps all of them, so it keeps its shape, and runs from `start` to `end`:
+// points the solver keeps on the whole curve. Without them it's the whole curve.
+struct Spline
+{
+    std::vector<Id> points;
+    SplineKind kind = SplineKind::Fit;
+    bool closed = false;
+    Id start = kNoId;
+    Id end = kNoId;
+
+    bool isPiece() const { return start != kNoId && end != kNoId; }
+};
+
 enum class EntityKind
 {
     Point,
     Line,
     Circle,
     Arc,
+    Ellipse,
+    EllipseArc,
+    Spline,
 };
 
 // A part of the drawing edited on its own: its geometry, constraints and text show (and can be
@@ -90,7 +135,7 @@ struct Layer
 struct Entity
 {
     Id id = kNoId;
-    std::variant<Point, Line, Circle, Arc> geom;
+    std::variant<Point, Line, Circle, Arc, Ellipse, EllipseArc, Spline> geom;
     bool construction = false;  // reference geometry, not part of the drawing
     bool fixed = false;         // locked in place (Fusion's "Fix")
     Id sublayer = kNoId;        // which sublayer it's in (none: the origin and axes)
@@ -278,6 +323,9 @@ public:
     Id addCircle(double cx, double cy, double radius);
     Id addArc(Id center, Id start, Id end);
     Id addArc(double cx, double cy, double radius, double startDeg, double endDeg);
+    Id addEllipse(Id center, Id major, Id minor);
+    Id addEllipseArc(Id center, Id major, Id minor, Id start, Id end);
+    Id addSpline(const Spline& spline);  // a whole curve or a piece (see Spline)
 
     // --- constraints ---
     // Validates the references for the type; throws SketchError when they don't fit.
@@ -434,6 +482,12 @@ public:
     const Circle& circle(Id id) const;
     Circle& circle(Id id);
     const Arc& arc(Id id) const;
+    const Ellipse& ellipse(Id id) const;
+    const EllipseArc& ellipseArc(Id id) const;
+    const Spline& spline(Id id) const;
+    // Ellipse or elliptical arc: its centre, major and minor points.
+    bool isElliptic(Id id) const;
+    std::array<Id, 3> ellipseAxes(Id id) const;  // centre, major, minor
 
     // The largest id handed out so far; anything added later has a higher id.
     Id highestId() const { return m_nextId - 1; }

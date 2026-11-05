@@ -34,6 +34,9 @@ public:
     core::Id line(core::Id a, core::Id b);
     core::Id circle(core::Id center, double radius);
     core::Id arc(core::Id center, core::Id start, core::Id end);
+    core::Id ellipse(core::Id center, core::Id major, core::Id minor);
+    core::Id ellipseArc(core::Id center, core::Id major, core::Id minor, core::Id start, core::Id end);
+    core::Id spline(const std::vector<core::Id>& points, core::SplineKind kind, bool closed);
 
     // Composite shapes (see core/Builders.h); each records as one Python call.
     core::build::Rectangle rectangle(core::Id corner, core::Id opposite);

@@ -1,5 +1,6 @@
 #include "Solver.h"
 
+#include "Curves.h"
 #include "Features.h"
 
 #include <planegcs/GCS.h>
@@ -7,9 +8,11 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <functional>
 #include <stdexcept>
 #include <vector>
 #include <map>
+#include <set>
 #include <numbers>
 
 namespace core
@@ -246,9 +249,81 @@ private:
     double m_k;
 };
 
+// An equation given as a function of some parameters, with its gradient found numerically: for
+// the curves PlaneGCS doesn't have (ellipses, splines), whose shapes are built from their points.
+// A parameter may appear more than once (a point two curves share): it's moved everywhere at once.
+class ConstraintNumeric : public GCS::Constraint
+{
+public:
+    using Fn = std::function<double(const std::vector<double>&)>;
+    ConstraintNumeric(GCS::VEC_pD params, Fn fn)
+        : m_fn(std::move(fn))
+    {
+        pvec = std::move(params);
+        origpvec = pvec;
+        rescale();
+    }
+
+    double error() override { return scale * m_fn(values()); }
+
+    double grad(double* param) override
+    {
+        std::vector<double> v = values();
+        std::vector<size_t> at;
+        for (size_t i = 0; i < pvec.size(); ++i) {
+            if (pvec[i] == param) {
+                at.push_back(i);
+            }
+        }
+        if (at.empty()) {
+            return 0.0;
+        }
+        const double h = 1e-7 * std::max(1.0, std::abs(v[at.front()]));
+        auto shifted = [&](double by) {
+            for (size_t i : at) {
+                v[i] = *pvec[i] + by;
+            }
+            return m_fn(v);
+        };
+        const double up = shifted(h), down = shifted(-h);
+        return scale * (up - down) / (2 * h);
+    }
+
+private:
+    std::vector<double> values() const
+    {
+        std::vector<double> v(pvec.size());
+        for (size_t i = 0; i < pvec.size(); ++i) {
+            v[i] = *pvec[i];
+        }
+        return v;
+    }
+    Fn m_fn;
+};
+
+double cross(Vec2 a, Vec2 b) { return a.x * b.y - a.y * b.x; }
+double dot(Vec2 a, Vec2 b) { return a.x * b.x + a.y * b.y; }
+Vec2 unitOf(Vec2 a)
+{
+    const double n = std::hypot(a.x, a.y);
+    return n > 0 ? Vec2{a.x / n, a.y / n} : Vec2{1, 0};
+}
+
 Vec2 operator-(Vec2 a, Vec2 b)
 {
     return {a.x - b.x, a.y - b.y};
+}
+
+// An ellipse from the values of its centre, major and minor points (six numbers from `v`).
+curve::EllipseFrame frameFrom(const double* v)
+{
+    curve::EllipseFrame f;
+    f.c = {v[0], v[1]};
+    const Vec2 major{v[2] - v[0], v[3] - v[1]};
+    f.a = std::hypot(major.x, major.y);
+    f.u = unitOf(major);
+    f.b = std::hypot(v[4] - v[0], v[5] - v[1]);
+    return f;
 }
 }  // namespace
 
@@ -309,6 +384,47 @@ struct Solver::Impl
         return arc;
     }
     std::map<std::pair<Id, Id>, Id> chainArc;  // (centre, end chain) -> an arc in it
+    // Whether a point is on a spline by its making: one it passes through, or its own end.
+    static bool splineEndOnCurve(const Spline& sp, Id p)
+    {
+        return (sp.kind == SplineKind::Fit && std::ranges::find(sp.points, p) != sp.points.end())
+            || (!sp.closed && (p == sp.points.front() || p == sp.points.back()));
+    }
+
+    // A curve as the solver has it: the parameters its shape depends on, and how to build its
+    // path from their values (in that order). Splines are always the whole curve.
+    struct CurveModel
+    {
+        GCS::VEC_pD params;
+        std::function<curve::Path(const double*)> build;
+    };
+    CurveModel model(const Sketch& sketch, Id id);
+    // Point p kept on a curve with no PlaneGCS counterpart (ellipse, elliptical arc, spline).
+    // Once per point and underlying curve (an ellipse's three points, a spline's): pieces of one
+    // sharing an end would otherwise say it twice. Returns false if it was there already.
+    bool addPointOnCurve(const Sketch& sketch, Id p, Id curve, int tag);
+    std::set<std::vector<Id>> onCurves;  // (the curve's defining points..., kind marker, p)
+    static std::vector<Id> onCurveKey(const Sketch& sketch, Id p, Id curve)
+    {
+        std::vector<Id> key;
+        if (sketch.isElliptic(curve)) {
+            const std::array<Id, 3> ax = sketch.ellipseAxes(curve);
+            key.assign(ax.begin(), ax.end());
+            key.push_back(0);
+        }
+        else {
+            const Spline& sp = sketch.spline(curve);
+            key = sp.points;
+            key.push_back(sp.kind == SplineKind::Fit ? 1 : 2);
+            key.push_back(sp.closed ? 1 : 0);
+        }
+        key.push_back(p);
+        return key;
+    }
+    // Two curves (one at least an ellipse or a spline) touching: where they share an end
+    // (`joint`), their directions there agree; otherwise at a contact point found with them.
+    void addTangentCurves(const Sketch& sketch, Id a, Id b, Id joint, int tag);
+
     // A constraint the arcs say already (left out, so it isn't reported as redundant; it still
     // applies once they don't, e.g. when the arc joining them is deleted).
     bool impliedByArcs(const Sketch& sketch, const Constraint& c);
@@ -369,6 +485,17 @@ struct Solver::Impl
             if (const auto* arc = std::get_if<Arc>(&e.geom)) {
                 return {arc->start, arc->end};
             }
+            if (const auto* ea = std::get_if<EllipseArc>(&e.geom)) {
+                return {ea->start, ea->end};
+            }
+            if (const auto* sp = std::get_if<Spline>(&e.geom)) {
+                if (sp->isPiece()) {
+                    return {sp->start, sp->end};
+                }
+                if (!sp->closed) {
+                    return {sp->points.front(), sp->points.back()};
+                }
+            }
             return {};
         };
         for (Id p : ends(a)) {
@@ -415,7 +542,9 @@ void Solver::Impl::build(const Sketch& sketch)
             featureValues += 8 * c.refs.size();
         }
     }
-    store.reserve(4 * pointCount + 3 * roundCount + 2 * sketch.constraints().size() + featureValues + 16);
+    // (+ the contact parameters of tangents and points on splines, and spline pieces' ends)
+    store.reserve(4 * pointCount + 3 * roundCount + 3 * sketch.constraints().size() + 2 * sketch.entities().size()
+                  + featureValues + 16);
 
     // Arcs capping a both-sides offset: their ends are pinned by the two sides already.
     for (const auto& [id, c] : sketch.constraints()) {
@@ -525,6 +654,63 @@ void Solver::Impl::build(const Sketch& sketch)
         }
     }
 
+    // Ellipses keep their axes at right angles (once per ellipse: pieces of one share its points),
+    // except copies whose three points are all placed by a pattern or a mirror (of an ellipse that
+    // has the rule): for them it would be said twice. Elliptical arcs' and spline pieces' ends stay
+    // on their curves.
+    std::set<Id> placedCopies;
+    std::map<Id, std::pair<Id, Id>> mirrorOf;  // point -> (its mirror image, the mirror line)
+    for (const auto& [cid, c] : sketch.constraints()) {
+        if (c.type == ConstraintType::LinearPattern || c.type == ConstraintType::CircularPattern) {
+            for (const auto& copies : feature::pattern(c).copies) {
+                for (Id copy : copies) {
+                    if (sketch.hasEntity(copy) && sketch.isElliptic(copy)) {
+                        placedCopies.insert(copy);
+                    }
+                }
+            }
+        }
+        if (c.type == ConstraintType::Symmetric && c.refs.size() == 3) {
+            mirrorOf[c.refs[0]] = {c.refs[1], c.refs[2]};
+            mirrorOf[c.refs[1]] = {c.refs[0], c.refs[2]};
+        }
+    }
+    std::set<std::array<Id, 3>> rightAngled;
+    for (const auto& [id, e] : sketch.entities()) {
+        if (!sketch.isElliptic(id)) {
+            continue;
+        }
+        const std::array<Id, 3> ax = sketch.ellipseAxes(id);
+        bool mirrored = mirrorOf.contains(ax[0]) && mirrorOf.contains(ax[1]) && mirrorOf.contains(ax[2]);
+        if (mirrored) {
+            const Id line = mirrorOf.at(ax[0]).second;
+            const std::array<Id, 3> image{mirrorOf.at(ax[0]).first, mirrorOf.at(ax[1]).first, mirrorOf.at(ax[2]).first};
+            mirrored = mirrorOf.at(ax[1]).second == line && mirrorOf.at(ax[2]).second == line && rightAngled.contains(image);
+        }
+        if (placedCopies.contains(id) || mirrored || !rightAngled.insert(ax).second) {
+            continue;
+        }
+        sys.addConstraintPerpendicular(points.at(ax[0]), points.at(ax[1]), points.at(ax[0]), points.at(ax[2]),
+                                       kInternalTag);
+    }
+    for (const auto& [id, e] : sketch.entities()) {
+        if (const auto* ea = std::get_if<EllipseArc>(&e.geom)) {
+            for (Id end : {ea->start, ea->end}) {
+                if (end != ea->major && end != ea->minor) {  // (those are on it already)
+                    addPointOnCurve(sketch, end, id, kInternalTag);
+                }
+            }
+        }
+        if (const auto* sp = std::get_if<Spline>(&e.geom); sp && sp->isPiece()) {
+            // (not an end that's on the curve already: a point it passes through, or its own end)
+            for (Id end : {sp->start, sp->end}) {
+                if (!splineEndOnCurve(*sp, end)) {
+                    addPointOnCurve(sketch, end, id, kInternalTag);
+                }
+            }
+        }
+    }
+
     // Arcs joined end to end round a centre are on one circle.
     for (const auto& [id, e] : sketch.entities()) {
         if (const auto* a = std::get_if<Arc>(&e.geom)) {
@@ -562,6 +748,201 @@ void Solver::Impl::build(const Sketch& sketch)
     sys.declareUnknowns(unknowns);
 }
 
+Solver::Impl::CurveModel Solver::Impl::model(const Sketch& sketch, Id id)
+{
+    CurveModel m;
+    auto take = [&](Id p) {
+        const GCS::Point& gp = points.at(p);
+        m.params.push_back(gp.x);
+        m.params.push_back(gp.y);
+    };
+    const Entity& e = sketch.entity(id);
+    switch (e.kind()) {
+        case EntityKind::Line:
+            take(sketch.line(id).p1);
+            take(sketch.line(id).p2);
+            m.build = [](const double* v) { return curve::Path::line({v[0], v[1]}, {v[2], v[3]}); };
+            break;
+        case EntityKind::Circle:
+            take(sketch.circle(id).center);
+            m.params.push_back(circles.at(id).rad);
+            m.build = [](const double* v) { return curve::Path::circle({v[0], v[1]}, v[2]); };
+            break;
+        case EntityKind::Arc: {
+            const Arc& a = sketch.arc(id);
+            take(a.center);
+            take(a.start);
+            take(a.end);
+            m.build = [](const double* v) {
+                const double s = std::atan2(v[3] - v[1], v[2] - v[0]);
+                double sweep = std::fmod(std::atan2(v[5] - v[1], v[4] - v[0]) - s, 2 * kPi);
+                if (sweep <= 0) {
+                    sweep += 2 * kPi;
+                }
+                return curve::Path::arc({v[0], v[1]}, std::hypot(v[2] - v[0], v[3] - v[1]), s, sweep);
+            };
+            break;
+        }
+        case EntityKind::Ellipse:
+            for (Id p : sketch.ellipseAxes(id)) {
+                take(p);
+            }
+            m.build = [](const double* v) { return curve::Path::ellipse(frameFrom(v)); };
+            break;
+        case EntityKind::EllipseArc: {
+            const EllipseArc& ea = sketch.ellipseArc(id);
+            for (Id p : {ea.center, ea.major, ea.minor, ea.start, ea.end}) {
+                take(p);
+            }
+            m.build = [](const double* v) {
+                const curve::EllipseFrame f = frameFrom(v);
+                const double t0 = f.param({v[6], v[7]});
+                double sweep = std::fmod(f.param({v[8], v[9]}) - t0, 2 * kPi);
+                if (sweep <= 0) {
+                    sweep += 2 * kPi;
+                }
+                return curve::Path::ellipseArc(f, t0, sweep);
+            };
+            break;
+        }
+        case EntityKind::Spline: {
+            const Spline& sp = sketch.spline(id);
+            for (Id p : sp.points) {
+                take(p);
+            }
+            const size_t n = sp.points.size();
+            const SplineKind kind = sp.kind;
+            const bool closed = sp.closed;
+            m.build = [n, kind, closed](const double* v) {
+                std::vector<Vec2> pts(n);
+                for (size_t i = 0; i < n; ++i) {
+                    pts[i] = {v[2 * i], v[2 * i + 1]};
+                }
+                std::vector<curve::Bezier> pieces = curve::splineBeziers(pts, kind, closed);
+                const double count = static_cast<double>(pieces.size());
+                return curve::Path::spline(std::move(pieces), closed, 0.0, count);
+            };
+            break;
+        }
+        case EntityKind::Point: throw SketchError("not a curve");
+    }
+    return m;
+}
+
+bool Solver::Impl::addPointOnCurve(const Sketch& sketch, Id p, Id curveId, int tag)
+{
+    if (!onCurves.insert(onCurveKey(sketch, p, curveId)).second) {
+        return false;
+    }
+    const GCS::Point& gp = points.at(p);
+    if (sketch.isElliptic(curveId)) {
+        // On the whole ellipse (as PlaneGCS's point on an arc is on its circle): its implicit
+        // equation, scaled to about a distance.
+        GCS::VEC_pD params;
+        for (Id q : sketch.ellipseAxes(curveId)) {
+            params.push_back(points.at(q).x);
+            params.push_back(points.at(q).y);
+        }
+        params.push_back(gp.x);
+        params.push_back(gp.y);
+        auto* on = new ConstraintNumeric(std::move(params), [](const std::vector<double>& v) {
+            const curve::EllipseFrame f = frameFrom(v.data());
+            const Vec2 d{v[6] - f.c.x, v[7] - f.c.y};
+            const double x = dot(d, f.u) / std::max(f.a, 1e-12);
+            const double y = dot(d, Vec2{-f.u.y, f.u.x}) / std::max(f.b, 1e-12);
+            return (std::sqrt(x * x + y * y) - 1.0) * std::sqrt(f.a * f.b);
+        });
+        on->setTag(tag);
+        sys.addConstraint(on);  // the system owns it
+        return true;
+    }
+    // On a spline: at a parameter along it (a new unknown), in both coordinates.
+    CurveModel m = model(sketch, curveId);
+    std::vector<double> now(m.params.size());
+    for (size_t i = 0; i < now.size(); ++i) {
+        now[i] = *m.params[i];
+    }
+    double* t = alloc(m.build(now.data()).param({*gp.x, *gp.y}));
+    unknowns.push_back(t);
+    GCS::VEC_pD params = m.params;
+    const size_t k = params.size();
+    params.push_back(gp.x);
+    params.push_back(gp.y);
+    params.push_back(t);
+    for (int component = 0; component < 2; ++component) {
+        auto* on = new ConstraintNumeric(params, [build = m.build, k, component](const std::vector<double>& v) {
+            const Vec2 q = build(v.data()).at(v[k + 2]);
+            return component == 0 ? v[k] - q.x : v[k + 1] - q.y;
+        });
+        on->setTag(tag);
+        sys.addConstraint(on);  // the system owns it
+    }
+    return true;
+}
+
+void Solver::Impl::addTangentCurves(const Sketch& sketch, Id a, Id b, Id joint, int tag)
+{
+    CurveModel ma = model(sketch, a), mb = model(sketch, b);
+    GCS::VEC_pD params = ma.params;
+    const size_t na = params.size();
+    params.insert(params.end(), mb.params.begin(), mb.params.end());
+    const size_t nb = params.size();
+    std::vector<double> now(params.size());
+    for (size_t i = 0; i < now.size(); ++i) {
+        now[i] = *params[i];
+    }
+    const curve::Path pa = ma.build(now.data()), pb = mb.build(now.data() + na);
+
+    if (joint != kNoId) {
+        // Joined end to end: the same direction (or opposite) where they meet.
+        params.push_back(points.at(joint).x);
+        params.push_back(points.at(joint).y);
+        auto* t = new ConstraintNumeric(params, [ba = ma.build, bb = mb.build, na, nb](const std::vector<double>& v) {
+            const curve::Path p1 = ba(v.data()), p2 = bb(v.data() + na);
+            const Vec2 j{v[nb], v[nb + 1]};
+            return cross(unitOf(p1.derivative(p1.param(j))), unitOf(p2.derivative(p2.param(j))));
+        });
+        t->setTag(tag);
+        sys.addConstraint(t);  // the system owns it
+        return;
+    }
+
+    // Elsewhere: a contact point, at parameter s on a and t on b (two new unknowns). There b(t)
+    // is on a (at its foot s), and their directions agree.
+    double bestT = 0, best = 1e300;
+    const int n = 256;
+    for (int i = 0; i <= n; ++i) {
+        const double t = pb.end() * i / n;
+        const double gap = pa.distance(pb.at(t));
+        if (gap < best) {
+            best = gap;
+            bestT = t;
+        }
+    }
+    double* s = alloc(pa.param(pb.at(bestT)));
+    double* t = alloc(bestT);
+    unknowns.push_back(s);
+    unknowns.push_back(t);
+    params.push_back(s);
+    params.push_back(t);
+    auto contact = [ba = ma.build, bb = mb.build, na, nb](const std::vector<double>& v, int which) {
+        const curve::Path p1 = ba(v.data()), p2 = bb(v.data() + na);
+        const double s = v[nb], t = v[nb + 1];
+        const Vec2 ta = unitOf(p1.derivative(s));
+        const Vec2 gap = p2.at(t) - p1.at(s);
+        switch (which) {
+            case 0: return dot(gap, ta);    // s is the foot of b(t) on a
+            case 1: return cross(ta, gap);  // b(t) is on a
+            default: return cross(ta, unitOf(p2.derivative(t)));  // same direction there
+        }
+    };
+    for (int which = 0; which < 3; ++which) {
+        auto* eq = new ConstraintNumeric(params, [contact, which](const std::vector<double>& v) { return contact(v, which); });
+        eq->setTag(tag);
+        sys.addConstraint(eq);  // the system owns it
+    }
+}
+
 bool Solver::Impl::impliedByArcs(const Sketch& sketch, const Constraint& c)
 {
     auto arcOf = [&](Id id) -> const Arc* {
@@ -573,6 +954,28 @@ bool Solver::Impl::impliedByArcs(const Sketch& sketch, const Constraint& c)
         const auto it = chainArc.find({centre, root});
         return root == kNoId || it == chainArc.end() ? kNoId : circleRoot(it->second);
     };
+    if (c.type == ConstraintType::Coincident && c.refs.size() == 2 && sketch.hasEntity(c.refs[1])) {
+        // A point on an ellipse arc or spline that's on it by its making: an end of it, or a
+        // point a spline passes through.
+        const Entity& on = sketch.entity(c.refs[1]);
+        const Id p = c.refs[0];
+        if (const auto* ea = std::get_if<EllipseArc>(&on.geom); ea && (ea->start == p || ea->end == p)) {
+            return true;
+        }
+        if (sketch.isElliptic(c.refs[1])) {
+            const std::array<Id, 3> ax = sketch.ellipseAxes(c.refs[1]);
+            if (p == ax[1] || p == ax[2]) {
+                return true;  // its axis points are on it
+            }
+        }
+        if (const auto* sp = std::get_if<Spline>(&on.geom)) {
+            if (sp->start == p || sp->end == p
+                || (sp->kind == SplineKind::Fit && std::ranges::find(sp->points, p) != sp->points.end())
+                || (!sp->closed && (p == sp->points.front() || p == sp->points.back()))) {
+                return true;
+            }
+        }
+    }
     if (c.type == ConstraintType::Coincident && c.refs.size() == 2) {
         // A point on a line that's known to be on it already (an end of a line collinear with it,
         // or a point put on it before).
@@ -637,6 +1040,9 @@ void Solver::Impl::addConstraint(const Sketch& sketch, const Constraint& c)
                 case EntityKind::Line: sys.addConstraintPointOnLine(pt(r[0]), ln(r[1]), tag); break;
                 case EntityKind::Circle: sys.addConstraintPointOnCircle(pt(r[0]), circles.at(r[1]), tag); break;
                 case EntityKind::Arc: sys.addConstraintPointOnArc(pt(r[0]), arcs.at(r[1]), tag); break;
+                case EntityKind::Ellipse:
+                case EntityKind::EllipseArc:
+                case EntityKind::Spline: addPointOnCurve(sketch, r[0], r[1], tag); break;  // (once)
             }
             break;
 
@@ -662,7 +1068,11 @@ void Solver::Impl::addConstraint(const Sketch& sketch, const Constraint& c)
         case ConstraintType::Perpendicular: sys.addConstraintPerpendicular(ln(r[0]), ln(r[1]), tag); break;
 
         case ConstraintType::Tangent:
-            if (const Id joint = sharedEndpoint(sketch, r[0], r[1]); joint != kNoId) {
+            if (auto plain = [](EntityKind k) { return k == EntityKind::Line || k == EntityKind::Circle || k == EntityKind::Arc; };
+                !plain(kind(0)) || !plain(kind(1))) {
+                addTangentCurves(sketch, r[0], r[1], sharedEndpoint(sketch, r[0], r[1]), tag);
+            }
+            else if (const Id joint = sharedEndpoint(sketch, r[0], r[1]); joint != kNoId) {
                 // Curves joined end to end: "meet at 0 or 180 degrees at the joint". The
                 // distance-based form below is only satisfied at a minimum when the curves share
                 // a point, which leaves the solver's Jacobian rank-deficient there (reported as
@@ -774,7 +1184,11 @@ void Solver::Impl::addConstraint(const Sketch& sketch, const Constraint& c)
         }
 
         case ConstraintType::Radius:
-            if (kind(0) == EntityKind::Circle) {
+            if (sketch.isElliptic(r[0])) {  // the major semi-axis
+                const std::array<Id, 3> ax = sketch.ellipseAxes(r[0]);
+                sys.addConstraintP2PDistance(pt(ax[0]), pt(ax[1]), alloc(c.value), tag);
+            }
+            else if (kind(0) == EntityKind::Circle) {
                 sys.addConstraintCircleRadius(circles.at(r[0]), alloc(c.value), tag);
             }
             else {
@@ -783,7 +1197,11 @@ void Solver::Impl::addConstraint(const Sketch& sketch, const Constraint& c)
             break;
 
         case ConstraintType::Diameter:
-            if (kind(0) == EntityKind::Circle) {
+            if (sketch.isElliptic(r[0])) {  // the major axis
+                const std::array<Id, 3> ax = sketch.ellipseAxes(r[0]);
+                sys.addConstraintP2PDistance(pt(ax[0]), pt(ax[1]), alloc(c.value / 2), tag);
+            }
+            else if (kind(0) == EntityKind::Circle) {
                 sys.addConstraintCircleDiameter(circles.at(r[0]), alloc(c.value), tag);
             }
             else {
@@ -858,6 +1276,24 @@ void Solver::Impl::addPattern(const Sketch& sketch, const Constraint& c)
                 const Id pinned = reduced[a.end] < 2 ? a.end : a.start;
                 ++reduced[pinned];
                 reducedBy[pinned] = a.center;
+            }
+            else if (kind == EntityKind::EllipseArc) {
+                // Both ends are on the (copied) ellipse already: one equation each to place them.
+                const EllipseArc& a = sketch.ellipseArc(copy);
+                for (Id end : {a.start, a.end}) {
+                    ++reduced[end];
+                    reducedBy[end] = a.center;
+                }
+            }
+            else if (kind == EntityKind::Spline) {
+                // A piece's ends are on its (copied) curve: likewise, by direction from its first point.
+                const Spline& sp = sketch.spline(copy);
+                for (Id end : {sp.start, sp.end}) {
+                    if (end != kNoId && !splineEndOnCurve(sp, end)) {
+                        ++reduced[end];
+                        reducedBy[end] = sp.points.front();
+                    }
+                }
             }
         }
 
@@ -1138,7 +1574,13 @@ SolveResult Solver::solve()
     sys.invalidatedDiagnosis();
     sys.initSolution(GCS::DogLeg);  // also runs diagnosis
 
-    const GCS::SolveStatus status = sys.solve(GCS::DogLeg);
+    GCS::SolveStatus status = sys.solve(GCS::DogLeg);
+    if (status != GCS::SolveStatus::Success) {
+        // Big changes (a point pulled onto an ellipse far away) can leave DogLeg short of the
+        // answer; Levenberg-Marquardt, from where it started, often gets there.
+        sys.undoSolution();
+        status = sys.solve(GCS::LevenbergMarquardt);
+    }
     if (status == GCS::SolveStatus::Success) {
         sys.applySolution();
     }

@@ -10,6 +10,8 @@
 #include "Editor.h"
 #include "TextShapes.h"
 
+#include <core/Curves.h>
+#include <numbers>
 #include <core/Dimensions.h>
 #include <core/Export.h>
 #include <core/Features.h>
@@ -105,6 +107,12 @@ struct CircleH : Item
 {};
 struct ArcH : Item
 {};
+struct EllipseH : Item
+{};
+struct EllipseArcH : Item
+{};
+struct SplineH : Item
+{};
 struct ConstraintH : Item
 {};
 struct FillH : Item
@@ -155,6 +163,9 @@ py::object wrap(Id id)
         case EntityKind::Line: return py::cast(LineH{{id}});
         case EntityKind::Circle: return py::cast(CircleH{{id}});
         case EntityKind::Arc: return py::cast(ArcH{{id}});
+        case EntityKind::Ellipse: return py::cast(EllipseH{{id}});
+        case EntityKind::EllipseArc: return py::cast(EllipseArcH{{id}});
+        case EntityKind::Spline: return py::cast(SplineH{{id}});
     }
     return py::none();
 }
@@ -725,6 +736,64 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
         });
     entityProps(arc);
 
+    // Ellipses: the centre and the ends of the two semi-axes (points, which can be dragged and
+    // constrained); the axes are kept at right angles.
+    auto ellipseProps = [&entityProps](auto& cls, const char* what) {
+        using T = typename std::remove_reference_t<decltype(cls)>::type;
+        cls.def_property_readonly("center", [](const T& e) { entity(e.id); return wrap(sketch().ellipseAxes(e.id)[0]); })
+            .def_property_readonly("major", [](const T& e) { entity(e.id); return wrap(sketch().ellipseAxes(e.id)[1]); },
+                                   "The end of the first semi-axis (it sets the direction).")
+            .def_property_readonly("minor", [](const T& e) { entity(e.id); return wrap(sketch().ellipseAxes(e.id)[2]); },
+                                   "The end of the other semi-axis.")
+            .def_property_readonly("major_radius", [](const T& e) { entity(e.id); return core::curve::ellipseFrame(sketch(), e.id).a; })
+            .def_property_readonly("minor_radius", [](const T& e) { entity(e.id); return core::curve::ellipseFrame(sketch(), e.id).b; })
+            .def_property_readonly("angle", [](const T& e) {
+                entity(e.id);
+                const core::curve::EllipseFrame f = core::curve::ellipseFrame(sketch(), e.id);
+                return std::atan2(f.u.y, f.u.x) * 180.0 / std::numbers::pi;
+            }, "Of the major axis, in degrees from +x.")
+            .def("__repr__", [what](const T& e) {
+                if (!sketch().hasEntity(e.id)) {
+                    return std::string("<") + what + " " + std::to_string(e.id) + " (deleted)>";
+                }
+                const core::curve::EllipseFrame f = core::curve::ellipseFrame(sketch(), e.id);
+                return std::string("<") + what + " " + itemName(e.id) + " " + fmt(f.a) + " x " + fmt(f.b) + ">";
+            });
+        entityProps(cls);
+    };
+    py::class_<EllipseH, Item> ellipse(m, "Ellipse");
+    ellipseProps(ellipse, "Ellipse");
+    py::class_<EllipseArcH, Item> ellipseArc(m, "EllipseArc");
+    ellipseArc.def_property_readonly("start", [](const EllipseArcH& a) { entity(a.id); return wrap(sketch().ellipseArc(a.id).start); })
+        .def_property_readonly("end", [](const EllipseArcH& a) { entity(a.id); return wrap(sketch().ellipseArc(a.id).end); });
+    ellipseProps(ellipseArc, "EllipseArc");
+
+    py::class_<SplineH, Item> spline(m, "Spline");
+    spline.def_property_readonly("points", [](const SplineH& sp) { entity(sp.id); return wrapAll(sketch().spline(sp.id).points); },
+                                 "Its points: on the curve (fit) or pulling it (control).")
+        .def_property_readonly("kind", [](const SplineH& sp) { entity(sp.id); return std::string(core::toString(sketch().spline(sp.id).kind)); })
+        .def_property_readonly("closed", [](const SplineH& sp) { entity(sp.id); return sketch().spline(sp.id).closed; })
+        .def_property_readonly("start", [](const SplineH& sp) -> py::object {
+            entity(sp.id);
+            const core::Spline& s = sketch().spline(sp.id);
+            return s.isPiece() ? wrap(s.start) : py::none();
+        }, "A trimmed piece's first end (None for a whole spline).")
+        .def_property_readonly("end", [](const SplineH& sp) -> py::object {
+            entity(sp.id);
+            const core::Spline& s = sketch().spline(sp.id);
+            return s.isPiece() ? wrap(s.end) : py::none();
+        })
+        .def_property_readonly("length", [](const SplineH& sp) { entity(sp.id); return core::curve::pathOf(sketch(), sp.id).length(); })
+        .def("__repr__", [](const SplineH& sp) {
+            if (!sketch().hasEntity(sp.id)) {
+                return "<Spline " + std::to_string(sp.id) + " (deleted)>";
+            }
+            const core::Spline& s = sketch().spline(sp.id);
+            return "<Spline " + itemName(sp.id) + " " + core::toString(s.kind) + ", " + std::to_string(s.points.size())
+                + " points" + (s.closed ? ", closed" : "") + (s.isPiece() ? ", piece" : "") + ">";
+        });
+    entityProps(spline);
+
     py::class_<ConstraintH, Item>(m, "Constraint")
         .def_property_readonly("type", [](const ConstraintH& c) {
             return Editor::function(constraintOf(c.id).type).toStdString();
@@ -1021,6 +1090,56 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
                 return ed.arc(c, s0, pointArg(ed, end));
             }));
         }, py::arg("center"), py::arg("start"), py::arg("end"), "Counter-clockwise from start to end.")
+        .def("ellipse", [](const SketchH&, py::handle center, py::handle major, py::handle minor) {
+            return wrap(editReturningId("Ellipse", [&](Editor& ed) {
+                const Id c = pointArg(ed, center);
+                const Id a = pointArg(ed, major);
+                Id b = kNoId;
+                if (py::isinstance<py::float_>(minor) || py::isinstance<py::int_>(minor)) {
+                    // A number: the other semi-axis, at right angles (counter-clockwise).
+                    const double r = minor.cast<double>();
+                    const core::Point& pc = ed.sketch().point(c);
+                    const core::Point& pa = ed.sketch().point(a);
+                    const double len = std::hypot(pa.x - pc.x, pa.y - pc.y);
+                    if (!(r > 0.0) || !(len > 0.0)) {
+                        throw core::SketchError("ellipse: the radii must be positive");
+                    }
+                    b = ed.point(pc.x - (pa.y - pc.y) / len * r, pc.y + (pa.x - pc.x) / len * r);
+                }
+                else {
+                    b = pointArg(ed, minor);
+                }
+                return ed.ellipse(c, a, b);
+            }));
+        }, py::arg("center"), py::arg("major"), py::arg("minor"),
+           "An ellipse: its centre, the end of one semi-axis, and the end of the other (a point, or just its "
+           "length). The axes are kept at right angles.")
+        .def("ellipse_arc", [](const SketchH&, py::handle center, py::handle major, py::handle minor, py::handle start,
+                               py::handle end) {
+            return wrap(editReturningId("Elliptical arc", [&](Editor& ed) {
+                const Id c = pointArg(ed, center);
+                const Id a = pointArg(ed, major);
+                const Id b = pointArg(ed, minor);
+                const Id s0 = pointArg(ed, start);
+                return ed.ellipseArc(c, a, b, s0, pointArg(ed, end));
+            }));
+        }, py::arg("center"), py::arg("major"), py::arg("minor"), py::arg("start"), py::arg("end"),
+           "Part of an ellipse, counter-clockwise from start to end (both kept on it).")
+        .def("spline", [](const SketchH&, py::handle pointsArg, const std::string& kind, bool closed) {
+            core::SplineKind k;
+            if (!core::splineKindFromString(kind, k)) {
+                throw py::value_error("kind: \"fit\" (through the points) or \"control\" (pulled by them)");
+            }
+            return wrap(editReturningId("Spline", [&](Editor& ed) {
+                std::vector<Id> pts;
+                for (py::handle h : pointsArg) {
+                    pts.push_back(pointArg(ed, h));
+                }
+                return ed.spline(pts, k, closed);
+            }));
+        }, py::arg("points"), py::arg("kind") = "fit", py::arg("closed") = false,
+           "A smooth curve through the points (kind=\"fit\") or pulled towards them, through the first and last "
+           "(kind=\"control\"). Points or (x, y) pairs; closed joins the last back to the first.")
         .def("rectangle", [](const SketchH&, py::handle corner, py::handle opposite) {
             return editCurves("Rectangle", [&](Editor& ed) {
                 const Id a = pointArg(ed, corner);
@@ -2009,7 +2128,7 @@ def run_file(path, argv):
         sys.argv, sys.path[:] = old_argv, old_path
 
 
-_NAME = re.compile(r"^([plcakdf])(\d+)$")
+_NAME = re.compile(r"^(sp|ea|[plcakdfte])(\d+)$")
 
 
 class ConsoleNamespace(dict):

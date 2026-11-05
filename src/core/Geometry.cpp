@@ -1,5 +1,7 @@
 #include "Geometry.h"
 
+#include "Curves.h"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -134,6 +136,9 @@ double distanceTo(const Sketch& sketch, Id id, Vec2 p)
             const Arc& arc = std::get<Arc>(e.geom);
             return std::min(len(pos(sketch, arc.start), p), len(pos(sketch, arc.end), p));
         }
+        case EntityKind::Ellipse:
+        case EntityKind::EllipseArc:
+        case EntityKind::Spline: return curve::pathOf(sketch, id).distance(p);
     }
     return std::numeric_limits<double>::infinity();
 }
@@ -173,6 +178,9 @@ Vec2 closestPoint(const Sketch& sketch, Id id, Vec2 p)
             const Vec2 s = pos(sketch, arc.start), en = pos(sketch, arc.end);
             return len(s, p) <= len(en, p) ? s : en;
         }
+        case EntityKind::Ellipse:
+        case EntityKind::EllipseArc:
+        case EntityKind::Spline: return curve::pathOf(sketch, id).closest(p);
     }
     return p;
 }
@@ -265,6 +273,17 @@ std::vector<Vec2> sample(const Sketch& sketch, Id id, int segments)
                 const double t = a.startAngle + a.sweep * i / segments;
                 out.push_back({a.center.x + a.radius * std::cos(t), a.center.y + a.radius * std::sin(t)});
             }
+            break;
+        }
+        case EntityKind::Ellipse:
+        case EntityKind::EllipseArc: {
+            const curve::Path path = curve::pathOf(sketch, id);
+            out = path.sample(0, path.end(), segments);
+            break;
+        }
+        case EntityKind::Spline: {
+            const curve::Path path = curve::pathOf(sketch, id);
+            out = path.sample(0, path.end(), std::max(segments, static_cast<int>(std::ceil(path.end() * 16))));
             break;
         }
     }

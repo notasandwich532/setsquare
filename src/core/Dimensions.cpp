@@ -77,6 +77,11 @@ double roundRadius(const Sketch& s, Id id)
     if (e.kind() == EntityKind::Circle) {
         return std::get<Circle>(e.geom).radius;
     }
+    if (s.isElliptic(id)) {  // (its major semi-axis)
+        const std::array<Id, 3> ax = s.ellipseAxes(id);
+        const Vec2 c = pos(s, ax[0]), m = pos(s, ax[1]);
+        return std::hypot(m.x - c.x, m.y - c.y);
+    }
     return s.arcRadius(id);
 }
 
@@ -85,6 +90,9 @@ Vec2 roundCenter(const Sketch& s, Id id)
     const Entity& e = s.entity(id);
     if (e.kind() == EntityKind::Circle) {
         return pos(s, std::get<Circle>(e.geom).center);
+    }
+    if (s.isElliptic(id)) {
+        return pos(s, s.ellipseAxes(id)[0]);
     }
     return pos(s, std::get<Arc>(e.geom).center);
 }

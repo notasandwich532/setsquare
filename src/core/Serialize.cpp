@@ -37,6 +37,29 @@ json entityToJson(const Entity& e)
                 j["start"] = g.start;
                 j["end"] = g.end;
             }
+            else if constexpr (std::is_same_v<T, Ellipse>) {
+                j["center"] = g.center;
+                j["major"] = g.major;
+                j["minor"] = g.minor;
+            }
+            else if constexpr (std::is_same_v<T, EllipseArc>) {
+                j["center"] = g.center;
+                j["major"] = g.major;
+                j["minor"] = g.minor;
+                j["start"] = g.start;
+                j["end"] = g.end;
+            }
+            else if constexpr (std::is_same_v<T, Spline>) {
+                j["points"] = g.points;
+                j["kind"] = toString(g.kind);
+                if (g.closed) {
+                    j["closed"] = true;
+                }
+                if (g.isPiece()) {
+                    j["start"] = g.start;
+                    j["end"] = g.end;
+                }
+            }
         },
         e.geom);
     if (e.construction) {
@@ -70,6 +93,24 @@ Entity entityFromJson(const json& j)
     }
     else if (type == "arc") {
         e.geom = Arc{j.at("center").get<Id>(), j.at("start").get<Id>(), j.at("end").get<Id>()};
+    }
+    else if (type == "ellipse") {
+        e.geom = Ellipse{j.at("center").get<Id>(), j.at("major").get<Id>(), j.at("minor").get<Id>()};
+    }
+    else if (type == "ellipse_arc") {
+        e.geom = EllipseArc{j.at("center").get<Id>(), j.at("major").get<Id>(), j.at("minor").get<Id>(),
+                            j.at("start").get<Id>(), j.at("end").get<Id>()};
+    }
+    else if (type == "spline") {
+        Spline sp;
+        sp.points = j.at("points").get<std::vector<Id>>();
+        if (!splineKindFromString(j.value("kind", std::string("fit")), sp.kind)) {
+            throw SketchError("unknown spline kind '" + j.value("kind", std::string()) + "'");
+        }
+        sp.closed = j.value("closed", false);
+        sp.start = j.value("start", Id{kNoId});
+        sp.end = j.value("end", Id{kNoId});
+        e.geom = std::move(sp);
     }
     else {
         throw SketchError("unknown entity type '" + type + "'");

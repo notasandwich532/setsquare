@@ -1,5 +1,6 @@
 #include "Modify.h"
 
+#include "Curves.h"
 #include "Dimensions.h"
 
 #include <algorithm>
@@ -40,7 +41,8 @@ Vec2 pos(const Sketch& s, Id p)
 }
 
 // A curve's underlying geometry, with a parameter running along it: t in [0, 1] for lines,
-// the angle from the start for arcs (0..sweep) and circles (0..2pi from +x).
+// the angle from the start for arcs (0..sweep) and circles (0..2pi from +x). Ellipses, elliptical
+// arcs and splines (Other) go by their path (see core/Curves.h).
 struct Geo
 {
     enum class Kind
@@ -48,18 +50,25 @@ struct Geo
         Line,
         Circle,
         Arc,
+        Other,
     } kind = Kind::Line;
     Vec2 a, b;  // line
     Vec2 c;     // circle/arc
     double r = 0, start = 0, sweep = kTwoPi;
+    curve::Path path;  // other
 
-    double end() const { return kind == Kind::Line ? 1.0 : sweep; }
+    double end() const { return kind == Kind::Line ? 1.0 : kind == Kind::Other ? path.end() : sweep; }
+    // Closed all the way round (a circle, an ellipse, a whole closed spline): its parameter wraps.
+    bool closed() const { return kind == Kind::Circle || (kind == Kind::Other && path.closed()); }
 
     double param(Vec2 p) const
     {
         if (kind == Kind::Line) {
             const Vec2 d = sub(b, a);
             return dot(sub(p, a), d) / dot(d, d);
+        }
+        if (kind == Kind::Other) {
+            return path.param(p);
         }
         return angleFrom(start, std::atan2(p.y - c.y, p.x - c.x));
     }
@@ -69,6 +78,9 @@ struct Geo
         if (kind == Kind::Line) {
             return add(a, mul(sub(b, a), u));
         }
+        if (kind == Kind::Other) {
+            return path.at(u);
+        }
         return {c.x + r * std::cos(start + u), c.y + r * std::sin(start + u)};
     }
 
@@ -77,6 +89,9 @@ struct Geo
     {
         if (kind == Kind::Circle) {
             return true;
+        }
+        if (kind == Kind::Other) {
+            return path.distance(p) <= 1e-6 * std::max(1.0, norm(p));
         }
         const double u = param(p);
         if (kind == Kind::Line) {
@@ -121,14 +136,39 @@ Geo geoOf(const Sketch& s, Id id)
             g.sweep = a.sweep;
             break;
         }
+        case EntityKind::Ellipse:
+        case EntityKind::EllipseArc:
+        case EntityKind::Spline:
+            g.kind = Geo::Kind::Other;
+            g.path = curve::pathOf(s, id);
+            break;
         case EntityKind::Point: throw SketchError("not a curve");
     }
     return g;
 }
 
-// Crossings of the underlying infinite lines / full circles.
+// A curve's geometry as a path, its underlying line long and its circle whole (for crossings
+// with the curves that have no formula).
+curve::Path wholePath(const Geo& g)
+{
+    switch (g.kind) {
+        case Geo::Kind::Line: {
+            const Vec2 d = sub(g.b, g.a);
+            return curve::Path::line(sub(g.a, mul(d, 1e3)), add(g.b, mul(d, 1e3)));
+        }
+        case Geo::Kind::Circle:
+        case Geo::Kind::Arc: return curve::Path::circle(g.c, g.r);
+        case Geo::Kind::Other: return g.path;
+    }
+    return g.path;
+}
+
+// Crossings of the underlying infinite lines / full circles (and of ellipses and splines).
 std::vector<Vec2> rawIntersect(const Geo& g1, const Geo& g2)
 {
+    if (g1.kind == Geo::Kind::Other || g2.kind == Geo::Kind::Other) {
+        return curve::intersections(wholePath(g1), wholePath(g2));
+    }
     const bool line1 = g1.kind == Geo::Kind::Line, line2 = g2.kind == Geo::Kind::Line;
     if (line1 && line2) {
         const Vec2 d1 = sub(g1.b, g1.a), d2 = sub(g2.b, g2.a);
@@ -193,9 +233,10 @@ std::vector<Cut> cutsOn(const Sketch& s, Id curve, const Geo& g)
         }
         for (const Vec2& p : intersections(s, curve, id)) {
             const double u = g.param(p);
-            const double slack = g.kind == Geo::Kind::Line ? kPosEps / std::max(norm(sub(g.b, g.a)), kPosEps)
-                                                           : kPosEps / std::max(g.r, kPosEps);
-            if (g.kind == Geo::Kind::Circle || (u > slack && u < g.end() - slack)) {
+            const double slack = g.kind == Geo::Kind::Line    ? kPosEps / std::max(norm(sub(g.b, g.a)), kPosEps)
+                : g.kind == Geo::Kind::Other ? kPosEps / std::max(g.path.length() / std::max(g.end(), 1e-9), kPosEps)
+                                             : kPosEps / std::max(g.r, kPosEps);
+            if (g.closed() || (u > slack && u < g.end() - slack)) {
                 cuts.push_back({u, id, p});
             }
         }
@@ -227,7 +268,7 @@ Span spanAt(const Sketch& s, Id curve, Vec2 near)
             sp.hi = c;
         }
     }
-    if (sp.g.kind == Geo::Kind::Circle) {
+    if (sp.g.closed()) {
         // Distinct crossings needed to cut a circle; the span wraps around 0.
         if (cuts.size() < 2 || std::abs(cuts.front().param - cuts.back().param) < kParamEps) {
             sp.whole = true;
@@ -318,6 +359,78 @@ Id circleToArc(Sketch& s, Id circle, Id from, Id to)
     s.retarget(circle, arc);
     s.remove(circle);
     return arc;
+}
+
+// Replaces an ellipse by the elliptical arc from `from` to `to` (counter-clockwise), keeping its
+// constraints.
+Id ellipseToArc(Sketch& s, Id ellipse, Id from, Id to)
+{
+    const Ellipse e = s.ellipse(ellipse);
+    const Id arc = s.addEllipseArc(e.center, e.major, e.minor, from, to);
+    s.entity(arc).construction = s.entity(ellipse).construction;
+    s.copyStroke(ellipse, arc);
+    s.retarget(ellipse, arc);
+    s.remove(ellipse);
+    return arc;
+}
+
+// Splits an elliptical arc at a crossing: `arc` keeps start..cut, the returned new one is
+// cut..end. They share the ellipse's points, so they stay on it.
+Id splitEllipseArc(Sketch& s, Id arc, const Cut& cut)
+{
+    const EllipseArc a = s.ellipseArc(arc);
+    const Id p = pointOn(s, cut.at, cut.cutter, arc);
+    s.rebindPoint(arc, a.end, p);
+    const Id piece = s.addEllipseArc(a.center, a.major, a.minor, p, a.end);
+    s.entity(piece).construction = s.entity(arc).construction;
+    s.copyStroke(arc, piece);
+    return piece;
+}
+
+// A spline's ends in the order its path runs: a whole open one's first and last points, a
+// piece's start and end.
+std::pair<Id, Id> splineEnds(const Sketch& s, Id id)
+{
+    const Spline& sp = s.spline(id);
+    if (!sp.isPiece()) {
+        return {sp.points.front(), sp.points.back()};
+    }
+    const Vec2 first = curve::pathOf(s, id).at(0);
+    return dist(pos(s, sp.start), first) <= dist(pos(s, sp.end), first) ? std::pair{sp.start, sp.end}
+                                                                          : std::pair{sp.end, sp.start};
+}
+
+// Moves one end of a spline (a whole one becomes a piece of itself). The old end goes if it was
+// only a piece's end (a spline's own points stay).
+void setSplineEnd(Sketch& s, Id id, bool last, Id point)
+{
+    const auto [first, final] = splineEnds(s, id);
+    Spline& sp = std::get<Spline>(s.entity(id).geom);
+    if (!sp.isPiece()) {
+        sp.start = first;
+        sp.end = final;
+    }
+    const Id old = last ? final : first;
+    (sp.start == old ? sp.start : sp.end) = point;
+    s.removeIfUnused(old);
+}
+
+// Splits a spline at a crossing: `spline` keeps its first end..cut, the returned new piece (the
+// same curve) is cut..last end.
+Id splitSpline(Sketch& s, Id spline, const Cut& cut)
+{
+    const auto [first, last] = splineEnds(s, spline);
+    const Id p = pointOn(s, cut.at, cut.cutter, spline);
+    Spline piece = s.spline(spline);
+    piece.start = p;
+    piece.end = last;
+    Spline& mine = std::get<Spline>(s.entity(spline).geom);
+    mine.start = first;
+    mine.end = p;
+    const Id added = s.addSpline(piece);
+    s.entity(added).construction = s.entity(spline).construction;
+    s.copyStroke(spline, added);
+    return added;
 }
 }  // namespace
 
@@ -416,6 +529,52 @@ void trim(Sketch& s, Id curve, Vec2 near)
             circleToArc(s, curve, from, to);
             break;
         }
+        case Geo::Kind::Other: {
+            const EntityKind kind = s.entity(curve).kind();
+            if (sp.g.closed()) {
+                // The rest, from the upper crossing round to the lower one.
+                const Id from = pointOn(s, sp.hi->at, sp.hi->cutter, curve);
+                const Id to = pointOn(s, sp.lo->at, sp.lo->cutter, curve);
+                if (kind == EntityKind::Ellipse) {
+                    ellipseToArc(s, curve, from, to);
+                }
+                else {
+                    Spline& whole = std::get<Spline>(s.entity(curve).geom);
+                    whole.start = from;
+                    whole.end = to;
+                }
+                break;
+            }
+            if (kind == EntityKind::EllipseArc) {
+                const EllipseArc a = s.ellipseArc(curve);
+                if (!sp.lo) {
+                    s.rebindPoint(curve, a.start, pointOn(s, sp.hi->at, sp.hi->cutter, curve));
+                    s.removeIfUnused(a.start);
+                }
+                else if (!sp.hi) {
+                    s.rebindPoint(curve, a.end, pointOn(s, sp.lo->at, sp.lo->cutter, curve));
+                    s.removeIfUnused(a.end);
+                }
+                else {
+                    splitEllipseArc(s, curve, *sp.hi);
+                    const Id cutEnd = s.ellipseArc(curve).end;
+                    s.rebindPoint(curve, cutEnd, pointOn(s, sp.lo->at, sp.lo->cutter, curve));
+                }
+                break;
+            }
+            // A spline (open, or a piece).
+            if (!sp.lo) {
+                setSplineEnd(s, curve, false, pointOn(s, sp.hi->at, sp.hi->cutter, curve));
+            }
+            else if (!sp.hi) {
+                setSplineEnd(s, curve, true, pointOn(s, sp.lo->at, sp.lo->cutter, curve));
+            }
+            else {
+                splitSpline(s, curve, *sp.hi);
+                setSplineEnd(s, curve, true, pointOn(s, sp.lo->at, sp.lo->cutter, curve));
+            }
+            break;
+        }
     }
 }
 
@@ -443,7 +602,7 @@ std::vector<Vec2> trimPreview(const Sketch& s, Id curve, Vec2 near)
     }
     const double from = sp.lo ? sp.lo->param : 0.0;
     double to = sp.hi ? sp.hi->param : sp.g.end();
-    if (sp.g.kind == Geo::Kind::Circle && to <= from) {
+    if (sp.g.closed() && to <= from) {
         to += kTwoPi;
     }
     return sp.g.sample(from, to);
@@ -478,6 +637,32 @@ std::vector<Id> breakCurve(Sketch& s, Id curve, Vec2 near)
             s.copyStroke(curve, clicked);
             const Id rest = circleToArc(s, curve, hi, lo);
             return {clicked, rest};
+        }
+        case Geo::Kind::Other: {
+            const EntityKind kind = s.entity(curve).kind();
+            if (sp.g.closed()) {
+                const Id lo = pointOn(s, sp.lo->at, sp.lo->cutter, curve);
+                const Id hi = pointOn(s, sp.hi->at, sp.hi->cutter, curve);
+                if (kind == EntityKind::Ellipse) {
+                    const Ellipse e = s.ellipse(curve);
+                    const Id clicked = s.addEllipseArc(e.center, e.major, e.minor, lo, hi);
+                    s.entity(clicked).construction = s.entity(curve).construction;
+                    s.copyStroke(curve, clicked);
+                    const Id rest = ellipseToArc(s, curve, hi, lo);
+                    return {clicked, rest};
+                }
+                Spline clickedPiece = s.spline(curve);
+                clickedPiece.start = lo;
+                clickedPiece.end = hi;
+                const Id clicked = s.addSpline(clickedPiece);
+                s.entity(clicked).construction = s.entity(curve).construction;
+                s.copyStroke(curve, clicked);
+                Spline& rest = std::get<Spline>(s.entity(curve).geom);
+                rest.start = hi;
+                rest.end = lo;
+                return {clicked, curve};
+            }
+            return kind == EntityKind::EllipseArc ? chain(splitEllipseArc) : chain(splitSpline);
         }
     }
     return {};
@@ -571,8 +756,19 @@ int dropTrivialCoincidences(Sketch& s)
                 continue;
             }
             const Entity& e = s.entity(curve);
-            const bool end = (e.kind() == EntityKind::Line && (s.line(curve).p1 == p || s.line(curve).p2 == p))
-                || (e.kind() == EntityKind::Arc && (s.arc(curve).start == p || s.arc(curve).end == p));
+            bool end = (e.kind() == EntityKind::Line && (s.line(curve).p1 == p || s.line(curve).p2 == p))
+                || (e.kind() == EntityKind::Arc && (s.arc(curve).start == p || s.arc(curve).end == p))
+                || (e.kind() == EntityKind::EllipseArc && (s.ellipseArc(curve).start == p || s.ellipseArc(curve).end == p));
+            if (s.isElliptic(curve)) {
+                const std::array<Id, 3> ax = s.ellipseAxes(curve);
+                end = end || p == ax[1] || p == ax[2];
+            }
+            if (const auto* spl = std::get_if<Spline>(&e.geom)) {
+                // Its piece's ends, and the points it passes through.
+                end = spl->start == p || spl->end == p
+                    || (spl->kind == SplineKind::Fit && std::ranges::find(spl->points, p) != spl->points.end())
+                    || (!spl->closed && (spl->points.front() == p || spl->points.back() == p));
+            }
             if (end) {
                 trivial.push_back(id);
                 break;

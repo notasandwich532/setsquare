@@ -8,6 +8,7 @@ add_library(drawcore STATIC
     Export.h
     Features.cpp
     Features.h
+    Curves.cpp
     Geometry.cpp
     Geometry.h
     Modify.cpp
