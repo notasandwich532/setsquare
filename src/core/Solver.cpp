@@ -403,6 +403,7 @@ void Solver::Impl::build(const Sketch& sketch)
         }
     }
 
+    std::set<std::pair<Id, std::pair<Id, Id>>> arcShapes;  // centre and ends of the arcs so far
     for (const auto& [id, e] : sketch.entities()) {
         const bool fixed = e.fixed;
         if (const auto* l = std::get_if<Line>(&e.geom)) {
@@ -442,7 +443,21 @@ void Solver::Impl::build(const Sketch& sketch)
                 declare(ga.endAngle);
             }
             auto [it, _] = arcs.emplace(id, ga);
-            if (!capArcs.contains(id)) {  // (caps get theirs from their offset: see addOffset)
+            // An arc on the same centre and end points as one already here (the two halves of a
+            // circle trimmed to construction) has its ends on the circle already: the usual arc
+            // rules would say that twice, which leaves drags unable to converge. Like an offset's
+            // caps, its radius and start angle come from its start, and only the angle from its end.
+            const std::pair<Id, std::pair<Id, Id>> key{a->center, std::minmax(a->start, a->end)};
+            if (capArcs.contains(id)) {
+                // (caps get theirs from their offset: see addOffset)
+            }
+            else if (!arcShapes.insert(key).second) {
+                GCS::Arc& twin = it->second;
+                sys.addConstraintP2PDistance(twin.center, twin.start, twin.rad, kInternalTag);
+                sys.addConstraintP2PAngle(twin.center, twin.start, twin.startAngle, 0.0, kInternalTag);
+                sys.addConstraintP2PAngle(twin.center, twin.end, twin.endAngle, 0.0, kInternalTag);
+            }
+            else {
                 sys.addConstraintArcRules(it->second, kInternalTag);
             }
         }

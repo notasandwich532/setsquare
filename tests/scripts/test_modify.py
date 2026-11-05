@@ -59,3 +59,17 @@ b = s.line((0, -20), (0, 20))
 arc = s.fillet(a, b, 3, near=((10, 0), (0, -10)))
 assert isclose(arc.center.x, 3) and isclose(arc.center.y, -3)
 print("modify ok")
+
+# A circle trimmed to construction leaves two arcs on the same centre and ends; the geometry must
+# still drag (their arc rules once said the same thing twice, and drags couldn't converge).
+doc.new()
+a = s.circle((0, 0), 10)
+b = s.circle((8, 0), 10)
+centre = b.center
+s.trim(b, near=(18, 0), construction=True)
+assert len(s.arcs) == 2
+x0 = centre.x
+s.drag([centre], 3, 0)
+assert abs(centre.x - (x0 + 3)) < 1e-6, centre.pos
+r = s.solve()
+assert r.ok and not r.redundant and not r.conflicting
