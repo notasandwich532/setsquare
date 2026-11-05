@@ -67,7 +67,11 @@ Ellipses and splines work like the other curves: points can be kept on them (`s.
 they can be tangent to any curve (`s.tangent`, also where they join end to end), they close
 areas for fills, cut and can be trimmed or broken (an ellipse becomes an elliptical arc,
 `s.ellipse_arc`; a spline a piece of itself with `start` and `end` points), and copy, mirror
-and pattern. Text can run along them. Not yet: fillets, chamfers, offsets and extend.
+and pattern. Text can run along them. Fillets and chamfers work between any two open curves
+(a whole ellipse or closed spline: trim it first); extend carries an elliptical arc round its
+ellipse, a piece of a spline along it, and a whole spline on past its end (the point reached
+becomes its new end point). An ellipse's or spline's offset is a spline through points at the
+distance from it (placed from it, so they follow it exactly; only its ends join the solve).
 
 Shapes come with their constraints, and each returns its outline curves:
 

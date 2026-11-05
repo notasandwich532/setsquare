@@ -1,6 +1,7 @@
 #include "Geometry.h"
 
 #include "Curves.h"
+#include "Features.h"
 
 #include <algorithm>
 #include <cmath>
@@ -192,7 +193,12 @@ Id pick(const Sketch& sketch, Vec2 p, const PickOptions& options)
     // Curves lying on top of each other (a fillet's solid piece over its now-construction
     // original) are equally near: then the solid one is meant.
     const double same = 1e-9 + 1e-6 * options.tolerance;
+    // (an ellipse's or spline's offset: the points along it follow the source, not picked)
+    const std::set<Id> placed = options.points ? feature::placedOffsetPoints(sketch) : std::set<Id>{};
     for (const auto& [id, e] : sketch.entities()) {
+        if (placed.contains(id)) {
+            continue;
+        }
         if (options.exclude.contains(id) || sketch.isHiddenReference(id) || sketch.isAxis(id) || !sketch.isShown(id)
             || (options.sublayer != kNoId && e.sublayer != kNoId && e.sublayer != options.sublayer)) {
             continue;

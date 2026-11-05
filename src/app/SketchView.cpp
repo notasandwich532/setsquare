@@ -1,6 +1,7 @@
 #include "SketchView.h"
 
 #include <core/Curves.h>
+#include <core/Features.h>
 
 #include "CommandPanel.h"
 #include "Document.h"
@@ -1049,8 +1050,9 @@ void SketchView::drawSketch(QPainter& painter) const
     }
     drawAnnotations(painter);
 
+    const std::set<core::Id> placedPoints = core::feature::placedOffsetPoints(sketch);  // (follow their source)
     for (const auto& [id, e] : sketch.entities()) {
-        if (e.kind() != core::EntityKind::Point || sketch.isHiddenReference(id) || hidden(id)) {
+        if (e.kind() != core::EntityKind::Point || sketch.isHiddenReference(id) || hidden(id) || placedPoints.contains(id)) {
             continue;
         }
         if (const core::Id layer = sketch.layerOf(id); layer != core::kNoId && layer != activeLayer) {

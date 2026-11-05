@@ -10,6 +10,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <QLineEdit>
 #include <QTest>
 
 #include <algorithm>
@@ -371,4 +372,39 @@ TEST_CASE("Dimension tool on an ellipse: the axis nearer the click", "[shapes][c
     }
     CHECK(std::ranges::count(types, ConstraintType::Radius) == 1);
     CHECK(std::ranges::count(types, ConstraintType::Distance) == 1);
+}
+
+TEST_CASE("Fillet a line and a spline by clicking their corner; extend an elliptical arc", "[shapes][curves]")
+{
+    Fixture f;
+    Id line = kNoId, spline = kNoId;
+    f.doc.edit("curves", [&](Editor& ed) {
+        const Id a = ed.point(-40, 20), b = ed.point(-20, 20);
+        line = ed.line(a, b);
+        spline = ed.spline({b, ed.point(-10, 30), ed.point(0, 20), ed.point(10, 30)}, SplineKind::Fit, false);
+    });
+    f.view.setTool(ToolKind::Fillet);
+    f.click(-20, 20);  // the corner point
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    if (auto* e = f.view.findChild<QLineEdit*>("dimensionEditor")) {
+        e->selectAll();
+        QTest::keyClicks(e, "3");
+        QTest::keyClick(e, Qt::Key_Return);
+    }
+    CHECK(f.count(EntityKind::Arc) == 1);
+    CHECK(f.count(EntityKind::Spline) == 1);   // the kept piece
+    CHECK(f.count(EntityKind::Spline, true) == 1);  // the original, now construction
+    CHECK(f.doc.solveResult().ok);
+    CHECK(f.doc.solveResult().redundant.empty());
+
+    // An elliptical arc carries on round its ellipse to the line beyond its end.
+    Id arc = kNoId;
+    f.doc.edit("arc", [&](Editor& ed) {
+        arc = ed.ellipseArc(ed.point(0, -30), ed.point(20, -30), ed.point(0, -20), ed.point(20, -30), ed.point(0, -20));
+        ed.line(ed.point(-15, -50), ed.point(-15, -10));
+    });
+    f.view.setTool(ToolKind::Extend);
+    f.click(2, -20.2);  // near its end (the top)
+    const Point& end = f.sketch().point(f.sketch().ellipseArc(arc).end);
+    CHECK(end.x == Approx(-15).margin(1e-6));
 }

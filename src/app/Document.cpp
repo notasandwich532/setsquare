@@ -2,6 +2,7 @@
 
 #include "TextShapes.h"
 
+#include <core/Features.h>
 #include <core/Regions.h>
 #include <core/Serialize.h>
 
@@ -262,8 +263,11 @@ void Document::setSublayerVisible(core::Id sublayer, bool visible)
 
 void Document::followProjections()
 {
-    // Projections in other layers follow what's being dragged (their layers solved again).
-    if (m_sketch.syncProjections()) {
+    // Projections in other layers follow what's being dragged (their layers solved again), and
+    // offsets of ellipses and splines follow their sources.
+    const bool projected = m_sketch.syncProjections();
+    const bool placed = core::feature::placeOffsetPoints(m_sketch);
+    if (projected || placed) {
         core::solve(m_sketch);
     }
 }

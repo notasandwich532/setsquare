@@ -1195,7 +1195,11 @@ void Sketch::validateFeature(ConstraintType type, const std::vector<Id>& refs, d
             const size_t n = curves.size() / groups;
             for (size_t g = 1; g < groups; ++g) {
                 for (size_t i = 0; i < n; ++i) {
-                    if (kindOf(curves[g * n + i]) != kindOf(curves[i])) {
+                    // (an ellipse's or spline's offset is a spline)
+                    const EntityKind source = kindOf(curves[i]), made = kindOf(curves[g * n + i]);
+                    const bool curvy = source == EntityKind::Ellipse || source == EntityKind::EllipseArc
+                        || source == EntityKind::Spline;
+                    if (made != source && !(curvy && made == EntityKind::Spline)) {
                         fail("expects offsets of the same kinds as their sources");
                     }
                 }

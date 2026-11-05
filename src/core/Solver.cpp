@@ -399,6 +399,8 @@ struct Solver::Impl
         std::function<curve::Path(const double*)> build;
     };
     CurveModel model(const Sketch& sketch, Id id);
+    // The same, but a spline piece's own path (from one end to the other), not the whole curve's.
+    CurveModel pathModel(const Sketch& sketch, Id id);
     // Point p kept on a curve with no PlaneGCS counterpart (ellipse, elliptical arc, spline).
     // Once per point and underlying curve (an ellipse's three points, a spline's): pieces of one
     // sharing an end would otherwise say it twice. Returns false if it was there already.
@@ -555,8 +557,9 @@ void Solver::Impl::build(const Sketch& sketch)
         }
     }
 
-    // Points that may not move: fixed points, and the defining points of fixed curves.
-    std::set<Id> fixedPoints;
+    // Points that may not move: fixed points, and the defining points of fixed curves; and the
+    // points along ellipses' and splines' offsets, which are placed from their sources.
+    std::set<Id> fixedPoints = feature::placedOffsetPoints(sketch);
     for (const auto& [id, e] : sketch.entities()) {
         if (e.fixed) {
             fixedEntities.insert(id);
@@ -826,6 +829,39 @@ Solver::Impl::CurveModel Solver::Impl::model(const Sketch& sketch, Id id)
         }
         case EntityKind::Point: throw SketchError("not a curve");
     }
+    return m;
+}
+
+Solver::Impl::CurveModel Solver::Impl::pathModel(const Sketch& sketch, Id id)
+{
+    CurveModel m = model(sketch, id);
+    const auto* sp = std::get_if<Spline>(&sketch.entity(id).geom);
+    if (!sp || !sp->isPiece()) {
+        return m;
+    }
+    // (as curve::pathOf: from the nearer-the-start end along the whole curve to the other)
+    const size_t k = m.params.size();
+    for (Id end : {sp->start, sp->end}) {
+        m.params.push_back(points.at(end).x);
+        m.params.push_back(points.at(end).y);
+    }
+    const bool closed = sp->closed;
+    m.build = [whole = m.build, k, closed](const double* v) {
+        const curve::Path w = whole(v);
+        const double n = w.end();
+        double u0 = w.param({v[k], v[k + 1]}), u1 = w.param({v[k + 2], v[k + 3]});
+        if (closed) {
+            double span = std::fmod(u1 - u0, n);
+            if (span <= 0) {
+                span += n;
+            }
+            return curve::Path::spline(w.pieces, true, u0, span);
+        }
+        if (u1 < u0) {
+            std::swap(u0, u1);
+        }
+        return curve::Path::spline(w.pieces, false, u0, u1 - u0);
+    };
     return m;
 }
 
@@ -1373,8 +1409,106 @@ void Solver::Impl::addOffsetSide(const Sketch& sketch, const Constraint& c, cons
         if (const auto* l = std::get_if<Line>(&e.geom)) {
             return {l->p1, l->p2};
         }
+        if (const auto* ea = std::get_if<EllipseArc>(&e.geom)) {
+            return {ea->start, ea->end};
+        }
+        if (const auto* sp = std::get_if<Spline>(&e.geom)) {
+            if (!sp->isPiece()) {
+                return {sp->points.front(), sp->points.back()};
+            }
+            const Vec2 first = curve::pathOf(sketch, curve).at(0);  // (in the order its path runs)
+            const Vec2 s0 = pos(points.at(sp->start)), s1 = pos(points.at(sp->end));
+            return std::hypot(s0.x - first.x, s0.y - first.y) <= std::hypot(s1.x - first.x, s1.y - first.y)
+                ? std::array<Id, 2>{sp->start, sp->end}
+                : std::array<Id, 2>{sp->end, sp->start};
+        }
         const Arc& a = std::get<Arc>(e.geom);
         return {a.start, a.end};
+    };
+    // Ellipses and splines: their offsets are splines through points kept at the distance.
+    auto curvy = [&](size_t i) {
+        const EntityKind k = sketch.entity(refs.sources[i]).kind();
+        return k == EntityKind::Ellipse || k == EntityKind::EllipseArc || k == EntityKind::Spline;
+    };
+    auto closedCurvy = [&](size_t i) {
+        const Entity& e = sketch.entity(refs.sources[i]);
+        const auto* sp = std::get_if<Spline>(&e.geom);
+        return e.kind() == EntityKind::Ellipse || (sp && sp->closed && !sp->isPiece());
+    };
+    std::map<size_t, CurveModel> models;
+    auto sourceModel = [&](size_t i) -> CurveModel& {
+        if (!models.contains(i)) {
+            models.emplace(i, pathModel(sketch, refs.sources[i]));
+        }
+        return models.at(i);
+    };
+    auto pathNow = [&](size_t i) {
+        const CurveModel& m = sourceModel(i);
+        std::vector<double> v(m.params.size());
+        for (size_t k = 0; k < v.size(); ++k) {
+            v[k] = *m.params[k];
+        }
+        return m.build(v.data());
+    };
+    // Which side of the source (in its own direction) its offset is on: as it is now.
+    std::map<size_t, double> sides;
+    auto sideOf = [&](size_t i) {
+        if (!sides.contains(i)) {
+            const Spline& off = sketch.spline(refs.offsets[i]);
+            const bool closedOff = off.closed;
+            const size_t pieces = closedOff ? off.points.size() : off.points.size() - 1;
+            const size_t k = closedOff ? 0 : pieces / 2;
+            const curve::Path p = pathNow(i);
+            const double u = p.end() * static_cast<double>(k) / static_cast<double>(pieces);
+            const Vec2 q = pos(points.at(off.points[k]));
+            sides[i] = cross(p.derivative(u), q - p.at(u)) >= 0.0 ? 1.0 : -1.0;
+        }
+        return sides.at(i);
+    };
+    auto offsetPoint = [](const curve::Path& p, double u, double sign, double d) {
+        const Vec2 n = unitOf(p.derivative(u));
+        const Vec2 s = p.at(u);
+        return Vec2{s.x - sign * d * n.y, s.y + sign * d * n.x};
+    };
+    // q at the distance from source i, square to it at the fraction `frac` along it.
+    auto fixedOffset = [&](size_t i, Id q, double frac) {
+        const CurveModel& m = sourceModel(i);
+        const double sign = sideOf(i);
+        GCS::VEC_pD params = m.params;
+        const size_t k = params.size();
+        params.push_back(points.at(q).x);
+        params.push_back(points.at(q).y);
+        for (int component = 0; component < 2; ++component) {
+            auto* eq = new ConstraintNumeric(params, [build = m.build, k, component, frac, sign, distance,
+                                                      offsetPoint](const std::vector<double>& v) {
+                const curve::Path p = build(v.data());
+                const Vec2 o = offsetPoint(p, frac * p.end(), sign, distance);
+                return component == 0 ? v[k] - o.x : v[k + 1] - o.y;
+            });
+            eq->setTag(tag);
+            sys.addConstraint(eq);  // the system owns it
+        }
+    };
+    // q on source i's offset somewhere (at a parameter found with it).
+    auto onOffset = [&](size_t i, Id q) {
+        const CurveModel& m = sourceModel(i);
+        const double sign = sideOf(i);
+        double* u = alloc(pathNow(i).param(pos(points.at(q))));
+        unknowns.push_back(u);
+        GCS::VEC_pD params = m.params;
+        const size_t k = params.size();
+        params.push_back(points.at(q).x);
+        params.push_back(points.at(q).y);
+        params.push_back(u);
+        for (int component = 0; component < 2; ++component) {
+            auto* eq = new ConstraintNumeric(params, [build = m.build, k, component, sign, distance,
+                                                      offsetPoint](const std::vector<double>& v) {
+                const Vec2 o = offsetPoint(build(v.data()), v[k + 2], sign, distance);
+                return component == 0 ? v[k] - o.x : v[k + 1] - o.y;
+            });
+            eq->setTag(tag);
+            sys.addConstraint(eq);  // the system owns it
+        }
     };
     auto radiusEquation = [&](size_t i) {
         double* src = radiusOf(refs.sources[i]);
@@ -1393,6 +1527,9 @@ void Solver::Impl::addOffsetSide(const Sketch& sketch, const Constraint& c, cons
             radiusEquation(i);
             continue;
         }
+        if (curvy(i) && closedCurvy(i)) {
+            continue;  // (its offset's points are all placed from it: see feature::placeOffsetPoints)
+        }
         const auto from = ends(refs.sources[i]);
         const auto to = ends(refs.offsets[i]);
         for (size_t j = 0; j < 2; ++j) {
@@ -1406,6 +1543,10 @@ void Solver::Impl::addOffsetSide(const Sketch& sketch, const Constraint& c, cons
         Vec2 t;
         if (const auto* l = std::get_if<Line>(&e.geom)) {
             t = pos(points.at(l->p2)) - pos(points.at(l->p1));
+        }
+        else if (curvy(i)) {
+            const curve::Path path = pathNow(i);
+            t = path.derivative(path.param(pos(points.at(p))));
         }
         else {
             const Vec2 r = pos(points.at(p)) - pos(points.at(std::get<Arc>(e.geom).center));
@@ -1441,10 +1582,15 @@ void Solver::Impl::addOffsetSide(const Sketch& sketch, const Constraint& c, cons
     for (const auto& [q, joint] : joints) {
         const Id p = joint.source;
         const size_t i = joint.curves[0];
+        // (at an end of source i: 0 at its first, 1 at its last)
+        auto fracOf = [&](size_t k) { return ends(refs.sources[k])[0] == p ? 0.0 : 1.0; };
         if (joint.curves.size() == 1) {
             if (kind(i) == EntityKind::Line) {
                 lineDistance(i, q);
                 normal(i, p, q);
+            }
+            else if (curvy(i)) {
+                fixedOffset(i, q, fracOf(i));
             }
             else {
                 radial(i, p, q);
@@ -1456,7 +1602,33 @@ void Solver::Impl::addOffsetSide(const Sketch& sketch, const Constraint& c, cons
         const bool smooth = std::abs(ti.x * tj.y - ti.y * tj.x) < 1e-6;
         const bool arcI = kind(i) == EntityKind::Arc, arcJ = kind(j) == EntityKind::Arc;
 
-        if (arcI && arcJ) {
+        if (curvy(i) || curvy(j)) {
+            const bool lineI = kind(i) == EntityKind::Line, lineJ = kind(j) == EntityKind::Line;
+            if (smooth) {
+                if (arcI || arcJ) {
+                    radial(arcI ? i : j, p, q);  // (the arc keeps it on its circle)
+                }
+                else if (lineI || lineJ) {
+                    lineDistance(lineI ? i : j, q);
+                    normal(lineI ? i : j, p, q);
+                }
+                else {
+                    fixedOffset(i, q, fracOf(i));
+                }
+            }
+            else {
+                // A sharp corner: on both offsets (an arc's keeps it on its circle by itself).
+                for (size_t k : {i, j}) {
+                    if (kind(k) == EntityKind::Line) {
+                        lineDistance(k, q);
+                    }
+                    else if (curvy(k)) {
+                        onOffset(k, q);
+                    }
+                }
+            }
+        }
+        else if (arcI && arcJ) {
             if (smooth) {
                 if (root(i) != root(j)) {
                     group[root(j)] = root(i);
@@ -1732,11 +1904,25 @@ void Solver::endDrag()
     d->dragging = false;
 }
 
+SolveResult solveOnce(Sketch& sketch);
+
 SolveResult solve(Sketch& sketch)
 {
     // Layers share no unknowns (projections are fixed copies), so one solve does them all; but a
     // projection is a constant there, so when its original moves, it's moved and solved again
     // (once per layer it passes through, at most).
+    // Offsets of ellipses and splines are placed from their sources after each solve; if that
+    // moved them (and something is tied to them), solve again.
+    feature::placeOffsetPoints(sketch);
+    SolveResult result = solveOnce(sketch);
+    for (int pass = 0; pass < 3 && result.ok && feature::placeOffsetPoints(sketch); ++pass) {
+        result = solveOnce(sketch);
+    }
+    return result;
+}
+
+SolveResult solveOnce(Sketch& sketch)
+{
     if (sketch.layers().size() == 1) {
         sketch.syncProjections();  // (only unlinked ones can be here: they stay put)
         Solver solver(sketch);

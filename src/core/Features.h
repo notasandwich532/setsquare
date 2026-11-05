@@ -4,6 +4,7 @@
 #include "Sketch.h"
 #include "Transform.h"
 
+#include <set>
 #include <vector>
 
 // Linked copies: rectangular and circular patterns, and offsets. Each is one feature constraint
@@ -92,6 +93,13 @@ std::vector<Id> chainAt(const Sketch& sketch, Id curve);
 // offset constraint's id.
 Id offset(Sketch& sketch, const std::vector<Id>& curves, double distance, Vec2 toward, bool bothSides = false,
           bool caps = false);
+
+// An ellipse's or spline's offset is a spline through points at the distance from it, evenly
+// along it. Those points (all but its ends, which join the chain's other offsets and are solved)
+// follow the source exactly: placed from it after each solve, not solved. Returns whether any
+// moved. (`placedOffsetPoints`: which points those are, for the solver to leave alone.)
+bool placeOffsetPoints(Sketch& sketch);
+std::set<Id> placedOffsetPoints(const Sketch& sketch);
 
 // --- dividing a line ---
 //

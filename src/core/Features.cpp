@@ -1,5 +1,7 @@
 #include "Features.h"
 
+#include "Curves.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -107,7 +109,26 @@ void removeCopies(Sketch& s, Id id)
 
 // --- chains ---
 
-// A line's or arc's ends, in their own order (p1/p2, start/end).
+// An ellipse or a closed spline (whole): offset by itself, like a circle.
+bool closedCurve(const Sketch& s, Id curve)
+{
+    const Entity& e = s.entity(curve);
+    if (e.kind() == EntityKind::Circle || e.kind() == EntityKind::Ellipse) {
+        return true;
+    }
+    const auto* sp = std::get_if<Spline>(&e.geom);
+    return sp && sp->closed && !sp->isPiece();
+}
+
+// An ellipse, elliptical arc or spline: its offset is a spline through points at the distance.
+bool curvy(const Sketch& s, Id curve)
+{
+    const EntityKind k = s.entity(curve).kind();
+    return k == EntityKind::Ellipse || k == EntityKind::EllipseArc || k == EntityKind::Spline;
+}
+
+// A curve's ends, in the order its path runs (a line's p1/p2, an arc's start/end, a spline's
+// first and last). None for closed curves.
 std::optional<std::pair<Id, Id>> endsOf(const Sketch& s, Id curve)
 {
     const Entity& e = s.entity(curve);
@@ -117,7 +138,34 @@ std::optional<std::pair<Id, Id>> endsOf(const Sketch& s, Id curve)
     if (const auto* a = std::get_if<Arc>(&e.geom)) {
         return std::pair{a->start, a->end};
     }
+    if (const auto* ea = std::get_if<EllipseArc>(&e.geom)) {
+        return std::pair{ea->start, ea->end};
+    }
+    if (const auto* sp = std::get_if<Spline>(&e.geom); sp && !closedCurve(s, curve)) {
+        if (!sp->isPiece()) {
+            return std::pair{sp->points.front(), sp->points.back()};
+        }
+        const Vec2 first = curve::pathOf(s, curve).at(0);
+        return norm(at(s, sp->start) - first) <= norm(at(s, sp->end) - first) ? std::pair{sp->start, sp->end}
+                                                                                : std::pair{sp->end, sp->start};
+    }
     return std::nullopt;
+}
+
+// How many pieces an ellipse's or spline's offset is made of: points close enough that the
+// spline through them follows the true offset closely.
+int offsetPieces(const curve::Path& path)
+{
+    if (path.kind() == curve::Path::Kind::Spline) {
+        return std::max(12, static_cast<int>(std::ceil(path.end() * 24)));
+    }
+    return std::max(16, static_cast<int>(std::ceil(path.end() / (2 * std::numbers::pi) * 96)));
+}
+
+// The point at distance d from a path, on its left (sign +1) or right (-1), at parameter u.
+Vec2 offsetAt(const curve::Path& path, double u, double sign, double d)
+{
+    return path.at(u) + (sign * d) * left(unit(path.derivative(u)));
 }
 
 struct Step
@@ -134,7 +182,7 @@ std::vector<Step> orderChain(const Sketch& s, const std::vector<Id>& curves, boo
     for (Id c : curves) {
         const auto ends = endsOf(s, c);
         if (!ends) {
-            throw SketchError("offset: only lines and arcs can be chained");
+            throw SketchError("offset: a closed curve (circle, ellipse, closed spline) is offset by itself");
         }
         at[ends->first].push_back(c);
         at[ends->second].push_back(c);
@@ -185,23 +233,45 @@ Vec2 tangentAt(const Sketch& s, const Step& step, Vec2 x)
     if (const auto* l = std::get_if<Line>(&e.geom)) {
         t = at(s, l->p2) - at(s, l->p1);
     }
-    else {
-        t = left(x - at(s, std::get<Arc>(e.geom).center));  // counter-clockwise
+    else if (const auto* a = std::get_if<Arc>(&e.geom)) {
+        t = left(x - at(s, a->center));  // counter-clockwise
+    }
+    else {  // along its path
+        const curve::Path path = curve::pathOf(s, step.curve);
+        t = path.derivative(path.param(x));
     }
     return unit(step.forward ? t : -1.0 * t);
 }
 
-// An offset curve as a line (through a, b) or a circle.
+// An offset curve as a line (through a, b) or a circle; or, for an ellipse's or spline's, a path
+// that follows it (a little past the ends, to find corners there).
 struct Prim
 {
     bool line = true;
     Vec2 a, b;
     Vec2 c;
     double r = 0.0;
+    bool curvy = false;
+    curve::Path path;
 };
+
+curve::Path pathOfPrim(const Prim& p)
+{
+    if (p.curvy) {
+        return p.path;
+    }
+    if (p.line) {
+        const Vec2 d = p.b - p.a;
+        return curve::Path::line(p.a - 1e3 * d, p.b + 1e3 * d);
+    }
+    return curve::Path::circle(p.c, p.r);
+}
 
 std::vector<Vec2> intersect(const Prim& p, const Prim& q)
 {
+    if (p.curvy || q.curvy) {
+        return curve::intersections(pathOfPrim(p), pathOfPrim(q));
+    }
     if (p.line && q.line) {
         const Vec2 d1 = p.b - p.a, d2 = q.b - q.a;
         const double den = cross(d1, d2);
@@ -455,10 +525,10 @@ OffsetRefs offsetRefs(const Constraint& c)
 std::vector<Id> chainAt(const Sketch& s, Id curve)
 {
     if (!endsOf(s, curve)) {
-        if (s.entity(curve).kind() == EntityKind::Circle) {
+        if (closedCurve(s, curve)) {
             return {curve};
         }
-        throw SketchError("offset: pick a line, arc or circle");
+        throw SketchError("offset: pick a curve");
     }
     const bool construction = s.entity(curve).construction;
     std::map<Id, std::vector<Id>> at;
@@ -519,6 +589,20 @@ Side offsetSide(Sketch& s, const std::vector<Step>& steps, bool closed, double s
             const Vec2 n = sign * d * left(tangentAt(s, step, {}));
             prim.a = at(s, l->p1) + n;
             prim.b = at(s, l->p2) + n;
+        }
+        else if (curvy(s, step.curve)) {
+            // The offset, sampled a little past each end, as a spline.
+            const curve::Path path = curve::pathOf(s, step.curve);
+            const double sideOfPath = step.forward ? sign : -sign;
+            std::vector<Vec2> around;
+            for (int k = 0; k <= 40; ++k) {
+                around.push_back(offsetAt(path, path.end() * (-0.3 + 1.6 * k / 40), sideOfPath, d));
+            }
+            prim.line = false;
+            prim.curvy = true;
+            std::vector<curve::Bezier> pieces = curve::splineBeziers(around, SplineKind::Fit, false);
+            const double count = static_cast<double>(pieces.size());
+            prim.path = curve::Path::spline(std::move(pieces), false, 0.0, count);
         }
         else {
             const Arc& a = std::get<Arc>(e.geom);
@@ -581,6 +665,22 @@ Side offsetSide(Sketch& s, const std::vector<Step>& steps, bool closed, double s
         if (const auto* l = std::get_if<Line>(&e.geom)) {
             curve = s.addLine(side.points.at(l->p1), side.points.at(l->p2));
         }
+        else if (curvy(s, step.curve)) {
+            // A spline through points at the distance, evenly along the source (in its own
+            // direction), from the offset point at its first end to the one at its last.
+            const curve::Path path = curve::pathOf(s, step.curve);
+            const auto [first, last] = *endsOf(s, step.curve);
+            const double sideOfPath = step.forward ? sign : -sign;
+            const int pieces = offsetPieces(path);
+            Spline sp;
+            sp.points.push_back(side.points.at(first));
+            for (int k = 1; k < pieces; ++k) {
+                const Vec2 q = offsetAt(path, path.end() * k / pieces, sideOfPath, d);
+                sp.points.push_back(s.addPoint(q.x, q.y));
+            }
+            sp.points.push_back(side.points.at(last));
+            curve = s.addSpline(sp);
+        }
         else {
             const Arc& a = std::get<Arc>(e.geom);
             curve = s.addArc(a.center, side.points.at(a.start), side.points.at(a.end));
@@ -616,6 +716,37 @@ Id offset(Sketch& s, const std::vector<Id>& curves, double d, Vec2 toward, bool 
                 throw SketchError("offset: the distance is larger than the circle");
             }
             const Id made = s.addCircle(circle.center, r);
+            s.entity(made).construction = s.entity(curves[0]).construction;
+            s.copyStroke(curves[0], made);
+            refs.push_back(made);
+        }
+        return s.addConstraint(ConstraintType::Offset, std::move(refs), d, params);
+    }
+
+    if (curves.size() == 1 && closedCurve(s, curves[0])) {
+        // An ellipse or a closed spline: a closed spline through points at the distance, evenly
+        // round it (in its own direction), on the side `toward` is (or both).
+        const curve::Path path = curve::pathOf(s, curves[0]);
+        const double u = path.param(toward);
+        const double towardSide = cross(path.derivative(u), toward - path.at(u)) >= 0.0 ? 1.0 : -1.0;
+        const std::vector<double> sideSigns = bothSides ? std::vector<double>{1.0, -1.0} : std::vector<double>{towardSide};
+        if (s.entity(curves[0]).kind() == EntityKind::Ellipse) {
+            const curve::EllipseFrame f = curve::ellipseFrame(s, curves[0]);
+            const double inner = std::min(f.a, f.b) * std::min(f.a, f.b) / std::max(f.a, f.b);  // tightest curve
+            if (d >= inner && (bothSides || towardSide > 0)) {  // (left of counter-clockwise: inside)
+                throw SketchError("offset: the distance is larger than the ellipse's tightest curve");
+            }
+        }
+        std::vector<Id> refs{curves[0]};
+        const int pieces = offsetPieces(path);
+        for (double sideSign : sideSigns) {
+            Spline sp;
+            sp.closed = true;
+            for (int k = 0; k < pieces; ++k) {
+                const Vec2 q = offsetAt(path, path.end() * k / pieces, sideSign, d);
+                sp.points.push_back(s.addPoint(q.x, q.y));
+            }
+            const Id made = s.addSpline(sp);
             s.entity(made).construction = s.entity(curves[0]).construction;
             s.copyStroke(curves[0], made);
             refs.push_back(made);
@@ -678,6 +809,74 @@ Id offset(Sketch& s, const std::vector<Id>& curves, double d, Vec2 toward, bool 
         settings.push_back(double(capArcs.size()));
     }
     return s.addConstraint(ConstraintType::Offset, std::move(refs), d, settings);
+}
+
+namespace
+{
+// Each curvy offset: its source, the offset spline, and whether its ends are solved (open).
+template<typename F>
+void forEachCurvyOffset(const Sketch& s, F&& f)
+{
+    for (const auto& [id, c] : s.constraints()) {
+        if (c.type != ConstraintType::Offset) {
+            continue;
+        }
+        const OffsetRefs refs = offsetRefs(c);
+        for (const std::vector<Id>* side : {&refs.offsets, &refs.offsets2}) {
+            for (size_t i = 0; i < side->size() && i < refs.sources.size(); ++i) {
+                const Id source = refs.sources[i], made = (*side)[i];
+                if (s.hasEntity(source) && s.hasEntity(made) && curvy(s, source)
+                    && s.entity(made).kind() == EntityKind::Spline) {
+                    f(c, source, made);
+                }
+            }
+        }
+    }
+}
+}  // namespace
+
+std::set<Id> placedOffsetPoints(const Sketch& s)
+{
+    std::set<Id> out;
+    forEachCurvyOffset(s, [&](const Constraint&, Id, Id made) {
+        const Spline& sp = s.spline(made);
+        const size_t from = sp.closed ? 0 : 1, to = sp.closed ? sp.points.size() : sp.points.size() - 1;
+        for (size_t k = from; k < to; ++k) {
+            out.insert(sp.points[k]);
+        }
+    });
+    return out;
+}
+
+bool placeOffsetPoints(Sketch& s)
+{
+    bool moved = false;
+    std::vector<std::pair<Id, Vec2>> where;
+    forEachCurvyOffset(s, [&](const Constraint& c, Id source, Id made) {
+        const curve::Path path = curve::pathOf(s, source);
+        const Spline& sp = s.spline(made);
+        const size_t pieces = sp.closed ? sp.points.size() : sp.points.size() - 1;
+        if (pieces < 2) {
+            return;
+        }
+        // Which side it's on: as its middle point is now.
+        const size_t mid = sp.closed ? 0 : pieces / 2;
+        const double um = path.end() * static_cast<double>(mid) / static_cast<double>(pieces);
+        const double sign = cross(path.derivative(um), at(s, sp.points[mid]) - path.at(um)) >= 0.0 ? 1.0 : -1.0;
+        const size_t from = sp.closed ? 0 : 1, to = sp.closed ? sp.points.size() : sp.points.size() - 1;
+        for (size_t k = from; k < to; ++k) {
+            where.emplace_back(sp.points[k],
+                               offsetAt(path, path.end() * static_cast<double>(k) / static_cast<double>(pieces), sign, c.value));
+        }
+    });
+    for (const auto& [p, q] : where) {
+        Point& pt = s.point(p);
+        if (std::abs(pt.x - q.x) > 1e-12 || std::abs(pt.y - q.y) > 1e-12) {
+            pt = Point{q.x, q.y};
+            moved = true;
+        }
+    }
+    return moved;
 }
 
 // ---------------------------------------------------------------------------------------------

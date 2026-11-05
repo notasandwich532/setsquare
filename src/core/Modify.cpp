@@ -685,11 +685,125 @@ struct Extension
     Cut target;
     Geo g;
     double from = 0, to = 0;  // parameter range of the extension (for previews)
+    // A whole open spline: the point reached is added as its new first/last point instead.
+    bool append = false;
+    bool atEnd = true;
 };
+
+// Elliptical arcs carry on round their ellipse; pieces of splines along the whole spline; a whole
+// open spline smoothly past its end (its end pieces continued).
+std::optional<Extension> findCurvyExtension(const Sketch& s, Id curve, Vec2 near)
+{
+    const Entity& e = s.entity(curve);
+    const curve::Path own = curve::pathOf(s, curve);
+    const double span = own.end();
+    const bool atEnd = own.param(near) >= span / 2;
+    // The underlying path, and where on it this curve's 0 is; or, for a whole open spline, the
+    // continuation past the end that's being extended.
+    curve::Path full;
+    double offset = 0, round = 0;  // (round: the underlying curve's length in parameter, if closed)
+    bool append = false;
+    if (s.isElliptic(curve)) {
+        if (e.kind() == EntityKind::Ellipse) {
+            return std::nullopt;
+        }
+        full = curve::Path::ellipse(own.ellipseShape);
+        offset = own.start;
+        round = kTwoPi;
+    }
+    else {
+        const Spline& sp = s.spline(curve);
+        const double n = static_cast<double>(own.pieces.size());
+        if (!sp.isPiece()) {
+            if (sp.closed) {
+                return std::nullopt;
+            }
+            append = true;
+            constexpr double kReach = 3.0;  // (pieces' worth carried on)
+            full = atEnd ? curve::Path::spline(own.pieces, false, n, kReach)
+                         : curve::Path::spline(own.pieces, false, -kReach, kReach);
+        }
+        else {
+            full = curve::Path::spline(own.pieces, sp.closed, 0.0, n);
+            offset = own.start;
+            round = sp.closed ? n : 0.0;
+        }
+    }
+
+    std::optional<Extension> best;
+    for (const auto& [id, other] : s.entities()) {
+        if (!isCutter(s, id, curve)) {
+            continue;
+        }
+        const Geo og = geoOf(s, id);
+        for (const Vec2& p : curve::intersections(full, wholePath(og))) {
+            if (!og.contains(p)) {
+                continue;
+            }
+            double distance = 0;  // how far the end moves (in parameter)
+            double t = 0;         // (on this curve's own parameter, for the preview)
+            if (append) {
+                const double u = full.param(p);
+                distance = atEnd ? u : full.end() - u;
+                t = atEnd ? span + u : -(full.end() - u);
+            }
+            else {
+                const double uf = s.isElliptic(curve) ? full.ellipseShape.param(p) : full.param(p);
+                t = uf - offset;
+                if (round > 0) {
+                    t = std::fmod(t, round);
+                    if (t < 0) {
+                        t += round;
+                    }
+                }
+                const bool ahead = atEnd ? t > span + kParamEps && (round == 0 || t < round - kParamEps)
+                                         : (round > 0 ? t > span + kParamEps : t < -kParamEps);
+                if (!ahead) {
+                    continue;
+                }
+                distance = atEnd ? t - span : (round > 0 ? round - t : -t);
+                if (!atEnd && round > 0) {
+                    t -= round;
+                }
+            }
+            if (distance <= kParamEps || (best && distance >= best->target.param)) {
+                continue;
+            }
+            Extension x;
+            x.target = {distance, id, p};
+            x.g.kind = Geo::Kind::Other;
+            x.g.path = own;
+            x.append = append;
+            x.atEnd = atEnd;
+            x.from = atEnd ? span : t;
+            x.to = atEnd ? t : 0.0;
+            if (append) {
+                // (the preview runs along the continuation)
+                x.g.path = full;
+                x.from = atEnd ? 0.0 : full.param(p);
+                x.to = atEnd ? full.param(p) : full.end();
+            }
+            else if (s.isElliptic(curve)) {
+                x.end = atEnd ? s.ellipseArc(curve).end : s.ellipseArc(curve).start;
+            }
+            else {
+                const Spline& sp = s.spline(curve);
+                const Vec2 first = own.at(0);
+                const bool startFirst = dist(pos(s, sp.start), first) <= dist(pos(s, sp.end), first);
+                x.end = atEnd == startFirst ? sp.end : sp.start;
+            }
+            best = x;
+        }
+    }
+    return best;
+}
 
 std::optional<Extension> findExtension(const Sketch& s, Id curve, Vec2 near)
 {
     const Entity& e = s.entity(curve);
+    if (e.kind() == EntityKind::EllipseArc || e.kind() == EntityKind::Spline || e.kind() == EntityKind::Ellipse) {
+        return findCurvyExtension(s, curve, near);
+    }
     if (e.kind() != EntityKind::Line && e.kind() != EntityKind::Arc) {
         return std::nullopt;
     }
@@ -787,7 +901,23 @@ void extend(Sketch& s, Id curve, Vec2 near)
     if (!x) {
         throw SketchError("extend: nothing to extend to");
     }
-    s.rebindPoint(curve, x->end, pointOn(s, x->target.at, x->target.cutter, curve));
+    const Id reached = pointOn(s, x->target.at, x->target.cutter, curve);
+    if (x->append) {
+        // A whole spline: the point reached becomes its new first or last point.
+        Spline grown = s.spline(curve);
+        if (std::ranges::find(grown.points, reached) != grown.points.end()) {
+            throw SketchError("extend: the spline reaches that point already");
+        }
+        if (x->atEnd) {
+            grown.points.push_back(reached);
+        }
+        else {
+            grown.points.insert(grown.points.begin(), reached);
+        }
+        std::get<Spline>(s.entity(curve).geom) = std::move(grown);
+        return;
+    }
+    s.rebindPoint(curve, x->end, reached);
     s.removeIfUnused(x->end);
 }
 
@@ -841,18 +971,48 @@ Vec2 touch(const Geo& g, Vec2 c)
     return add(g.c, mul(unit(sub(c, g.c)), g.r));
 }
 
-void requireCornerCurves(const Sketch& s, Id a, Id b, bool linesOnly, const char* what)
+// Ellipses' and splines' corners are found numerically (lines' and arcs' by formula).
+bool curvyCurve(const Sketch& s, Id id)
+{
+    const EntityKind k = s.entity(id).kind();
+    return k == EntityKind::Ellipse || k == EntityKind::EllipseArc || k == EntityKind::Spline;
+}
+
+void requireCornerCurves(const Sketch& s, Id a, Id b, const char* what)
 {
     for (Id id : {a, b}) {
-        const EntityKind k = s.entity(id).kind();
-        const bool ok = k == EntityKind::Line || (!linesOnly && k == EntityKind::Arc);
-        if (!ok || s.isReference(id)) {
-            throw SketchError(std::string(what) + (linesOnly ? ": pick two lines" : ": pick two lines or arcs"));
+        const Entity& e = s.entity(id);
+        const auto* sp = std::get_if<Spline>(&e.geom);
+        if (e.kind() == EntityKind::Ellipse || (sp && sp->closed && !sp->isPiece())) {
+            throw SketchError(std::string(what) + ": a whole ellipse or closed spline has no ends to round off; trim it first");
+        }
+        if (e.kind() == EntityKind::Point || e.kind() == EntityKind::Circle || s.isReference(id)) {
+            throw SketchError(std::string(what) + ": pick two curves (lines, arcs, elliptical arcs or splines)");
         }
     }
     if (a == b) {
         throw SketchError(std::string(what) + ": pick two different curves");
     }
+}
+
+// A curve's path, carrying on past its ends (a line along its line, an arc round its circle, a
+// spline along itself): for finding corners and touching points.
+curve::Path cornerPath(const Sketch& s, Id id)
+{
+    const Geo g = geoOf(s, id);
+    return g.kind == Geo::Kind::Other ? g.path : wholePath(g);
+}
+
+Vec2 normalOf(const curve::Path& p, double u)
+{
+    return rot90(unit(p.derivative(u)));
+}
+
+// Which side of path p (in its direction) the point q is, near q.
+double sideOf(const curve::Path& p, Vec2 q)
+{
+    const double u = p.param(q);
+    return cross(p.derivative(u), sub(q, p.at(u))) >= 0 ? 1.0 : -1.0;
 }
 
 // A construction line that `line` lies along and that also ends at `end`: the original that
@@ -910,6 +1070,37 @@ Kept keptPiece(Sketch& s, Id curve, Vec2 t, Vec2 away, const char* what)
         s.addConstraint(CT::Coincident, {tp, curve});  // stays on the original line
         return {s.addLine(keep, tp), tp, false};
     }
+    if (const auto* ea = std::get_if<EllipseArc>(&s.entity(curve).geom)) {
+        // As an arc: counter-clockwise, on round the same ellipse.
+        const EllipseArc arc = *ea;
+        const double uT = g.path.ellipseShape.param(t) - g.path.start;
+        const double u = std::fmod(uT + 2 * kTwoPi, kTwoPi);
+        const bool ccw = dot(g.path.ellipseShape.derivative(g.path.ellipseShape.param(t)), away) > 0;
+        const Id tp = s.addPoint(t.x, t.y);
+        if (ccw && u < g.path.end() - kParamEps) {
+            return {s.addEllipseArc(arc.center, arc.major, arc.minor, tp, arc.end), tp, false};
+        }
+        if (!ccw && u > kParamEps && u <= g.path.end() + kParamEps) {
+            return {s.addEllipseArc(arc.center, arc.major, arc.minor, arc.start, tp), tp, false};
+        }
+        throw SketchError(std::string(what) + ": too big for this elliptical arc");
+    }
+    if (std::get_if<Spline>(&s.entity(curve).geom)) {
+        // The rest of the spline from t onwards (or back), as a piece of the same curve.
+        const curve::Path& p = g.path;
+        const double uT = p.param(t);
+        const bool forward = dot(p.derivative(uT), away) > 0;
+        if ((forward && uT >= p.end() - kParamEps) || (!forward && uT <= kParamEps)) {
+            throw SketchError(std::string(what) + ": too big for this spline");
+        }
+        const auto [first, last] = splineEnds(s, curve);
+        const Id tp = s.addPoint(t.x, t.y);
+        s.addConstraint(CT::Coincident, {tp, curve});  // stays on the original
+        Spline piece = s.spline(curve);
+        piece.start = forward ? tp : first;
+        piece.end = forward ? last : tp;
+        return {s.addSpline(piece), tp, false};
+    }
     // Arcs run counter-clockwise; carry on that way if that heads away from the corner.
     const Arc a = s.arc(curve);
     const double uT = g.param(t);
@@ -938,11 +1129,86 @@ void finishPieces(Sketch& s, Id a, const Kept& keptA, Id b, const Kept& keptB)
 }
 }  // namespace
 
+namespace
+{
+// A fillet's touching points on curves with no formula for them: a centre at the radius from
+// both, on the side of each where the other was picked (Newton's method from where they were
+// picked, then from where they cross).
+std::optional<std::array<Vec2, 3>> filletTouches(const Sketch& s, Id a, Vec2 nearA, Id b, Vec2 nearB, double r)
+{
+    const curve::Path pa = cornerPath(s, a), pb = cornerPath(s, b);
+    const double sa = sideOf(pa, nearB), sb = sideOf(pb, nearA);
+    auto residual = [&](double u, double v) {
+        return sub(add(pa.at(u), mul(normalOf(pa, u), sa * r)), add(pb.at(v), mul(normalOf(pb, v), sb * r)));
+    };
+    std::vector<std::pair<double, double>> starts{{pa.param(nearA), pb.param(nearB)}};
+    for (const Vec2& x : curve::intersections(pa, pb)) {
+        starts.push_back({pa.param(x), pb.param(x)});
+    }
+    double scale = 1.0;
+    for (const Vec2& q : {nearA, nearB}) {
+        scale = std::max({scale, std::abs(q.x), std::abs(q.y)});
+    }
+    std::optional<std::array<Vec2, 3>> best;
+    double bestScore = 1e300;
+    for (auto [u, v] : starts) {
+        bool ok = false;
+        for (int k = 0; k < 60; ++k) {
+            const Vec2 f = residual(u, v);
+            if (norm(f) <= 1e-11 * scale) {
+                ok = true;
+                break;
+            }
+            const double hu = 1e-7 * std::max(1.0, std::abs(u)), hv = 1e-7 * std::max(1.0, std::abs(v));
+            const Vec2 du = mul(sub(residual(u + hu, v), residual(u - hu, v)), 1 / (2 * hu));
+            const Vec2 dv = mul(sub(residual(u, v + hv), residual(u, v - hv)), 1 / (2 * hv));
+            const double det = du.x * dv.y - du.y * dv.x;
+            if (std::abs(det) < 1e-300) {
+                break;
+            }
+            u -= (f.x * dv.y - f.y * dv.x) / det;
+            v -= (du.x * f.y - du.y * f.x) / det;
+        }
+        if (!ok) {
+            continue;
+        }
+        const Vec2 ta = pa.at(u), tb = pb.at(v);
+        const double score = dist(ta, nearA) + dist(tb, nearB);
+        if (score < bestScore) {
+            bestScore = score;
+            best = std::array<Vec2, 3>{add(ta, mul(normalOf(pa, u), sa * r)), ta, tb};
+        }
+    }
+    return best;
+}
+}  // namespace
+
 Corner fillet(Sketch& s, Id a, Vec2 nearA, Id b, Vec2 nearB, double radius)
 {
-    requireCornerCurves(s, a, b, false, "fillet");
+    requireCornerCurves(s, a, b, "fillet");
     if (!(radius > kPosEps)) {
         throw SketchError("fillet: the radius must be positive");
+    }
+    if (curvyCurve(s, a) || curvyCurve(s, b)) {
+        const auto found = filletTouches(s, a, nearA, b, nearB, radius);
+        if (!found) {
+            throw SketchError("fillet: these curves can't be joined by an arc of that radius");
+        }
+        const auto [centre, touchA, touchB] = *found;
+        Corner out;
+        const Kept keptA = keptPiece(s, a, touchA, sub(touchA, touchB), "fillet");
+        const Kept keptB = keptPiece(s, b, touchB, sub(touchB, touchA), "fillet");
+        finishPieces(s, a, keptA, b, keptB);
+        out.pieces = {keptA.piece, keptB.piece};
+        const Id c = s.addPoint(centre.x, centre.y);
+        const double sweep = angleFrom(std::atan2(touchA.y - centre.y, touchA.x - centre.x),
+                                       std::atan2(touchB.y - centre.y, touchB.x - centre.x));
+        out.joint = sweep <= kPi ? s.addArc(c, keptA.point, keptB.point) : s.addArc(c, keptB.point, keptA.point);
+        s.copyStroke(a, out.joint);
+        s.addConstraint(CT::Tangent, {keptA.piece, out.joint});
+        s.addConstraint(CT::Tangent, {keptB.piece, out.joint});
+        out.dimensions.push_back(s.addConstraint(CT::Radius, {out.joint}, radius));
+        return out;
     }
     const Geo ga = geoOf(s, a), gb = geoOf(s, b);
 
@@ -995,9 +1261,123 @@ Corner fillet(Sketch& s, Id a, Vec2 nearA, Id b, Vec2 nearB, double radius)
     return out;
 }
 
+namespace
+{
+// The point of path p at straight-line distance d from x, going from x's parameter towards
+// `toward`'s.
+std::optional<Vec2> alongBy(const curve::Path& p, Vec2 x, Vec2 toward, double d)
+{
+    const double u0 = p.param(x), u1 = p.param(toward);
+    const double dir = u1 >= u0 ? 1.0 : -1.0;
+    const double step = std::max(p.end(), 1.0) / 400;
+    double lo = u0, hi = u0;
+    for (int k = 1; k <= 4000; ++k) {
+        hi = u0 + dir * step * k;
+        if (dist(p.at(hi), x) >= d) {
+            for (int i = 0; i < 80; ++i) {
+                const double mid = (lo + hi) / 2;
+                (dist(p.at(mid), x) < d ? lo : hi) = mid;
+            }
+            return p.at((lo + hi) / 2);
+        }
+        lo = hi;
+    }
+    return std::nullopt;
+}
+
+// Chamfering curves other than two lines: the corner where they meet (a shared end, or where
+// they cross, nearest the picks), then a point on each at the distances from it.
+Corner chamferCurves(Sketch& s, Id a, Vec2 nearA, Id b, Vec2 nearB, ChamferKind kind, double d1, double value2)
+{
+    const curve::Path pa = cornerPath(s, a), pb = cornerPath(s, b);
+    Id corner = kNoId;
+    Vec2 x{};
+    for (Id p : s.definingPoints(a)) {
+        const auto pbPoints = s.definingPoints(b);
+        if (std::ranges::find(pbPoints, p) != pbPoints.end() && pa.distance(pos(s, p)) < 1e-6 && pb.distance(pos(s, p)) < 1e-6) {
+            corner = p;
+            x = pos(s, p);
+        }
+    }
+    if (corner == kNoId) {
+        const std::vector<Vec2> xs = curve::intersections(pa, pb);
+        if (xs.empty()) {
+            throw SketchError("chamfer: these curves don't meet");
+        }
+        x = *std::ranges::min_element(xs, {}, [&](Vec2 q) { return dist(q, nearA) + dist(q, nearB); });
+    }
+    if (kind == ChamferKind::DistanceAngle && s.entity(a).kind() != EntityKind::Line) {
+        throw SketchError("chamfer: a distance-angle chamfer measures its angle from a line: pick the line first");
+    }
+    const auto c1 = alongBy(pa, x, nearA, d1);
+    if (!c1) {
+        throw SketchError("chamfer: too big for these curves");
+    }
+    double d2 = value2;
+    if (kind == ChamferKind::EqualDistance) {
+        d2 = d1;
+    }
+    else if (kind == ChamferKind::DistanceAngle) {
+        // The second point: where a line from c1 at the angle to the first curve meets the second.
+        const Vec2 u1 = unit(sub(*c1, x));
+        const double alpha = value2 * kPi / 180.0;
+        double best = 1e300;
+        std::optional<Vec2> hit;
+        for (double sign : {1.0, -1.0}) {
+            const double c = std::cos(kPi - alpha), sn = sign * std::sin(kPi - alpha);
+            const Vec2 dir{u1.x * c - u1.y * sn, u1.x * sn + u1.y * c};
+            const curve::Path ray = curve::Path::line(*c1, add(*c1, mul(dir, 1e4)));
+            for (const Vec2& q : curve::intersections(ray, pb)) {
+                if (dist(q, nearB) < best) {
+                    best = dist(q, nearB);
+                    hit = q;
+                }
+            }
+        }
+        if (!hit) {
+            throw SketchError("chamfer: that angle doesn't fit this corner");
+        }
+        d2 = dist(*hit, x);
+    }
+    if (!(d1 > kPosEps) || !(d2 > kPosEps)) {
+        throw SketchError("chamfer: distances must be positive");
+    }
+    const auto c2 = alongBy(pb, x, nearB, d2);
+    if (!c2) {
+        throw SketchError("chamfer: too big for these curves");
+    }
+    if (corner == kNoId) {
+        corner = s.addPoint(x.x, x.y);
+        s.addConstraint(CT::Coincident, {corner, a});
+        s.addConstraint(CT::Coincident, {corner, b});
+    }
+    Corner out;
+    const Kept keptA = keptPiece(s, a, *c1, sub(*c1, x), "chamfer");
+    const Kept keptB = keptPiece(s, b, *c2, sub(*c2, x), "chamfer");
+    finishPieces(s, a, keptA, b, keptB);
+    out.pieces = {keptA.piece, keptB.piece};
+    out.joint = s.addLine(keptA.point, keptB.point);
+    s.copyStroke(keptA.piece, out.joint);
+    out.dimensions.push_back(s.addConstraint(CT::Distance, {corner, keptA.point}, d1));
+    if (kind == ChamferKind::DistanceAngle) {
+        const Vec2 inside = mul(add(add(x, *c1), *c2), 1.0 / 3.0);
+        const Id angle = s.addConstraint(CT::Angle, {keptA.piece, out.joint}, value2);
+        s.setConstraintFlip(angle, angleFlipAt(s, keptA.piece, out.joint, inside));
+        out.dimensions.push_back(angle);
+    }
+    else {
+        out.dimensions.push_back(s.addConstraint(CT::Distance, {corner, keptB.point}, d2));
+    }
+    return out;
+}
+}  // namespace
+
 Corner chamfer(Sketch& s, Id a, Vec2 nearA, Id b, Vec2 nearB, ChamferKind kind, double value1, double value2)
 {
-    requireCornerCurves(s, a, b, true, "chamfer");
+    requireCornerCurves(s, a, b, "chamfer");
+    if (s.entity(a).kind() != EntityKind::Line || s.entity(b).kind() != EntityKind::Line) {
+        return chamferCurves(s, a, nearA, b, nearB, kind, value1, value2);
+    }
     const Geo ga = geoOf(s, a), gb = geoOf(s, b);
     const auto xs = rawIntersect(ga, gb);
     if (xs.empty()) {
@@ -1087,6 +1467,19 @@ bool cornerAt(const Sketch& s, Id point, Id& a, Vec2& nearA, Id& b, Vec2& nearB)
                 const ArcShape sh = arcShape(s, id);
                 const double mid = sh.startAngle + sh.sweep / 2;
                 found.push_back({id, {sh.center.x + sh.radius * std::cos(mid), sh.center.y + sh.radius * std::sin(mid)}});
+            }
+        }
+        else if (e.kind() == EntityKind::EllipseArc || e.kind() == EntityKind::Spline) {
+            // Elliptical arcs and splines (open ones): their ends, and likewise their middle.
+            const auto* sp = std::get_if<Spline>(&e.geom);
+            if (sp && sp->closed && !sp->isPiece()) {
+                continue;
+            }
+            const auto [first, last] = sp ? splineEnds(s, id)
+                                          : std::pair{s.ellipseArc(id).start, s.ellipseArc(id).end};
+            if (first == point || last == point) {
+                const curve::Path path = curve::pathOf(s, id);
+                found.push_back({id, path.at(path.end() / 2)});
             }
         }
     }

@@ -602,3 +602,25 @@ TEST_CASE("A command panel works out sums; Enter on half a sum doesn't go ahead"
     CHECK(f.view.toolKind() == ToolKind::Select);
     CHECK(f.pos(f.rect.corners[0]).x == Approx(19.0).margin(1e-6));
 }
+TEST_CASE("Offset an ellipse: a closed spline at the distance, following it", "[transform][offset][curves]")
+{
+    Fixture f;
+    Id e = kNoId;
+    f.doc.edit("ellipse", [&](Editor& ed) { e = ed.ellipse(ed.point(60, 0), ed.point(80, 0), ed.point(60, 10)); });
+    f.view.setTool(ToolKind::Offset);
+    f.click(60 + 20 * std::cos(0.8), 10 * std::sin(0.8) + 0.3);  // on the curve, from just outside
+    f.field<QDoubleSpinBox>("distance")->setValue(2);
+    f.ok();
+    const Id k = f.feature(ConstraintType::Offset);
+    REQUIRE(k != kNoId);
+    const Id ring = feature::offsetRefs(f.sketch().constraint(k)).offsets[0];
+    REQUIRE(f.sketch().entity(ring).kind() == EntityKind::Spline);
+    CHECK(f.sketch().spline(ring).closed);
+    // Outside: its top is 2 above the ellipse's.
+    double top = -1e9;
+    for (Id p : f.sketch().spline(ring).points) {
+        top = std::max(top, f.sketch().point(p).y);
+    }
+    CHECK(top == Approx(12.0).margin(1e-3));
+    CHECK(f.doc.solveResult().redundant.empty());
+}
