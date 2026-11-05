@@ -1,6 +1,9 @@
 // Strokes in the UI: the stroke brush, the colour bar and presentation view.
 
 #include "ColorBar.h"
+
+#include <QComboBox>
+#include <QLineEdit>
 #include "Document.h"
 #include "PythonHost.h"
 #include "SketchView.h"
@@ -110,6 +113,58 @@ TEST_CASE("Colour bar changes apply to the selection, part by part", "[style][co
     f.view.setSelection({f.rect.sides[0]});
     CHECK(f.view.paint().width == 1.0);
     CHECK(f.view.paint().color1 == Fixture::hex("#22b14c"));
+}
+
+TEST_CASE("Width None: a fill without an outline", "[style][colorbar]")
+{
+    Fixture f;
+    QComboBox* width = f.bar.findChild<QComboBox*>("strokeWidth");
+    REQUIRE(width);
+    REQUIRE(width->itemText(0) == "None");
+    f.bar.pickColor(Fixture::hex("#ffffff"));  // (nothing selected: just the paint)
+    f.doc.edit("fill", [&](Editor& ed) { ed.fill({25, 20}, Fixture::hex("#ff0000")); });
+    f.view.setSelection({f.rect.sides[0], f.rect.sides[1], f.rect.sides[2], f.rect.sides[3]});
+    width->setCurrentIndex(0);
+    emit width->activated(0);
+    for (Id side : f.rect.sides) {
+        REQUIRE(f.sketch().stroke(side) != nullptr);
+        CHECK(f.sketch().stroke(side)->none());
+    }
+    CHECK(f.recorded.last().contains("width=\"none\""));
+
+    // In presentation view the outline is gone: nothing white along the edge (the strokes are
+    // white), while a side given a real width shows one.
+    f.view.setSelection({f.rect.sides[1]});
+    width->setEditText("0.5");
+    emit width->lineEdit()->editingFinished();
+    f.view.setSelection({});
+    f.view.setHovered(kNoId);
+    f.view.setPresentation(true);
+    const QImage image = f.view.grab().toImage();
+    auto whiteNear = [&](double x, double y) {
+        const QPoint p = f.at(x, y);
+        for (int dx = -3; dx <= 3; ++dx) {
+            for (int dy = -3; dy <= 3; ++dy) {
+                const QColor c = image.pixelColor(p.x() + dx, p.y() + dy);
+                if (c.red() > 200 && c.green() > 200 && c.blue() > 200) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+    CHECK_FALSE(whiteNear(25, 10));  // bottom: none
+    CHECK(whiteNear(40, 20));        // right: 0.5 mm
+    f.view.setPresentation(false);
+
+    // Typing a width puts a line back; "none" typed takes it away again.
+    f.view.setSelection({f.rect.sides[0]});
+    width->setEditText("0.5");
+    emit width->lineEdit()->editingFinished();
+    CHECK(f.sketch().stroke(f.rect.sides[0])->width == 0.5);
+    width->setEditText("none");
+    emit width->lineEdit()->editingFinished();
+    CHECK(f.sketch().stroke(f.rect.sides[0])->none());
 }
 
 TEST_CASE("Presentation view hides the sketching aids and turns off for drawing tools", "[style][presentation]")

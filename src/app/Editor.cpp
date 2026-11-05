@@ -472,7 +472,8 @@ std::map<Id, Id> Editor::paste(const core::Sketch& fragment, core::Vec2 at)
 QString Editor::strokeArgs(const core::StrokeStyle& style)
 {
     return QStringLiteral("color=\"%1\", width=%2, dash=\"%3\"")
-        .arg(QString::fromStdString(style.color.hex()), number(style.width), QString::fromLatin1(core::toString(style.dash)));
+        .arg(QString::fromStdString(style.color.hex()), style.none() ? QStringLiteral("\"none\"") : number(style.width),
+             QString::fromLatin1(core::toString(style.dash)));
 }
 
 void Editor::setStroke(const std::vector<Id>& curves, const core::StrokeStyle& style)

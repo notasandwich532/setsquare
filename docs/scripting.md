@@ -191,7 +191,9 @@ plain sketch geometry.
 ```python
 s.stroke(curves, color="#ed1c24", width=0.5, dash="dashed")  # any of these; the rest stay as they are
 s.stroke(line, color=(0, 162, 232, 128))      # (r, g, b[, a]) works too
-s.stroke(circle, width=0)                      # 0 = hairline (always 1 pixel)
+s.stroke(circle, width=0)                      # 0 (or "hairline") = always 1 pixel
+s.stroke(outline, width="none")               # no line in the finished drawing (presentation, SVG):
+                                               # e.g. a fill without an outline; still bounds fills
 s.clear_stroke(curves)
 line.stroke                                    # {'color': '#ed1c24', 'width': 0.5, 'dash': 'dashed'} or None
 app.presentation = True                        # see the drawing as it will look

@@ -34,10 +34,15 @@ bool dashFromString(const std::string& name, Dash& out);
 // A curve's line in the drawing.
 struct StrokeStyle
 {
+    // `width` for no line at all: the curve isn't drawn in the finished drawing (presentation view,
+    // SVG), though it's still part of it (it bounds fills). E.g. a fill without an outline.
+    static constexpr double kNone = -1.0;
+
     Color color;
     double width = 0.35;  // millimetres on the drawing (it zooms with it); 0 = hairline, 1 pixel
     Dash dash = Dash::Solid;
 
+    bool none() const { return width < 0.0; }
     bool operator==(const StrokeStyle&) const = default;
 };
 

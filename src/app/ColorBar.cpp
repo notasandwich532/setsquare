@@ -37,10 +37,14 @@ const char* const kPalette[2][10] = {
 };
 
 // Line widths (mm): ISO pen sizes.
-const double kWidths[] = {0.0, 0.13, 0.18, 0.25, 0.35, 0.5, 0.7, 1.0, 1.4, 2.0};
+// (None first: no line at all; then the hairline, 1 pixel.)
+const double kWidths[] = {core::StrokeStyle::kNone, 0.0, 0.13, 0.18, 0.25, 0.35, 0.5, 0.7, 1.0, 1.4, 2.0};
 
 QString widthText(double w)
 {
+    if (w < 0.0) {
+        return QObject::tr("None");
+    }
     return w == 0.0 ? QObject::tr("Hairline") : QStringLiteral("%1 mm").arg(w);
 }
 
@@ -196,7 +200,7 @@ ColorBar::ColorBar(SketchView& view, QWidget* parent)
 
     m_width = new QComboBox(this);
     m_width->setObjectName(QStringLiteral("strokeWidth"));
-    m_width->setToolTip(tr("Line width on the drawing (type any size in mm)"));
+    m_width->setToolTip(tr("Line width on the drawing (type any size in mm). None: no line in the finished drawing, e.g. for a fill without an outline"));
     m_width->setEditable(true);
     m_width->setInsertPolicy(QComboBox::NoInsert);
     for (double w : kWidths) {
@@ -217,7 +221,11 @@ ColorBar::ColorBar(SketchView& view, QWidget* parent)
             w = 0.0;
             ok = true;
         }
-        if (ok && w >= 0.0) {
+        if (text.compare(tr("None"), Qt::CaseInsensitive) == 0) {
+            w = core::StrokeStyle::kNone;
+            ok = true;
+        }
+        if (ok && (w >= 0.0 || w == core::StrokeStyle::kNone)) {
             setWidth(w);
         }
     };

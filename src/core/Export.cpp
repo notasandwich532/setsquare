@@ -129,7 +129,9 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
                 }
             }
             else if (const StrokeStyle* style = s.stroke(id)) {
-                g.strokes.push_back({id, *style});
+                if (!style->none()) {  // (no line: nothing to draw)
+                    g.strokes.push_back({id, *style});
+                }
             }
             else if (o.undecorated) {
                 g.plain.push_back({id, o.plain});
@@ -497,7 +499,7 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
                 items.push_back({id, "CONSTRUCTION"});
             }
         }
-        else if (const StrokeStyle* style = s.stroke(id); style && o.styles) {
+        else if (const StrokeStyle* style = s.stroke(id); style && o.styles && !style->none()) {
             items.push_back({id, "STROKES", lineTypeFor(style->dash), nearestAci(style->color)});
         }
         else {

@@ -1303,7 +1303,7 @@ void Sketch::setStroke(Id curve, const StrokeStyle& style)
     if (!hasEntity(curve) || !isCurve(curve) || isReference(curve)) {
         throw SketchError("only lines, circles and arcs can have a stroke");
     }
-    if (!(style.width >= 0.0)) {
+    if (!(style.width >= 0.0) && style.width != StrokeStyle::kNone) {
         throw SketchError("stroke width can't be negative");
     }
     m_strokes[curve] = style;

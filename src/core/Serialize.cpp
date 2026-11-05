@@ -1,5 +1,6 @@
 #include "Serialize.h"
 
+#include <algorithm>
 #include <nlohmann/json.hpp>
 
 #include <string>
@@ -148,8 +149,9 @@ std::string toJson(const Sketch& sketch, bool compact, const std::vector<std::st
     if (!sketch.strokes().empty()) {
         json strokes = json::array();
         for (const auto& [curve, style] : sketch.strokes()) {
+            json width = style.none() ? json("none") : json(style.width);
             strokes.push_back(
-                {{"curve", curve}, {"color", style.color.hex()}, {"width", style.width}, {"dash", toString(style.dash)}});
+                {{"curve", curve}, {"color", style.color.hex()}, {"width", std::move(width)}, {"dash", toString(style.dash)}});
         }
         doc["strokes"] = std::move(strokes);
     }
@@ -303,7 +305,15 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
             if (!Color::fromHex(color, style.color)) {
                 throw SketchError("bad stroke colour '" + color + "'");
             }
-            style.width = j.value("width", style.width);
+            if (j.contains("width") && j.at("width").is_string()) {
+                if (j.at("width").get<std::string>() != "none") {
+                    throw SketchError("bad stroke width '" + j.at("width").get<std::string>() + "'");
+                }
+                style.width = StrokeStyle::kNone;
+            }
+            else {
+                style.width = std::max(0.0, j.value("width", style.width));
+            }
             const std::string dash = j.value("dash", std::string("solid"));
             if (!dashFromString(dash, style.dash)) {
                 throw SketchError("unknown line style '" + dash + "'");

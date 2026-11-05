@@ -654,7 +654,7 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
                 }
                 py::dict d;
                 d["color"] = style->color.hex();
-                d["width"] = style->width;
+                d["width"] = style->none() ? py::object(py::str("none")) : py::object(py::float_(style->width));
                 d["dash"] = std::string(core::toString(style->dash));
                 return d;
             }, "The curve's stroke as {'color', 'width', 'dash'}, or None (see Sketch.stroke).");
@@ -1273,8 +1273,23 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
                 if (!color.is_none()) {
                     style.color = colorArg(color);
                 }
-                if (!width.is_none()) {
+                if (py::isinstance<py::str>(width)) {
+                    const std::string name = width.cast<std::string>();
+                    if (name == "none") {
+                        style.width = core::StrokeStyle::kNone;
+                    }
+                    else if (name == "hairline") {
+                        style.width = 0.0;
+                    }
+                    else {
+                        throw py::value_error("width: a size in mm, \"hairline\" or \"none\"");
+                    }
+                }
+                else if (!width.is_none()) {
                     style.width = width.cast<double>();
+                    if (style.width < 0.0) {
+                        throw py::value_error("width: a size in mm, \"hairline\" or \"none\"");
+                    }
                 }
                 if (!dash.is_none()) {
                     const std::string name = dash.cast<std::string>();
@@ -1300,7 +1315,7 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
         }, py::arg("curves"), py::arg("color") = py::none(), py::arg("width") = py::none(),
            py::arg("dash") = py::none(),
            "Give curves a stroke: color as '#rrggbb' (or '#rrggbbaa', or an (r, g, b[, a]) tuple), width in mm "
-           "(0 = hairline), dash 'solid', 'dashed', 'dotted', 'dash_dot' or 'dash_dot_dot'.")
+           "(0 = hairline; \"none\": no line, e.g. for a fill without an outline), dash 'solid', 'dashed', 'dotted', 'dash_dot' or 'dash_dot_dot'.")
         .def("fill", [](const SketchH&, py::handle at, py::handle color) {
             const core::Vec2 where = vecArg(at);
             const core::Color c = colorArg(color);

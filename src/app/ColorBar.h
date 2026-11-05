@@ -30,7 +30,7 @@ public:
 
     // As a click on the palette would (for tests and scripts): sets Colour 1 or 2.
     void pickColor(const core::Color& color, bool second = false);
-    void setWidth(double width);   // 0 = hairline
+    void setWidth(double width);   // 0 = hairline, StrokeStyle::kNone = no line
     void setDash(core::Dash dash);
     void editColor(bool second);   // opens the colour editor
     void resetSelection();         // takes the strokes off the selected curves

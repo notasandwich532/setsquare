@@ -911,6 +911,10 @@ void SketchView::drawSketch(QPainter& painter) const
         if (!sketch.hasEntity(id) || sketch.entity(id).construction || hidden(id) || !inLayer(id)) {
             continue;
         }
+        if (style.none()) {
+            decorated.insert(id);  // no line: in presentation view, nothing shows
+            continue;
+        }
         QPen pen = strokePen(style);
         if (!m_presentation) {
             QColor faded = pen.color();
