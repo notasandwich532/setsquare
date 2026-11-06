@@ -130,7 +130,8 @@ void SketchView::setTool(ToolKind kind)
         m_tool->cancel();
         m_tool.reset();  // before the new one starts (a command tidies up as it goes)
     }
-    if (kind != ToolKind::Select && kind != ToolKind::StrokeBrush && kind != ToolKind::Fill && kind != ToolKind::Gradient) {
+    if (kind != ToolKind::Select && kind != ToolKind::StrokeBrush && kind != ToolKind::Fill && kind != ToolKind::Gradient
+        && kind != ToolKind::ResetFill) {
         setPresentation(false);  // editing geometry: see it (and its constraints) properly
     }
     showOptionsPanel(kind);
@@ -195,6 +196,7 @@ void SketchView::setTool(ToolKind kind)
         case ToolKind::StrokeBrush: m_tool = std::make_unique<StrokeBrushTool>(*this); break;
         case ToolKind::Fill: m_tool = std::make_unique<FillTool>(*this); break;
         case ToolKind::Gradient: m_tool = std::make_unique<GradientTool>(*this); break;
+        case ToolKind::ResetFill: m_tool = std::make_unique<ResetFillTool>(*this); break;
         case ToolKind::Project: m_tool = std::make_unique<ProjectTool>(*this); break;
         case ToolKind::Ellipse: m_tool = std::make_unique<EllipseTool>(*this); break;
         case ToolKind::SplineFit: m_tool = std::make_unique<SplineTool>(*this, core::SplineKind::Fit); break;
@@ -299,6 +301,17 @@ void SketchView::setGradient(const core::Gradient& gradient)
     m_gradient = gradient;
     refreshTool();
     emit gradientChanged();
+}
+
+void SketchView::editGradient(core::Id item)
+{
+    const core::Sketch& s = m_doc.sketch();
+    const GradientTool::Target target = s.hasFill(item)   ? GradientTool::Target::Fill
+                                        : s.hasText(item) ? GradientTool::Target::Text
+                                                          : GradientTool::Target::Stroke;
+    setTool(ToolKind::Gradient);
+    gradientTool()->setTarget(target);
+    gradientTool()->setCurrent(item);
 }
 
 GradientTool* SketchView::gradientTool() const

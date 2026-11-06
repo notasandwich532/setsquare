@@ -75,6 +75,12 @@ GradientTool::~GradientTool()
 {
     view().setHovered(kNoId);
     if (m_panel) {
+        // (It goes later: nothing may reach this tool through it meanwhile.)
+        QObject::disconnect(&doc(), nullptr, m_panel, nullptr);
+        QObject::disconnect(&view(), nullptr, m_panel, nullptr);
+        for (QObject* child : m_panel->findChildren<QObject*>()) {
+            child->disconnect(m_panel);
+        }
         m_panel->hide();
         m_panel->deleteLater();
     }
@@ -181,8 +187,6 @@ void GradientTool::activate()
     QToolButton* reverse = button(QObject::tr("Reverse"), "gradientReverse", QObject::tr("Run the colours the other way"));
     QToolButton* fromPaint = button(QObject::tr("Colours 1 → 2"), "gradientFromPaint",
                                     QObject::tr("Start again from Colour 1 to Colour 2"));
-    QToolButton* plain = button(QObject::tr("Plain colour"), "gradientRemove",
-                                QObject::tr("Take the gradient off the picked item (its plain colour again)"));
     buttonLayout->addStretch();
     m_panel->addWidget(QString(), buttons);
 
@@ -254,15 +258,6 @@ void GradientTool::activate()
     QObject::connect(fromPaint, &QToolButton::clicked, m_panel, [this, change] {
         const SketchView::Paint paint = view().paint();
         change([&](core::Gradient& g) { g.stops = {{0.0, paint.color1}, {1.0, paint.color2}}; });
-    });
-    QObject::connect(plain, &QToolButton::clicked, m_panel, [this] {
-        if (m_current == kNoId) {
-            emit view().message(QObject::tr("Pick an item with a gradient first (click it)"));
-            return;
-        }
-        Item item;
-        item.id = m_current;
-        removeGradient(item);
     });
     QObject::connect(m_panel, &CommandPanel::accepted, m_panel, [this] { view().setFocus(); });
     QObject::connect(m_panel, &CommandPanel::rejected, m_panel, [this] { view().setFocus(); });
@@ -499,6 +494,9 @@ void GradientTool::setCurrent(Id item)
     m_current = hasGradient(item) ? item : kNoId;
     if (m_current != kNoId) {
         view().setGradient(*gradientOf(m_current));
+        if (m_input >= 0 && view().gradient().complete()) {
+            setCurrentInput(-1);  // (it has its geometry: clicks edit, not pick)
+        }
     }
     syncPanel();
     refresh();
@@ -695,6 +693,7 @@ void GradientTool::doubleClick(const ToolEvent& e)
         return;
     }
     const Item item = itemAt(e.screen, e.world);
+
     if (item.id == kNoId || !view().gradient().complete()) {
         return;
     }

@@ -104,9 +104,10 @@ TEST_CASE("The gradient tool has its own panel", "[gradient]")
     }
     CHECK(f.input<GradientEditor>("gradientStops"));
     CHECK(f.input<QDoubleSpinBox>("stopPosition"));
-    for (const char* name : {"stopColor", "gradientReverse", "gradientFromPaint", "gradientRemove"}) {
+    for (const char* name : {"stopColor", "gradientReverse", "gradientFromPaint"}) {
         CHECK(f.input<QToolButton>(name));
     }
+    CHECK(!f.tool().panel()->findChild<QToolButton*>(QStringLiteral("gradientRemove")));  // (the Reset Fill tool does that)
     // Starts from Colour 1 to Colour 2, asking for its start point.
     const Gradient& g = f.view.gradient();
     REQUIRE(g.stops.size() == 2);
@@ -271,4 +272,55 @@ TEST_CASE("Gradient text", "[gradient]")
     CHECK(f.sketch().text(text).hasColor);
     CHECK(f.sketch().text(text).gradient == f.view.gradient());
     f.view.setPresentation(true);
+}
+
+TEST_CASE("Double-clicking a gradient edits it in the gradient tool", "[gradient]")
+{
+    Fixture f;
+    f.pickLinear();
+    f.click(25, 15);  // a gradient fill
+    const Id fill = f.onlyFill();
+    f.input<QComboBox>("gradientTarget")->setCurrentIndex(1);
+    f.click(25, 10);  // and a gradient stroke on the bottom side
+    const Id bottom = f.rect.sides[0];
+    REQUIRE(f.sketch().stroke(bottom));
+
+    // From the select tool: the fill.
+    f.view.setTool(ToolKind::Select);
+    QTest::mouseDClick(&f.view, Qt::LeftButton, {}, f.at(25, 15));
+    REQUIRE(f.view.toolKind() == ToolKind::Gradient);
+    CHECK(f.tool().target() == GradientTool::Target::Fill);
+    CHECK(f.tool().current() == fill);
+    CHECK(f.tool().currentInput() == -1);  // (it has its geometry: clicks edit it)
+    f.input<QComboBox>("gradientSpread")->setCurrentIndex(2);
+    CHECK(f.fillGradient().spread == GradientSpread::Repeat);
+
+    // The stroke.
+    f.view.setTool(ToolKind::Select);
+    QTest::mouseDClick(&f.view, Qt::LeftButton, {}, f.at(25, 10));
+    REQUIRE(f.view.toolKind() == ToolKind::Gradient);
+    CHECK(f.tool().target() == GradientTool::Target::Stroke);
+    CHECK(f.tool().current() == bottom);
+
+    // A plain fill isn't a gradient: nothing happens.
+    f.view.tryEdit("plain", [&](Editor& ed) { ed.setFillGradient(fill, {}); });
+    f.view.setTool(ToolKind::Select);
+    QTest::mouseDClick(&f.view, Qt::LeftButton, {}, f.at(25, 15));
+    CHECK(f.view.toolKind() == ToolKind::Select);
+}
+
+TEST_CASE("Reset fill takes a fill off", "[gradient][fill]")
+{
+    Fixture f;
+    f.pickLinear();
+    f.click(25, 15);
+    REQUIRE(f.sketch().fills().size() == 1);
+    f.view.setTool(ToolKind::ResetFill);
+    f.click(60, 60);  // nothing there
+    CHECK(f.sketch().fills().size() == 1);
+    f.click(25, 15);
+    CHECK(f.sketch().fills().empty());
+    CHECK(f.recorded.join('\n').contains(QStringLiteral("s.delete(")));
+    f.doc.undo();
+    CHECK(f.sketch().fills().size() == 1);
 }

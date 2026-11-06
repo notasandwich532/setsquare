@@ -71,6 +71,8 @@ public:
     // Patterns: their command, editing them; offsets: the inline distance editor.
     void editFeature(core::Id feature);
     void editText(core::Id text);  // the Text tool, on it
+    // The Gradient tool, editing an item's gradient (a fill, a curve's stroke or a text).
+    void editGradient(core::Id item);
 
     // What Paste places (set before switching to ToolKind::Paste).
     void setPasteFragment(core::Sketch fragment);

@@ -31,7 +31,7 @@ const ToolKind kModifyTools[] = {
     ToolKind::Move,         ToolKind::Scale,              ToolKind::Mirror,        ToolKind::RectangularPattern,
     ToolKind::CircularPattern, ToolKind::Offset,             ToolKind::Divide};
 
-const ToolKind kAppearanceTools[] = {ToolKind::StrokeBrush, ToolKind::Fill, ToolKind::Gradient};
+const ToolKind kAppearanceTools[] = {ToolKind::StrokeBrush, ToolKind::Fill, ToolKind::Gradient, ToolKind::ResetFill};
 
 QImage render(const QByteArray& svg, int size, const QColor& background)
 {

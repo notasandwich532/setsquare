@@ -7,6 +7,7 @@
 #include <core/Geometry.h>
 
 #include <QPainter>
+#include <QPainterPath>
 #include <QPolygonF>
 
 #include <cmath>
@@ -198,19 +199,85 @@ const core::regions::Arrangement& FillTool::arrangement()
     return *m_arrangement;
 }
 
-Id FillTool::fillAt(core::Vec2 p)
+Id topFillAt(const core::Sketch& sketch, const core::regions::Arrangement& arrangement, core::Vec2 p)
 {
     Id found = kNoId;
-    for (const auto& [id, f] : doc().sketch().fills()) {  // later ones are on top
-        if (f.layer != doc().sketch().activeLayer()) {
+    for (const auto& [id, f] : sketch.fills()) {  // later ones are on top
+        if (f.layer != sketch.activeLayer()) {
             continue;
         }
-        const auto region = core::regions::resolve(arrangement(), f);
+        const auto region = core::regions::resolve(arrangement, f);
         if (region && region->contains(p)) {
             found = id;
         }
     }
     return found;
+}
+
+Id FillTool::fillAt(core::Vec2 p)
+{
+    return topFillAt(doc().sketch(), arrangement(), p);
+}
+
+// =============================================================================================
+// Reset fill
+// =============================================================================================
+
+QString ResetFillTool::hint() const
+{
+    return QObject::tr("Reset fill: click a filled area to take its fill off (its colour or gradient)");
+}
+
+Id ResetFillTool::fillAt(core::Vec2 p)
+{
+    const Id layer = doc().sketch().activeLayer();
+    if (!m_arrangement || m_builtFor != doc().revision() || m_builtLayer != layer) {
+        m_arrangement = std::make_unique<core::regions::Arrangement>(doc().sketch(), layer);
+        m_builtFor = doc().revision();
+        m_builtLayer = layer;
+    }
+    return topFillAt(doc().sketch(), *m_arrangement, p);
+}
+
+void ResetFillTool::move(const ToolEvent& e)
+{
+    const Id hover = fillAt(e.world);
+    if (hover != m_hover) {
+        m_hover = hover;
+        refresh();
+    }
+}
+
+void ResetFillTool::press(const ToolEvent& e)
+{
+    if (e.button != Qt::LeftButton) {
+        return;
+    }
+    const Id fill = fillAt(e.world);
+    if (fill == kNoId) {
+        emit view().message(QObject::tr("There's no fill there"));
+        return;
+    }
+    view().tryEdit(QObject::tr("Reset fill"), [&](Editor& ed) { ed.remove(fill); });
+    m_hover = fillAt(e.world);  // (one underneath, if any)
+    refresh();
+}
+
+void ResetFillTool::paintOverlay(QPainter& painter)
+{
+    if (m_hover == kNoId || !doc().sketch().hasFill(m_hover) || !m_arrangement) {
+        return;
+    }
+    const auto region = core::regions::resolve(*m_arrangement, doc().sketch().fill(m_hover));
+    if (!region) {
+        return;
+    }
+    // The fill a click takes off: crossed out in red.
+    const QPainterPath path = view().regionPath(*region);
+    painter.fillPath(path, QBrush(QColor(0xff, 0x45, 0x45, 90), Qt::BDiagPattern));
+    painter.setPen(QPen(QColor(0xff, 0x45, 0x45), 1.5, Qt::DashLine));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawPath(path);
 }
 
 void FillTool::move(const ToolEvent& e)

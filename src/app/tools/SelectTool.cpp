@@ -3,6 +3,7 @@
 #include "../Document.h"
 #include "../SketchView.h"
 #include "../Theme.h"
+#include "StyleTools.h"
 
 #include <core/Dimensions.h>
 
@@ -164,6 +165,19 @@ void SelectTool::doubleClick(const ToolEvent& e)
     const core::Sketch& sketch = doc().sketch();
     if (sketch.hasText(hit)) {
         view().editText(hit);
+        return;
+    }
+    // A gradient: into the gradient tool, editing it (a curve's stroke, else the fill there).
+    if (sketch.hasEntity(hit) && sketch.stroke(hit) && sketch.stroke(hit)->gradient.active()) {
+        view().editGradient(hit);
+        return;
+    }
+    if (hit == core::kNoId) {
+        const core::regions::Arrangement arrangement(sketch, sketch.activeLayer());
+        const core::Id fill = topFillAt(sketch, arrangement, e.world);
+        if (fill != core::kNoId && sketch.fill(fill).gradient.active()) {
+            view().editGradient(fill);
+        }
         return;
     }
     if (!sketch.hasConstraint(hit)) {

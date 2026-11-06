@@ -76,6 +76,7 @@ enum class ToolKind
     SplineFit,
     SplineControl,
     Gradient,
+    ResetFill,
 };
 
 struct ToolEvent

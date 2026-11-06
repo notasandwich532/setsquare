@@ -1080,6 +1080,23 @@ def icon_gradient():
     return finish("gradient")
 
 
+def icon_reset_fill():
+    """A filled square, and a cross: its fill taken off."""
+    start()
+    r = stroke(s.rectangle((2.5, 8), (15.5, 21)), GREY, width=1.5)
+    pin(r[0].p1, 2.5, 8)
+    s.distance(r[0], value=13)
+    s.distance(r[1], value=13)
+    s.solve()
+    s.fill(at=(9, 14), color=AMBER)
+    line((16, 2), (22, 8), RED)
+    line((16, 8), (22, 2), RED)
+    for x, y in ((16, 2), (22, 8), (16, 8), (22, 2)):
+        p = [q for q in s.points if abs(q.x - x) < 1e-9 and abs(q.y - y) < 1e-9]
+        pin(p[0], x, y)
+    return finish("reset_fill")
+
+
 def icon_presentation():
     """An eye: the drawing as it will be seen."""
     start()
@@ -1111,7 +1128,7 @@ ICONS.update({
               icon_slot_overall, icon_slot_center_point, icon_arc_slot, icon_arc_slot_3point, icon_trim,
               icon_trim_construction, icon_extend, icon_break, icon_fillet, icon_chamfer_equal, icon_chamfer_2distances,
               icon_chamfer_angle, icon_move, icon_scale, icon_mirror, icon_rectangular_pattern, icon_circular_pattern,
-              icon_offset, icon_divide, icon_stroke_brush, icon_fill, icon_gradient, icon_presentation]
+              icon_offset, icon_divide, icon_stroke_brush, icon_fill, icon_gradient, icon_reset_fill, icon_presentation]
 })
 
 wanted = sys.argv[1:] or list(ICONS)

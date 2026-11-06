@@ -63,3 +63,27 @@ private:
     std::optional<core::regions::Region> m_hover;
     std::vector<core::Vec2> m_looseEnds;  // shown after a click that found no area
 };
+
+// Reset fill: click a filled area to take its fill off (colour or gradient), leaving the area
+// empty again. Hover to see which fill a click will take.
+class ResetFillTool : public Tool
+{
+public:
+    using Tool::Tool;
+
+    QString hint() const override;
+    void press(const ToolEvent& e) override;
+    void move(const ToolEvent& e) override;
+    void paintOverlay(QPainter& painter) override;
+
+private:
+    core::Id fillAt(core::Vec2 p);  // the topmost fill of the active layer covering p
+
+    std::unique_ptr<core::regions::Arrangement> m_arrangement;
+    quint64 m_builtFor = ~quint64(0);
+    core::Id m_builtLayer = core::kNoId;
+    core::Id m_hover = core::kNoId;
+};
+
+// The topmost fill of the active layer covering `p` in an arrangement of it (kNoId if none).
+core::Id topFillAt(const core::Sketch& sketch, const core::regions::Arrangement& arrangement, core::Vec2 p);
