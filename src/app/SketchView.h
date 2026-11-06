@@ -173,9 +173,9 @@ public:
 
     // How a stroke style is drawn at the current zoom.
     QPen strokePen(const core::StrokeStyle& style) const;
-    // A gradient placed on an item's box (see core/Gradient.h), on screen; `alpha` scales its
-    // opacity (faded while sketching).
-    QBrush gradientBrush(const core::Gradient& g, const core::gradient::Frame& frame, double alpha = 1.0) const;
+    // A gradient placed by its sketch geometry (see core/Gradient.h), on screen; `alpha` scales
+    // its opacity (faded while sketching). Its average colour while its geometry is missing.
+    QBrush gradientBrush(const core::Gradient& g, double alpha = 1.0) const;
     // A closed area (with its holes) on screen, for filling.
     QPainterPath regionPath(const core::regions::Region& region) const;
     QPainterPath textPath(const core::Text& text) const;  // its letters, on screen

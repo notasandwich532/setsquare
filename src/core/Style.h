@@ -10,6 +10,10 @@
 namespace core
 {
 
+// Entities and constraints share one id space; 0 is never a valid id.
+using Id = std::uint32_t;
+inline constexpr Id kNoId = 0;
+
 struct Color
 {
     std::uint8_t r = 0, g = 0, b = 0, a = 255;
@@ -60,25 +64,24 @@ struct GradientStop
     bool operator==(const GradientStop&) const = default;
 };
 
-// A gradient's colours and where it lies. Positions are fractions of the painted item's box
-// (0,0 its bottom-left corner, 1,1 its top-right; text's box turns with it), so the gradient
-// follows the item as the geometry moves and resizes. See core/Gradient.h for placing it.
+// A gradient's colours, and the sketch geometry that places it: it follows that geometry as it
+// moves (constraints, dimensions, drags). Linear: from one point (offset 0) to another (offset 1).
+// Radial: offset 1 on a circle, arc, ellipse or elliptical arc (an ellipse's gradient is
+// elliptical too), offset 0 at its centre or at a focal point. See core/Gradient.h for placing it.
 struct Gradient
 {
     GradientKind kind = GradientKind::Linear;
     GradientSpread spread = GradientSpread::Pad;
     std::vector<GradientStop> stops;  // in offset order; none: no gradient (a plain colour)
 
-    // Linear: from start (offset 0) to end (offset 1). Radial: start is the centre, end a point
-    // on the circle where offset 1 is.
-    double x1 = 0.0, y1 = 0.5, x2 = 1.0, y2 = 0.5;
-    // Radial only: where offset 0 is, from the centre (a highlight off to one side), in box
-    // fractions; and the width across over the radius (other than 1: an ellipse, its first
-    // axis towards `end`).
-    double fx = 0.0, fy = 0.0;
-    double aspect = 1.0;
+    Id start = kNoId;  // linear: points
+    Id end = kNoId;
+    Id shape = kNoId;  // radial: the curve
+    Id focal = kNoId;  // radial: a point (optional; else the centre)
 
     bool active() const { return !stops.empty(); }
+    bool complete() const;        // has the geometry its kind needs
+    std::vector<Id> refs() const;  // the geometry it uses (of its kind)
     Color colorAt(double offset) const;  // between the stops (no spread applied)
     Color average() const;               // one colour standing for it (e.g. for DXF)
     void sortStops();

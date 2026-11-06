@@ -1066,7 +1066,7 @@ def icon_gradient():
     s.distance(r[0], value=18)
     s.distance(r[1], value=16)
     s.solve()
-    s.fill(at=(12, 12), color=drawapp.linear([AMBER, AMBER + "00"]))
+    s.fill(at=(12, 12), color=drawapp.linear([AMBER, AMBER + "00"], start=r[0].p1, end=r[0].p2))
     # The handle: a dot at each end (the first in the paint) and the line between them.
     handle = line((8.3, 12), (15.7, 12), GREY, width=1)
     pin(handle.p1, 8.3, 12)

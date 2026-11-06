@@ -14,22 +14,24 @@ namespace
 {
 constexpr const char* kFormat = "drawing_app.sketch";
 
-// {"type": "linear", "spread": "pad", "stops": [[0, "#ff0000"], [1, "#0000ff80"]],
-//  "start": [x, y], "end": [x, y], radial only: "focal": [dx, dy], "aspect": a}
+// {"type": "linear", "spread": "pad", "stops": [[0, "#ff0000"], [1, "#0000ff80"]], "start": id, "end": id}
+// or {"type": "radial", ..., "shape": id, "focal": id (optional)}: the sketch geometry placing it.
 json gradientToJson(const Gradient& g)
 {
     json stops = json::array();
     for (const GradientStop& s : g.stops) {
         stops.push_back({s.offset, s.color.hex()});
     }
-    json j{{"type", toString(g.kind)},
-           {"spread", toString(g.spread)},
-           {"stops", std::move(stops)},
-           {"start", {g.x1, g.y1}},
-           {"end", {g.x2, g.y2}}};
-    if (g.kind == GradientKind::Radial) {
-        j["focal"] = {g.fx, g.fy};
-        j["aspect"] = g.aspect;
+    json j{{"type", toString(g.kind)}, {"spread", toString(g.spread)}, {"stops", std::move(stops)}};
+    if (g.kind == GradientKind::Linear) {
+        j["start"] = g.start;
+        j["end"] = g.end;
+    }
+    else {
+        j["shape"] = g.shape;
+        if (g.focal != kNoId) {
+            j["focal"] = g.focal;
+        }
     }
     return j;
 }
@@ -50,19 +52,15 @@ Gradient gradientFromJson(const json& j)
         g.stops.push_back(stop);
     }
     g.sortStops();
-    auto pair = [&](const char* key, double& x, double& y) {
-        if (j.contains(key)) {
-            x = j.at(key).at(0).get<double>();
-            y = j.at(key).at(1).get<double>();
-        }
+    auto id = [&](const char* key) {
+        return j.contains(key) && j.at(key).is_number_integer() ? j.at(key).get<Id>() : kNoId;
     };
-    pair("start", g.x1, g.y1);
-    pair("end", g.x2, g.y2);
-    pair("focal", g.fx, g.fy);
-    g.aspect = j.value("aspect", 1.0);
+    g.start = id("start");
+    g.end = id("end");
+    g.shape = id("shape");
+    g.focal = id("focal");
     return g;
 }
-
 json entityToJson(const Entity& e)
 {
     json j{{"id", e.id}, {"type", toString(e.kind())}};

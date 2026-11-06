@@ -1,5 +1,7 @@
 #include "Transform.h"
 
+#include "Gradient.h"
+
 #include <algorithm>
 #include <cmath>
 #include <numbers>
@@ -188,6 +190,19 @@ std::map<Id, Id> copy(const Sketch& from, Sketch& to, const std::vector<Id>& sel
         }
     }
 
+    // Gradients use the copied geometry where it was copied too (else the original's, within a
+    // sketch; none when pasted from elsewhere).
+    const bool sameSketch = &from == &to;
+    for (Id id : ids) {
+        const auto made = map.find(id);
+        if (made == map.end() || !to.stroke(made->second) || !to.stroke(made->second)->gradient.active()) {
+            continue;
+        }
+        StrokeStyle style = *to.stroke(made->second);
+        gradient::remap(style.gradient, map, sameSketch);
+        to.setStroke(made->second, style);
+    }
+
     // Fills whose whole outline was copied come too.
     std::vector<Fill> fills;
     for (const auto& [id, f] : from.fills()) {
@@ -203,6 +218,7 @@ std::map<Id, Id> copy(const Sketch& from, Sketch& to, const std::vector<Id>& sel
         }
         const Vec2 seed = t.apply({f.seed.x, f.seed.y});
         f.seed = Point{seed.x, seed.y};
+        gradient::remap(f.gradient, map, sameSketch);
         map[was] = to.addFill(f);
     }
 

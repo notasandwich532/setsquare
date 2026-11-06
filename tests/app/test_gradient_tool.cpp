@@ -1,5 +1,5 @@
-// The gradient tool: its panel, painting fills, strokes and text, dragging out a direction,
-// handles, and the colour bar feeding its stops.
+// The gradient tool: its panel, the sketch geometry that places a gradient (picked on the canvas),
+// painting fills, strokes and text, and the colour bar feeding its stops.
 
 #include "ColorBar.h"
 #include "CommandPanel.h"
@@ -17,6 +17,7 @@
 
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QSpinBox>
 #include <QTest>
 #include <QToolButton>
 
@@ -33,6 +34,9 @@ struct Fixture
     ColorBar bar{view};
     QStringList recorded;
     build::Rectangle rect;
+    Id corner = kNoId, opposite = kNoId;  // (10, 10) and (40, 30)
+    Id circle = kNoId;                    // construction, round (25, 20), radius 8
+    Id focal = kNoId;                     // a lone point at (22, 23)
 
     Fixture()
     {
@@ -40,9 +44,13 @@ struct Fixture
         view.show();
         view.resetView();
         QObject::connect(&doc, &Document::recorded, [this](const QString& py) { recorded << py; });
-        doc.modify("rectangle", [&](Sketch& s) {
-            const Id a = s.addPoint(10, 10);
-            rect = build::rectangle(s, a, s.addPoint(40, 30));
+        doc.modify("geometry", [&](Sketch& s) {
+            corner = s.addPoint(10, 10);
+            opposite = s.addPoint(40, 30);
+            rect = build::rectangle(s, corner, opposite);
+            circle = s.addCircle(s.addPoint(25, 20), 8);
+            s.entity(circle).construction = true;
+            focal = s.addPoint(22, 23);
         });
         view.setTool(ToolKind::Gradient);
     }
@@ -55,20 +63,16 @@ struct Fixture
         move(x, y);
         QTest::mouseClick(&view, Qt::LeftButton, mods, at(x, y));
     }
-    void drag(double x0, double y0, double x1, double y1)
-    {
-        move(x0, y0);
-        QTest::mousePress(&view, Qt::LeftButton, {}, at(x0, y0));
-        for (int i = 1; i <= 6; ++i) {
-            move(x0 + (x1 - x0) * i / 6.0, y0 + (y1 - y0) * i / 6.0);
-        }
-        QTest::mouseRelease(&view, Qt::LeftButton, {}, at(x1, y1));
-    }
     GradientTool& tool() const { return *view.gradientTool(); }
     template <typename T>
     T* input(const char* name) const
     {
         return tool().panel()->findChild<T*>(QLatin1String(name));
+    }
+    void pickLinear()  // start and end: the rectangle's corners
+    {
+        click(10, 10);
+        click(40, 30);
     }
     const Sketch& sketch() const { return doc.sketch(); }
     Id onlyFill() const
@@ -95,16 +99,20 @@ TEST_CASE("The gradient tool has its own panel", "[gradient]")
     for (const char* name : {"gradientTarget", "gradientType", "gradientSpread"}) {
         CHECK(f.input<QComboBox>(name));
     }
+    for (const char* name : {"gradientStart", "gradientEnd", "gradientShape", "gradientFocal"}) {
+        CHECK(f.input<SelectionButton>(name));
+    }
     CHECK(f.input<GradientEditor>("gradientStops"));
     CHECK(f.input<QDoubleSpinBox>("stopPosition"));
     for (const char* name : {"stopColor", "gradientReverse", "gradientFromPaint", "gradientRemove"}) {
         CHECK(f.input<QToolButton>(name));
     }
-    // Starts from Colour 1 to Colour 2.
+    // Starts from Colour 1 to Colour 2, asking for its start point.
     const Gradient& g = f.view.gradient();
     REQUIRE(g.stops.size() == 2);
     CHECK(g.stops[0].color == f.view.paint().color1);
     CHECK(g.stops[1].color == f.view.paint().color2);
+    CHECK(f.tool().currentInput() == GradientTool::Start);
     // Its panel goes with it.
     QPointer<CommandPanel> panel = f.tool().panel();
     f.view.setTool(ToolKind::Select);
@@ -112,37 +120,59 @@ TEST_CASE("The gradient tool has its own panel", "[gradient]")
     CHECK(!panel);
 }
 
-TEST_CASE("Clicking an area fills it with the gradient; dragging sets where it runs", "[gradient]")
+TEST_CASE("A gradient is placed by sketch geometry picked on the canvas", "[gradient]")
 {
     Fixture f;
-    f.click(25, 20);
+    // Nothing to paint with until it has its points.
+    f.tool().setCurrentInput(-1);
+    f.click(25, 15);
+    CHECK(f.sketch().fills().empty());
+    CHECK(f.tool().currentInput() == GradientTool::Start);
+
+    // Only points are taken for the ends (clicking a side's middle takes nothing).
+    f.click(25, 10);
+    CHECK(f.view.gradient().start == kNoId);
+    f.pickLinear();
+    CHECK(f.view.gradient().start == f.corner);
+    CHECK(f.view.gradient().end == f.opposite);
+    CHECK(f.tool().currentInput() == -1);
+
+    f.click(25, 15);
     const Id fill = f.onlyFill();
-    CHECK(f.fillGradient() == f.view.gradient());
+    CHECK(f.fillGradient().start == f.corner);
+    CHECK(f.fillGradient().end == f.opposite);
     CHECK(f.tool().current() == fill);
-    CHECK(f.recorded.join('\n').contains("s.fill(at="));
-    CHECK(f.recorded.join('\n').contains("color=drawapp.linear("));
+    const QString script = f.recorded.join('\n');
+    CHECK(script.contains(QStringLiteral("color=drawapp.linear([(0, ")));
+    CHECK(script.contains(QStringLiteral("start=p%1, end=p%2").arg(f.corner).arg(f.opposite)));
 
-    // Drag across it, bottom to top: the gradient runs that way, in fractions of its box.
-    f.drag(25, 12, 25, 28);
-    const Gradient& g = f.fillGradient();
-    CHECK(g.x1 == Approx(0.5).margin(0.02));
-    CHECK(g.y1 == Approx(0.1).margin(0.02));
-    CHECK(g.x2 == Approx(0.5).margin(0.02));
-    CHECK(g.y2 == Approx(0.9).margin(0.02));
-    CHECK(f.sketch().fills().size() == 1);
+    // It follows the geometry.
+    f.doc.beginDrag({f.opposite});
+    f.doc.dragTo(30, 0);
+    f.doc.endDrag();
+    CHECK(gradient::place(f.fillGradient(), f.sketch())->end.x == Approx(70));
 
-    // Radial from the panel: the picked fill changes with it.
+    // Radial: the circle, then (optional) a focal point; the picked fill changes with each.
     f.input<QComboBox>("gradientType")->setCurrentIndex(1);
+    CHECK(f.tool().currentInput() == GradientTool::Shape);
+    CHECK(f.fillGradient().kind == GradientKind::Linear);  // (not until it has its circle)
+    f.click(25, 12);  // on the circle (not the point at its centre)
     CHECK(f.fillGradient().kind == GradientKind::Radial);
-    f.input<QComboBox>("gradientSpread")->setCurrentIndex(2);
-    CHECK(f.fillGradient().spread == GradientSpread::Repeat);
+    CHECK(f.fillGradient().shape == f.circle);
+    CHECK(f.tool().currentInput() == -1);
+    f.input<SelectionButton>("gradientFocal")->click();
+    CHECK(f.tool().currentInput() == GradientTool::Focal);
+    f.click(22, 23);
+    CHECK(f.fillGradient().focal == f.focal);
+    const auto placed = gradient::place(f.fillGradient(), f.sketch());
+    REQUIRE(placed);
+    CHECK(placed->center.x == Approx(25));
+    CHECK(placed->radius == Approx(8));
+    CHECK(placed->focal.x == Approx(22));
 
-    // Its edge handle: drag it out to the right side.
-    const gradient::Placed before = gradient::place(f.fillGradient(), gradient::Frame::around({{10, 10}, {40, 30}}));
-    f.drag(before.end.x, before.end.y, 40, before.center.y);
-    const gradient::Placed after = gradient::place(f.fillGradient(), gradient::Frame::around({{10, 10}, {40, 30}}));
-    CHECK(after.center.x == Approx(before.center.x).margin(0.01));
-    CHECK(after.radius == Approx(40 - before.center.x).margin(0.3));
+    // The focal point's ×: back to the centre.
+    emit f.input<SelectionButton>("gradientFocal")->cleared();
+    CHECK(f.fillGradient().focal == kNoId);
 
     // Undo puts the fill back, and the panel follows.
     const Gradient radial = f.fillGradient();
@@ -151,7 +181,7 @@ TEST_CASE("Clicking an area fills it with the gradient; dragging sets where it r
     CHECK(f.view.gradient() == f.fillGradient());
 
     // Ctrl+click takes it off: its plain colour again.
-    f.click(25, 20, Qt::ControlModifier);
+    f.click(25, 15, Qt::ControlModifier);
     CHECK(!f.fillGradient().active());
     CHECK(f.tool().current() == kNoId);
 }
@@ -159,7 +189,8 @@ TEST_CASE("Clicking an area fills it with the gradient; dragging sets where it r
 TEST_CASE("Gradient stops: the bar, the palette and the selected stop", "[gradient]")
 {
     Fixture f;
-    f.click(25, 20);
+    f.pickLinear();
+    f.click(25, 15);
     GradientEditor* stops = f.input<GradientEditor>("gradientStops");
     REQUIRE(stops);
 
@@ -182,7 +213,7 @@ TEST_CASE("Gradient stops: the bar, the palette and the selected stop", "[gradie
     CHECK(stops->selectedStop() == 2);
 
     // Opacity, and removing (but never below two).
-    f.tool().panel()->findChild<QSpinBox*>(QStringLiteral("stopOpacity"))->setValue(50);
+    f.input<QSpinBox>("stopOpacity")->setValue(50);
     CHECK(int(f.fillGradient().stops[2].color.a) == 128);
     CHECK(stops->removeStop(0));
     CHECK(!stops->removeStop(0));
@@ -194,9 +225,10 @@ TEST_CASE("Gradient stops: the bar, the palette and the selected stop", "[gradie
     CHECK(f.fillGradient().stops.front().color == g.stops.back().color);
 }
 
-TEST_CASE("Gradient strokes: a curve, then its whole chain sharing one box", "[gradient]")
+TEST_CASE("Gradient strokes: a curve, then its whole chain", "[gradient]")
 {
     Fixture f;
+    f.pickLinear();
     f.input<QComboBox>("gradientTarget")->setCurrentIndex(1);
     CHECK(f.tool().target() == GradientTool::Target::Stroke);
     f.click(25, 10);  // bottom side
@@ -207,12 +239,6 @@ TEST_CASE("Gradient strokes: a curve, then its whole chain sharing one box", "[g
 
     QTest::mouseDClick(&f.view, Qt::LeftButton, {}, f.at(10, 20));  // the left side: all four
     CHECK(f.sketch().strokes().size() == 4);
-    const auto frames = gradient::strokeFrames(f.sketch());
-    REQUIRE(frames.size() == 4);
-    for (const auto& [id, frame] : frames) {
-        CHECK(frame.u.x == Approx(frames.begin()->second.u.x));
-        CHECK(frame.origin.y == Approx(frames.begin()->second.origin.y));
-    }
     CHECK(gradient::strokeGroup(f.sketch(), bottom).size() == 4);
 
     // A change made in the panel goes to the whole outline.
@@ -236,6 +262,7 @@ TEST_CASE("Gradient text", "[gradient]")
         t.anchor = anchor;
         text = ed.text(t);
     });
+    f.pickLinear();
     f.input<QComboBox>("gradientTarget")->setCurrentIndex(2);
     const QPolygonF box = f.view.textBox(f.sketch().text(text));
     const QPointF middle = box.boundingRect().center();

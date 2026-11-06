@@ -102,10 +102,8 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
     {
         Color color;
         Gradient gradient;
-        gradient::Frame frame;
         std::vector<std::vector<Vec2>> contours;
     };
-    const std::map<Id, gradient::Frame> strokeFrames = gradient::strokeFrames(s);
     struct Group
     {
         const Layer* layer = nullptr;
@@ -159,8 +157,7 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
             if (t.shape.empty() || !s.hasEntity(t.anchor) || s.layerOf(id) != it->id) {
                 continue;
             }
-            TextArea area{t.hasColor ? t.color : o.plain.color, t.hasColor ? t.gradient : Gradient{},
-                          gradient::textFrame(s, t), {}};
+            TextArea area{t.hasColor ? t.color : o.plain.color, t.hasColor ? t.gradient : Gradient{}, {}};
             for (const auto& contour : t.shape) {
                 std::vector<Vec2> pts;
                 for (const Point& p : contour) {
@@ -238,8 +235,7 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
     int gradients = 0;
     // A gradient's definition, in drawing units (userSpaceOnUse: it doesn't depend on how SVG
     // would measure the shape's box); returns the paint that refers to it.
-    auto gradientPaint = [&](const Gradient& g, const gradient::Frame& frame) {
-        const gradient::Placed p = gradient::place(g, frame);
+    auto gradientPaint = [&](const gradient::Placed& p) {
         const std::string id = "gradient" + std::to_string(++gradients);
         std::string d;
         if (p.kind == GradientKind::Linear) {
@@ -279,9 +275,13 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
         return "url(#" + id + ")";
     };
     // fill="..." or stroke="..." (with its opacity), in a colour or a gradient.
-    auto paintAttrs = [&](const char* what, const Color& color, const Gradient& g, const gradient::Frame& frame) {
+    // (A gradient whose geometry is gone: its average colour.)
+    auto paintAttrs = [&](const char* what, Color color, const Gradient& g) {
         if (g.active()) {
-            return std::string(" ") + what + "=\"" + gradientPaint(g, frame) + '"';
+            if (const auto placed = gradient::place(g, s)) {
+                return std::string(" ") + what + "=\"" + gradientPaint(*placed) + '"';
+            }
+            color = g.average();
         }
         std::string a = std::string(" ") + what + "=\"" + rgb(color) + '"';
         if (color.a != 255) {
@@ -303,11 +303,7 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
     auto writeCurve = [&](const Item& item) {
         const StrokeStyle& st = item.style;
         const double w = st.width > 0.0 ? st.width : kHairline;
-        const auto frame = strokeFrames.find(item.curve);
-        std::string style = " fill=\"none\""
-                            + paintAttrs("stroke", st.color,
-                                         frame != strokeFrames.end() ? st.gradient : Gradient{},
-                                         frame != strokeFrames.end() ? frame->second : gradient::Frame{});
+        std::string style = " fill=\"none\"" + paintAttrs("stroke", st.color, st.gradient);
         style += " stroke-width=\"" + num(w) + '"';
         const std::vector<double> dashes = dashPattern(st.dash);
         if (dashes.empty()) {
@@ -399,7 +395,7 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
                 }
                 d.pop_back();
                 out << indent << "  <path d=\"" << d << '"'
-                    << paintAttrs("fill", a.color, a.gradient, gradient::fillFrame(a.region))
+                    << paintAttrs("fill", a.color, a.gradient)
                     << " fill-rule=\"evenodd\" stroke=\"none\"/>\n";
             }
             close();
@@ -419,7 +415,7 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
                     continue;
                 }
                 d.pop_back();
-                out << indent << "  <path d=\"" << d << '"' << paintAttrs("fill", t.color, t.gradient, t.frame)
+                out << indent << "  <path d=\"" << d << '"' << paintAttrs("fill", t.color, t.gradient)
                     << " fill-rule=\"nonzero\" stroke=\"none\"/>\n";
             }
             close();

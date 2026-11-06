@@ -90,15 +90,20 @@ public:
     // Appearance: give curves a stroke (colour, width, line style), or take it away.
     void setStroke(const std::vector<core::Id>& curves, const core::StrokeStyle& style);
     void clearStroke(const std::vector<core::Id>& curves);
-    static QString strokeArgs(const core::StrokeStyle& style);  // "color=\"#ff8800\", width=0.5, dash=\"dashed\""
+    // "color=\"#ff8800\", width=0.5, dash=\"dashed\""
+    static QString strokeArgs(const core::Sketch& sketch, const core::StrokeStyle& style);
     // Fills the closed area around `at` (a fill already there is recoloured). Throws
     // SketchError, saying how many loose ends there are, if `at` isn't enclosed. With a gradient
     // (active), the area is filled with that instead of the colour.
     core::Id fill(core::Vec2 at, const core::Color& color, const core::Gradient& gradient = {});
+    // Paint edits check their gradient (its geometry of the right kinds, in the layer; see
+    // core::gradient::check, which throws). One whose geometry has been deleted is dropped: the
+    // item goes back to a plain colour, the gradient's average.
+    void settleGradient(core::Gradient& gradient, core::Color& color, core::Id layer) const;
     // A fill's gradient (an inactive one: back to its plain colour).
     void setFillGradient(core::Id fill, const core::Gradient& gradient);
-    // e.g. drawapp.linear([(0, "#ff0000"), (1, "#0000ff")], start=(0, 0.5), end=(1, 0.5))
-    static QString gradientCall(const core::Gradient& gradient);
+    // e.g. drawapp.linear([(0, "#ff0000"), (1, "#0000ff")], start=p6, end=p7)
+    static QString gradientCall(const core::Sketch& sketch, const core::Gradient& gradient);
 
     // Sublayers (named uniquely; scripts refer to them by name). A new one becomes the active one.
     core::Id addSublayer(const QString& name);

@@ -1,33 +1,42 @@
-# Gradients on fills, strokes and text: made, read back, saved, exported, following the geometry,
-# and recorded as scripts that make them again.
+# Gradients on fills, strokes and text, placed by sketch geometry: made, read back, following the
+# geometry, saved, exported, copied, and recorded as scripts that make them again.
 import os
 import re
 import tempfile
-from math import isclose
 
 RED, BLUE = "#ff0000", "#0000ff"
 
+sides = s.rectangle((0, 0), (40, 20))
+a, b = sides[0].p1, sides[1].p2  # (0, 0) and (40, 20)
+ring = s.circle((20, 10), 8)
+ring.construction = True
+spot = s.point(16, 12)
+
 # --- making them ----------------------------------------------------------------------------
-g = drawapp.linear([RED, BLUE])
+g = drawapp.linear([RED, BLUE], start=a, end=b)
 assert g.type == "linear" and g.stops == [(0.0, RED), (1.0, BLUE)], g.stops
-assert g.start == (0.0, 0.5) and g.end == (1.0, 0.5) and g.spread == "pad"
+assert g.start == a and g.end == b and g.shape is None and g.spread == "pad"
 assert g.color_at(0.5) == "#800080", g.color_at(0.5)
-three = drawapp.linear([(0, RED), (0.25, "#00ff0080"), (1, BLUE)], start=(0, 0), end=(0, 1), spread="reflect")
-assert three.stops[1] == (0.25, "#00ff0080") and three.spread == "reflect"
-r = drawapp.radial([RED, BLUE], center=(0.5, 0.5), edge=(1, 0.5), focal=(0.6, 0.5), aspect=0.5, spread="repeat")
-assert r.type == "radial" and r.focal == (0.6, 0.5) and r.aspect == 0.5
-assert eval(repr(r)) == r and eval(repr(three)) == three  # repr is the call that makes it
-for bad in (lambda: drawapp.linear([]), lambda: drawapp.linear([(2, RED)]),
-            lambda: drawapp.linear([RED], spread="sideways"), lambda: drawapp.radial([RED], aspect=0)):
+r = drawapp.radial([RED, (0.25, "#00ff0080"), BLUE], shape=ring, focal=spot, spread="reflect")
+assert r.type == "radial" and r.shape == ring and r.focal == spot and r.stops[1] == (0.25, "#00ff0080")
+assert eval(repr(r).replace(f"c{ring.id}", "ring").replace(f"p{spot.id}", "spot")) == r
+# Only sketch geometry places them: points for the ends and focal point, a round curve for radial.
+for bad in (lambda: drawapp.linear([RED, BLUE], start=(0, 0), end=b),
+            lambda: drawapp.linear([RED, BLUE], start=a, end=a),
+            lambda: drawapp.linear([RED, BLUE], start=sides[0], end=b),
+            lambda: drawapp.radial([RED, BLUE], shape=sides[0]),
+            lambda: drawapp.radial([RED, BLUE], shape=ring, focal=ring),
+            lambda: drawapp.linear([], start=a, end=b),
+            lambda: drawapp.linear([(2, RED)], start=a, end=b),
+            lambda: drawapp.linear([RED], start=a, end=b, spread="sideways")):
     try:
         bad()
         raise AssertionError("accepted a bad gradient")
-    except ValueError:
+    except (ValueError, TypeError):
         pass
 
 # --- fills ------------------------------------------------------------------------------------
-sides = s.rectangle((0, 0), (40, 20))
-f = s.fill(at=(5, 5), color=g)
+f = s.fill(at=(2, 2), color=g)
 assert f.gradient == g, f.gradient
 assert "gradient" in repr(f)
 f.color = "#22b14c"  # a plain colour replaces it
@@ -38,65 +47,99 @@ f.gradient = None
 assert f.gradient is None and f.color == "#22b14c"
 f.gradient = g
 
-svg = doc.to_svg(undecorated=False, margin=0)
-# Drawing units, y down: left to right across the 40 x 20 box at mid-height.
-m = re.search(r'<linearGradient id="(gradient\d+)" gradientUnits="userSpaceOnUse" x1="([^"]+)" y1="([^"]+)" '
-              r'x2="([^"]+)" y2="([^"]+)"', svg)
-assert m, svg[:800]
-assert [float(v) for v in m.groups()[1:]] == [0, 10, 40, 10], m.groups()
-assert f'fill="url(#{m.group(1)})"' in svg
-assert '<stop offset="0" stop-color="#ff0000"/>' in svg and '<stop offset="1" stop-color="#0000ff"/>' in svg
-assert svg.index("<defs>") < svg.index("<g ")  # defined before use
 
-# It follows the geometry: wider box, wider gradient.
+def svg():
+    return doc.to_svg(undecorated=False, margin=0)
+
+
+def linear_coords(text):
+    m = re.search(r'<linearGradient id="(gradient\d+)" gradientUnits="userSpaceOnUse" x1="([^"]+)" y1="([^"]+)" '
+                  r'x2="([^"]+)" y2="([^"]+)"', text)
+    assert m, text[:800]
+    return m.group(1), [float(v) for v in m.groups()[1:]]
+
+
+# In the SVG, from point to point (y down).
+gid, coords = linear_coords(svg())
+assert coords == [0, 20, 40, 0], coords
+assert f'fill="url(#{gid})"' in svg()
+assert '<stop offset="0" stop-color="#ff0000"/>' in svg() and '<stop offset="1" stop-color="#0000ff"/>' in svg()
+assert svg().index("<defs>") < svg().index("<g ")  # defined before use
+
+# It follows its points.
 s.distance(sides[0], value=80)
 s.solve()
-m = re.search(r'<linearGradient[^>]* x1="([^"]+)" y1="[^"]+" x2="([^"]+)"', doc.to_svg(undecorated=False, margin=0))
-assert [float(v) for v in m.groups()] == [0, 80], m.groups()
+assert linear_coords(svg())[1] == [0, 20, 80, 0], linear_coords(svg())
 
-# Radial: a circle round the origin moved into place, turned and squashed, its focal point off
-# the centre; and the spread.
-f.gradient = drawapp.radial([RED, BLUE], center=(0.5, 0.5), edge=(0.5, 1), focal=(0.5, 0.6), aspect=2,
-                            spread="reflect")
-svg = doc.to_svg(undecorated=False, margin=0)
-m = re.search(r'<radialGradient [^>]*>', svg)
-assert m, svg[:800]
-tag = m.group(0)
-assert 'cx="0" cy="0" r="10"' in tag, tag  # half the 20 high box
-assert 'fx="2" fy="0"' in tag, tag          # a tenth of the height along the first axis (up)
-assert 'gradientTransform="translate(40 10) rotate(-90) scale(1 2)"' in tag, tag
+# Radial: round the circle's centre, out to it, the focal point off the centre, and the spread.
+f.gradient = r
+tag = re.search(r'<radialGradient [^>]*>', svg()).group(0)
+assert 'cx="0" cy="0" r="8"' in tag, tag
+assert 'fx="-4" fy="-2"' in tag, tag  # the focal point from the centre, y down
+x = round(ring.center.x - a.x, 4)  # (the SVG starts at the drawing's left edge: a, after it grew both ways)
+assert f'gradientTransform="translate({x:g} 10)"' in tag, (tag, x)
 assert 'spreadMethod="reflect"' in tag
+s.radius(ring, value=9)
+s.solve()
+assert 'r="9"' in svg()
+
+# An ellipse makes it elliptical: turned and squashed to the ellipse.
+oval = s.ellipse((60, 10), (66, 10), 3)
+oval.construction = True
+f.gradient = drawapp.radial([RED, BLUE], shape=oval)
+tag = re.search(r'<radialGradient [^>]*>', svg()).group(0)
+assert 'r="6"' in tag and "scale(1 0.5)" in tag and "fx=" not in tag, tag
 
 # See-through stops keep their opacity.
-f.gradient = drawapp.linear([RED, BLUE + "40"])
-assert 'stop-color="#0000ff" stop-opacity="0.251"' in doc.to_svg(), doc.to_svg()[:900]
+f.gradient = drawapp.linear([RED, BLUE + "40"], start=a, end=b)
+assert 'stop-color="#0000ff" stop-opacity="0.251"' in svg()
 
-# --- strokes: a stroked outline shares one gradient across its box ---------------------------
+# Its geometry deleted: painted in its average colour; the next edit makes that its plain colour.
+gone = s.point(5, 5)
+f.gradient = drawapp.linear([RED, BLUE], start=a, end=gone)
+saved = f.gradient
+s.delete(gone)
+assert "<linearGradient" not in svg() and 'fill="#800080"' in svg(), svg()[:900]
+f.gradient = saved  # (any edit)
+assert f.gradient is None and f.color == "#800080"
+
+# Only geometry in the same layer.
+base = s.layer
+other = s.add_layer("Other")
+far = s.point(1, 1)
+s.layer = base
+try:
+    f.gradient = drawapp.linear([RED, BLUE], start=a, end=far)
+    raise AssertionError("used another layer's point")
+except ValueError as e:
+    assert "layer" in str(e), e
+s.delete_layer(other)
+
+# --- strokes ----------------------------------------------------------------------------------------
 s.stroke(sides, color=g, width=1)
 assert sides[0].stroke["gradient"] == g and sides[0].stroke["width"] == 1
-svg = doc.to_svg(undecorated=False, margin=0)
-strokes = svg[svg.index('inkscape:label="Strokes"'):]
-ids = re.findall(r'stroke="url\(#(gradient\d+)\)"', strokes)
-assert len(ids) == 4, strokes[:600]
-coords = {re.search(rf'<linearGradient id="{i}"[^>]*>', svg).group(0).split('gradientUnits="userSpaceOnUse"')[1]
-          for i in ids}
-assert len(coords) == 1, coords  # the same box for all four sides: the whole outline's (with the line's width)
-assert 'x1="0" y1="10.5" x2="81" y2="10.5"' in coords.pop()
-s.stroke(sides[0], color="#000000")  # a plain colour on one side takes it out of the group
+strokes = svg()[svg().index('inkscape:label="Strokes"'):]
+assert len(re.findall(r'stroke="url\(#gradient\d+\)"', strokes)) == 4, strokes[:600]
+s.stroke(sides[0], color="#000000")  # a plain colour replaces it
 assert "gradient" not in sides[0].stroke
-
-# DXF: one colour for a line, so the gradient's average.
-dxf = doc.to_dxf()
-assert "STROKES" in dxf
+assert "STROKES" in doc.to_dxf()  # (DXF: the average colour)
 
 # --- text ---------------------------------------------------------------------------------------
 t = s.text("Hi", at=(0, 40), height=10, color=r)
 assert t.gradient == r and t.color is not None
 s.edit_text(t, color="#123456")
 assert t.gradient is None and t.color == "#123456"
-s.edit_text(t, color=three)
-assert t.gradient == three
-assert doc.to_svg().count("<linearGradient") >= 2
+s.edit_text(t, color=g)
+assert t.gradient == g
+
+# --- copies use the copied geometry where it was copied too --------------------------------------
+s.stroke(sides, color=g, width=1)
+copies = s.copy(sides, dy=-50)
+copied = copies[1].stroke["gradient"]
+assert copied.start not in (a, b) and copied.end not in (a, b), copied
+assert abs(copied.start.y - (a.y - 50)) < 1e-9
+partial = s.copy([ring], dx=100)  # the stroke's points weren't copied: still the originals
+f.gradient = drawapp.radial([RED, BLUE], shape=ring)
 
 # --- saved and opened -------------------------------------------------------------------------
 before = (f.gradient, sides[1].stroke, t.gradient)
@@ -109,12 +152,15 @@ assert (f.gradient, sides[1].stroke, t.gradient) == before  # (by id: the same i
 # --- recorded: the history makes it again ---------------------------------------------------------
 doc.new()
 sides = s.rectangle((0, 0), (40, 20))
-f = s.fill(at=(5, 5), color=r)
-s.stroke(sides[:2], color=three, width=0.5)
-f.gradient = g
+ring = s.circle((20, 10), 8)
+ring.construction = True
+f = s.fill(at=(2, 2), color=drawapp.radial([RED, BLUE], shape=ring, focal=sides[0].p1))
+s.stroke(sides[:2], color=drawapp.linear([RED, BLUE], start=sides[0].p1, end=sides[1].p2), width=0.5)
+f.gradient = drawapp.linear([BLUE, RED], start=sides[0].p1, end=sides[0].p2, spread="repeat")
 lines = doc.history
-assert any("drawapp.radial(" in l for l in lines) and any(".gradient = drawapp.linear(" in l for l in lines), lines
-svg = doc.to_svg()
+assert any("drawapp.radial(" in l and "shape=c" in l for l in lines), lines
+assert any(".gradient = drawapp.linear(" in l for l in lines), lines
+expected = svg()
 
 
 class Names(dict):  # as the console has them: p12, l7, f20 ... are the items with those ids
@@ -127,5 +173,5 @@ class Names(dict):  # as the console has them: p12, l7, f20 ... are the items wi
 
 doc.new()
 exec("\n".join(lines), globals(), Names())
-assert doc.to_svg() == svg
+assert svg() == expected
 print("ok")

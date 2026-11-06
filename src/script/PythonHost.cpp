@@ -15,6 +15,7 @@
 #include <core/Dimensions.h>
 #include <core/Export.h>
 #include <core/Features.h>
+#include <core/Gradient.h>
 #include <core/Regions.h>
 #include <core/Modify.h>
 #include <core/Serialize.h>
@@ -579,70 +580,68 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
     };
     py::class_<core::Gradient>(m, "Gradient",
                                "A gradient, for any colour of a fill, stroke or text: made by drawapp.linear or "
-                               "drawapp.radial. Positions are fractions of the painted item's box: (0, 0) its "
-                               "bottom-left corner, (1, 1) its top-right.")
+                               "drawapp.radial, placed by sketch geometry (it follows it).")
         .def_property_readonly("type", [](const core::Gradient& g) { return std::string(core::toString(g.kind)); },
                                "'linear' or 'radial'.")
         .def_property_readonly("stops", stopsOut, "[(offset, '#rrggbb'), ...]")
         .def_property_readonly("spread", [](const core::Gradient& g) { return std::string(core::toString(g.spread)); },
                                "Past the ends: 'pad', 'reflect' or 'repeat'.")
-        .def_property_readonly("start", [](const core::Gradient& g) { return py::make_tuple(g.x1, g.y1); },
-                               "Linear: where it starts (radial: the centre).")
-        .def_property_readonly("end", [](const core::Gradient& g) { return py::make_tuple(g.x2, g.y2); },
-                               "Linear: where it ends (radial: the edge point).")
-        .def_property_readonly("center", [](const core::Gradient& g) { return py::make_tuple(g.x1, g.y1); })
-        .def_property_readonly("edge", [](const core::Gradient& g) { return py::make_tuple(g.x2, g.y2); })
-        .def_property_readonly("focal", [](const core::Gradient& g) { return py::make_tuple(g.x1 + g.fx, g.y1 + g.fy); },
-                               "Radial: where its first colour is (the centre unless moved).")
-        .def_property_readonly("aspect", [](const core::Gradient& g) { return g.aspect; },
-                               "Radial: its width across over its radius (1: a circle).")
+        .def_property_readonly("start", [](const core::Gradient& g) { return g.start ? wrap(g.start) : py::none(); },
+                               "Linear: the point where it starts.")
+        .def_property_readonly("end", [](const core::Gradient& g) { return g.end ? wrap(g.end) : py::none(); },
+                               "Linear: the point where it ends.")
+        .def_property_readonly("shape", [](const core::Gradient& g) { return g.shape ? wrap(g.shape) : py::none(); },
+                               "Radial: the circle, arc, ellipse or elliptical arc where its last colour is.")
+        .def_property_readonly("focal", [](const core::Gradient& g) { return g.focal ? wrap(g.focal) : py::none(); },
+                               "Radial: the point where its first colour is (None: the shape's centre).")
         .def("color_at", [](const core::Gradient& g, double offset) { return g.colorAt(offset).hex(); },
              py::arg("offset"), "The colour at an offset along it.")
         .def(py::self == py::self)
-        .def("__repr__", [](const core::Gradient& g) { return Editor::gradientCall(g).toStdString(); });
+        .def("__repr__", [](const core::Gradient& g) { return Editor::gradientCall(sketch(), g).toStdString(); });
 
-    m.def("linear", [](py::handle stops, py::handle start, py::handle end, const std::string& spread) {
+    // The geometry a gradient is placed by: items of the sketch.
+    auto gradientPoint = [](py::handle h, const char* what) {
+        const Id id = idOf(h);
+        if (!core::gradient::canBePoint(sketch(), id)) {
+            throw py::value_error(std::string(what) + ": a point of the sketch");
+        }
+        return id;
+    };
+    m.def("linear", [gradientPoint](py::handle stops, py::handle start, py::handle end, const std::string& spread) {
         core::Gradient g;
         g.kind = core::GradientKind::Linear;
         g.stops = stopsArg(stops);
         g.sortStops();
-        std::tie(g.x1, g.y1) = pairOf(start, "start");
-        std::tie(g.x2, g.y2) = pairOf(end, "end");
+        g.start = gradientPoint(start, "start");
+        g.end = gradientPoint(end, "end");
+        if (g.start == g.end) {
+            throw py::value_error("start and end must be different points");
+        }
         g.spread = spreadArg(spread);
         return g;
-    }, py::arg("stops"), py::arg("start") = py::make_tuple(0.0, 0.5), py::arg("end") = py::make_tuple(1.0, 0.5),
-       py::arg("spread") = "pad",
-       "A linear gradient for color= (fills, strokes, text). stops: colours spread evenly, or (offset, colour) "
-       "pairs with offsets 0..1. start/end: where it runs, as fractions of the item's box ((0, 0) bottom-left, "
-       "(1, 1) top-right); the default runs left to right. spread: past the ends, 'pad' (the end colours carry "
-       "on), 'reflect' or 'repeat'.");
-    m.def("radial", [](py::handle stops, py::handle center, py::handle edge, py::object focal, double aspect,
-                       const std::string& spread) {
+    }, py::arg("stops"), py::arg("start"), py::arg("end"), py::arg("spread") = "pad",
+       "A linear gradient for color= (fills, strokes, text), running from the point `start` to the point `end` "
+       "(points of the sketch: it follows them as they move). stops: colours spread evenly, or (offset, colour) "
+       "pairs with offsets 0..1. spread: past the ends, 'pad' (the end colours carry on), 'reflect' or 'repeat'.");
+    m.def("radial", [gradientPoint](py::handle stops, py::handle shape, py::object focal, const std::string& spread) {
         core::Gradient g;
         g.kind = core::GradientKind::Radial;
         g.stops = stopsArg(stops);
         g.sortStops();
-        std::tie(g.x1, g.y1) = pairOf(center, "center");
-        std::tie(g.x2, g.y2) = pairOf(edge, "edge");
+        g.shape = idOf(shape);
+        if (!core::gradient::canBeShape(sketch(), g.shape)) {
+            throw py::value_error("shape: a circle, arc, ellipse or elliptical arc of the sketch");
+        }
         if (!focal.is_none()) {
-            const auto [fx, fy] = pairOf(focal, "focal");
-            g.fx = fx - g.x1;
-            g.fy = fy - g.y1;
+            g.focal = gradientPoint(focal, "focal");
         }
-        if (aspect <= 0.0) {
-            throw py::value_error("aspect must be more than 0");
-        }
-        g.aspect = aspect;
         g.spread = spreadArg(spread);
         return g;
-    }, py::arg("stops"), py::arg("center") = py::make_tuple(0.5, 0.5), py::arg("edge") = py::make_tuple(1.0, 0.5),
-       py::arg("focal") = py::none(), py::arg("aspect") = 1.0, py::arg("spread") = "pad",
-       "A radial gradient for color= (fills, strokes, text): the first stop at the centre, the last at the "
-       "circle through `edge` (positions as fractions of the item's box, (0, 0) bottom-left, (1, 1) top-right; "
-       "the circle stays round in the drawing). focal: where the first colour is, if not the centre (a highlight "
-       "to one side). aspect: its width across over its radius, for an ellipse (its first axis towards edge). "
-       "spread: past the edge, 'pad', 'reflect' or 'repeat'.");
-
+    }, py::arg("stops"), py::arg("shape"), py::arg("focal") = py::none(), py::arg("spread") = "pad",
+       "A radial gradient for color= (fills, strokes, text): its first stop at the centre of `shape` (a circle, "
+       "arc, ellipse or elliptical arc of the sketch; an ellipse makes it elliptical), its last on the shape, and "
+       "it follows the shape as it moves and resizes. focal: a point to put the first colour at instead of the "
+       "centre (a highlight to one side). spread: past the shape, 'pad', 'reflect' or 'repeat'.");
     // --- items -------------------------------------------------------------------------------
 
     py::class_<Item>(m, "Item", "Base of all sketch items.")

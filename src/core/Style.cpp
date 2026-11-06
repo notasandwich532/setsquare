@@ -110,6 +110,22 @@ Color mix(const Color& a, const Color& b, double t)
 }
 }  // namespace
 
+bool Gradient::complete() const
+{
+    return kind == GradientKind::Linear ? start != kNoId && end != kNoId : shape != kNoId;
+}
+
+std::vector<Id> Gradient::refs() const
+{
+    std::vector<Id> out;
+    for (Id id : kind == GradientKind::Linear ? std::vector<Id>{start, end} : std::vector<Id>{shape, focal}) {
+        if (id != kNoId) {
+            out.push_back(id);
+        }
+    }
+    return out;
+}
+
 Color Gradient::colorAt(double offset) const
 {
     if (stops.empty()) {

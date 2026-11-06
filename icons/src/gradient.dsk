@@ -431,15 +431,9 @@
       ],
       "color": "#f2b33d80",
       "gradient": {
-        "end": [
-          1.0,
-          0.5
-        ],
+        "end": 21,
         "spread": "pad",
-        "start": [
-          0.0,
-          0.5
-        ],
+        "start": 19,
         "stops": [
           [
             0.0,
@@ -499,7 +493,7 @@
     "d32 = s.vertical_distance(s.origin, p19, value=4)",
     "d33 = s.distance(l23, value=18)",
     "d34 = s.distance(l24, value=16)",
-    "f35 = s.fill(at=(12, 12), color=drawapp.linear([(0, \"#f2b33d\"), (1, \"#f2b33d00\")], start=(0, 0.5), end=(1, 0.5)))",
+    "f35 = s.fill(at=(12, 12), color=drawapp.linear([(0, \"#f2b33d\"), (1, \"#f2b33d00\")], start=p19, end=p21))",
     "p36 = s.point(8.3, 12)\np37 = s.point(15.7, 12)\nl38 = s.line(p36, p37)",
     "s.stroke([l38], color=\"#d5d9de\", width=1, dash=\"solid\")",
     "d39 = s.horizontal_distance(s.origin, p36, value=8.3)",

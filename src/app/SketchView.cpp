@@ -410,9 +410,17 @@ QPen SketchView::strokePen(const core::StrokeStyle& style) const
     return pen;
 }
 
-QBrush SketchView::gradientBrush(const core::Gradient& g, const core::gradient::Frame& frame, double alpha) const
+QBrush SketchView::gradientBrush(const core::Gradient& g, double alpha) const
 {
-    const core::gradient::Placed p = core::gradient::place(g, frame);
+    const auto placed = core::gradient::place(g, m_doc.sketch());
+    if (!placed) {
+        // Its geometry is incomplete or gone: its average colour, until it has some again.
+        const core::Color c = g.average();
+        QColor color(c.r, c.g, c.b, c.a);
+        color.setAlphaF(color.alphaF() * alpha);
+        return QBrush(color);
+    }
+    const core::gradient::Placed& p = *placed;
     QGradientStops stops;
     for (const core::GradientStop& s : p.stops) {
         QColor c(s.color.r, s.color.g, s.color.b, s.color.a);
@@ -999,7 +1007,6 @@ void SketchView::drawSketch(QPainter& painter) const
 
     // Layer by layer, from the bottom: fills, strokes, texts, then the geometry.
     const core::regions::Arrangements arrangements(sketch);
-    const std::map<core::Id, core::gradient::Frame> strokeFrames = core::gradient::strokeFrames(sketch);
     for (auto layerIt = sketch.layers().rbegin(); layerIt != sketch.layers().rend(); ++layerIt) {
     const core::Id layer = layerIt->id;
     if (!layerIt->visible) {
@@ -1019,7 +1026,7 @@ void SketchView::drawSketch(QPainter& painter) const
             }
             const double alpha = m_presentation ? 1.0 : 0.35;
             if (f.gradient.active()) {
-                painter.fillPath(regionPath(*region), gradientBrush(f.gradient, core::gradient::fillFrame(*region), alpha));
+                painter.fillPath(regionPath(*region), gradientBrush(f.gradient, alpha));
                 continue;
             }
             QColor color(f.color.r, f.color.g, f.color.b, f.color.a);
@@ -1041,8 +1048,8 @@ void SketchView::drawSketch(QPainter& painter) const
             continue;
         }
         QPen pen = strokePen(style);
-        if (const auto frame = strokeFrames.find(id); frame != strokeFrames.end()) {
-            pen.setBrush(gradientBrush(style.gradient, frame->second, m_presentation ? 1.0 : 0.3));
+        if (style.gradient.active()) {
+            pen.setBrush(gradientBrush(style.gradient, m_presentation ? 1.0 : 0.3));
         }
         else if (!m_presentation) {
             QColor faded = pen.color();
@@ -1069,7 +1076,7 @@ void SketchView::drawSketch(QPainter& painter) const
                 color = colors.fullyConstrained;  // as plain geometry shows
             }
             if (graded) {
-                painter.fillPath(path, gradientBrush(t.gradient, core::gradient::textFrame(sketch, t)));
+                painter.fillPath(path, gradientBrush(t.gradient));
             }
             else {
                 painter.fillPath(path, color);
@@ -1085,7 +1092,7 @@ void SketchView::drawSketch(QPainter& painter) const
         QColor faint = color;
         faint.setAlphaF(faint.alphaF() * 0.3);
         if (graded) {
-            painter.fillPath(path, gradientBrush(t.gradient, core::gradient::textFrame(sketch, t), 0.3));
+            painter.fillPath(path, gradientBrush(t.gradient, 0.3));
         }
         else {
             painter.fillPath(path, faint);

@@ -14,10 +14,6 @@
 namespace core
 {
 
-// Entities and constraints share one id space; 0 is never a valid id.
-using Id = std::uint32_t;
-inline constexpr Id kNoId = 0;
-
 class SketchError : public std::runtime_error
 {
 public:
