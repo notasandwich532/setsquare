@@ -11,6 +11,8 @@ add_library(drawcore STATIC
     Curves.cpp
     Geometry.cpp
     Geometry.h
+    Gradient.cpp
+    Gradient.h
     Modify.cpp
     Modify.h
     Regions.cpp

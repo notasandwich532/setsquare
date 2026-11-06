@@ -1,6 +1,8 @@
 #include "Style.h"
 
+#include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 
 namespace core
@@ -58,6 +60,108 @@ bool dashFromString(const std::string& name, Dash& out)
         }
     }
     return false;
+}
+
+const char* toString(GradientKind kind)
+{
+    return kind == GradientKind::Radial ? "radial" : "linear";
+}
+
+const char* toString(GradientSpread spread)
+{
+    switch (spread) {
+        case GradientSpread::Pad: return "pad";
+        case GradientSpread::Reflect: return "reflect";
+        case GradientSpread::Repeat: return "repeat";
+    }
+    return "pad";
+}
+
+bool gradientKindFromString(const std::string& name, GradientKind& out)
+{
+    for (GradientKind k : {GradientKind::Linear, GradientKind::Radial}) {
+        if (name == toString(k)) {
+            out = k;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool gradientSpreadFromString(const std::string& name, GradientSpread& out)
+{
+    for (GradientSpread s : {GradientSpread::Pad, GradientSpread::Reflect, GradientSpread::Repeat}) {
+        if (name == toString(s)) {
+            out = s;
+            return true;
+        }
+    }
+    return false;
+}
+
+namespace
+{
+Color mix(const Color& a, const Color& b, double t)
+{
+    auto ch = [t](std::uint8_t x, std::uint8_t y) {
+        return static_cast<std::uint8_t>(std::lround(x + (y - x) * t));
+    };
+    return {ch(a.r, b.r), ch(a.g, b.g), ch(a.b, b.b), ch(a.a, b.a)};
+}
+}  // namespace
+
+Color Gradient::colorAt(double offset) const
+{
+    if (stops.empty()) {
+        return {};
+    }
+    if (offset <= stops.front().offset) {
+        return stops.front().color;
+    }
+    for (size_t i = 1; i < stops.size(); ++i) {
+        const GradientStop& a = stops[i - 1];
+        const GradientStop& b = stops[i];
+        if (offset <= b.offset) {
+            const double span = b.offset - a.offset;
+            return span <= 0.0 ? b.color : mix(a.color, b.color, (offset - a.offset) / span);
+        }
+    }
+    return stops.back().color;
+}
+
+Color Gradient::average() const
+{
+    if (stops.empty()) {
+        return {};
+    }
+    double r = 0, g = 0, b = 0, a = 0;
+    constexpr int kSamples = 16;
+    for (int i = 0; i < kSamples; ++i) {
+        const Color c = colorAt((i + 0.5) / kSamples);
+        r += c.r;
+        g += c.g;
+        b += c.b;
+        a += c.a;
+    }
+    auto ch = [](double v) { return static_cast<std::uint8_t>(std::lround(v / kSamples)); };
+    return {ch(r), ch(g), ch(b), ch(a)};
+}
+
+void Gradient::sortStops()
+{
+    for (GradientStop& s : stops) {
+        s.offset = std::clamp(s.offset, 0.0, 1.0);
+    }
+    std::stable_sort(stops.begin(), stops.end(),
+                     [](const GradientStop& a, const GradientStop& b) { return a.offset < b.offset; });
+}
+
+void Gradient::reverse()
+{
+    for (GradientStop& s : stops) {
+        s.offset = 1.0 - s.offset;
+    }
+    std::reverse(stops.begin(), stops.end());
 }
 
 }  // namespace core

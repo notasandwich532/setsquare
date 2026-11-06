@@ -25,6 +25,7 @@
 #pragma push_macro("slots")
 #undef slots
 #include <pybind11/embed.h>
+#include <pybind11/operators.h>
 #include <pybind11/stl.h>
 #pragma pop_macro("slots")
 
@@ -251,6 +252,68 @@ core::Color colorArg(py::handle h)
         }
     }
     throw py::type_error("a colour is '#rrggbb' or an (r, g, b[, a]) tuple");
+}
+
+// A colour argument that may also be a gradient (drawapp.linear / drawapp.radial).
+struct PaintArg
+{
+    core::Color color;
+    core::Gradient gradient;  // active when one was given
+};
+
+PaintArg paintArg(py::handle h)
+{
+    PaintArg p;
+    if (py::isinstance<core::Gradient>(h)) {
+        p.gradient = h.cast<core::Gradient>();
+        if (!p.gradient.active()) {
+            throw py::value_error("a gradient needs at least one colour");
+        }
+        p.color = p.gradient.average();
+        return p;
+    }
+    p.color = colorArg(h);
+    return p;
+}
+
+// Gradient stops: colours spread evenly, or (offset, colour) pairs.
+std::vector<core::GradientStop> stopsArg(py::handle h)
+{
+    if (!py::isinstance<py::sequence>(h) || py::isinstance<py::str>(h)) {
+        throw py::type_error("stops: a list of colours, or of (offset, colour) pairs");
+    }
+    const auto seq = h.cast<py::sequence>();
+    std::vector<core::GradientStop> stops;
+    for (size_t i = 0; i < seq.size(); ++i) {
+        const py::handle item = seq[i];
+        core::GradientStop stop;
+        if (py::isinstance<py::sequence>(item) && !py::isinstance<py::str>(item) && py::len(item) == 2) {
+            const auto pairSeq = item.cast<py::sequence>();
+            stop.offset = pairSeq[0].cast<double>();
+            stop.color = colorArg(pairSeq[1]);
+        }
+        else {
+            stop.offset = seq.size() > 1 ? double(i) / double(seq.size() - 1) : 0.0;
+            stop.color = colorArg(item);
+        }
+        if (stop.offset < 0.0 || stop.offset > 1.0) {
+            throw py::value_error("stop offsets run from 0 to 1");
+        }
+        stops.push_back(stop);
+    }
+    if (stops.empty()) {
+        throw py::value_error("a gradient needs at least one colour");
+    }
+    return stops;
+}
+
+core::GradientSpread spreadArg(const std::string& name)
+{
+    core::GradientSpread s;
+    if (!core::gradientSpreadFromString(name, s)) {
+        throw py::value_error("spread: 'pad', 'reflect' or 'repeat'");
+    }
+    return s;
 }
 
 std::pair<double, double> pairOf(py::handle h, const char* what)
@@ -505,6 +568,81 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
         }
     });
 
+    // --- gradients ---------------------------------------------------------------------------
+
+    auto stopsOut = [](const core::Gradient& g) {
+        py::list out;
+        for (const core::GradientStop& s : g.stops) {
+            out.append(py::make_tuple(s.offset, s.color.hex()));
+        }
+        return out;
+    };
+    py::class_<core::Gradient>(m, "Gradient",
+                               "A gradient, for any colour of a fill, stroke or text: made by drawapp.linear or "
+                               "drawapp.radial. Positions are fractions of the painted item's box: (0, 0) its "
+                               "bottom-left corner, (1, 1) its top-right.")
+        .def_property_readonly("type", [](const core::Gradient& g) { return std::string(core::toString(g.kind)); },
+                               "'linear' or 'radial'.")
+        .def_property_readonly("stops", stopsOut, "[(offset, '#rrggbb'), ...]")
+        .def_property_readonly("spread", [](const core::Gradient& g) { return std::string(core::toString(g.spread)); },
+                               "Past the ends: 'pad', 'reflect' or 'repeat'.")
+        .def_property_readonly("start", [](const core::Gradient& g) { return py::make_tuple(g.x1, g.y1); },
+                               "Linear: where it starts (radial: the centre).")
+        .def_property_readonly("end", [](const core::Gradient& g) { return py::make_tuple(g.x2, g.y2); },
+                               "Linear: where it ends (radial: the edge point).")
+        .def_property_readonly("center", [](const core::Gradient& g) { return py::make_tuple(g.x1, g.y1); })
+        .def_property_readonly("edge", [](const core::Gradient& g) { return py::make_tuple(g.x2, g.y2); })
+        .def_property_readonly("focal", [](const core::Gradient& g) { return py::make_tuple(g.x1 + g.fx, g.y1 + g.fy); },
+                               "Radial: where its first colour is (the centre unless moved).")
+        .def_property_readonly("aspect", [](const core::Gradient& g) { return g.aspect; },
+                               "Radial: its width across over its radius (1: a circle).")
+        .def("color_at", [](const core::Gradient& g, double offset) { return g.colorAt(offset).hex(); },
+             py::arg("offset"), "The colour at an offset along it.")
+        .def(py::self == py::self)
+        .def("__repr__", [](const core::Gradient& g) { return Editor::gradientCall(g).toStdString(); });
+
+    m.def("linear", [](py::handle stops, py::handle start, py::handle end, const std::string& spread) {
+        core::Gradient g;
+        g.kind = core::GradientKind::Linear;
+        g.stops = stopsArg(stops);
+        g.sortStops();
+        std::tie(g.x1, g.y1) = pairOf(start, "start");
+        std::tie(g.x2, g.y2) = pairOf(end, "end");
+        g.spread = spreadArg(spread);
+        return g;
+    }, py::arg("stops"), py::arg("start") = py::make_tuple(0.0, 0.5), py::arg("end") = py::make_tuple(1.0, 0.5),
+       py::arg("spread") = "pad",
+       "A linear gradient for color= (fills, strokes, text). stops: colours spread evenly, or (offset, colour) "
+       "pairs with offsets 0..1. start/end: where it runs, as fractions of the item's box ((0, 0) bottom-left, "
+       "(1, 1) top-right); the default runs left to right. spread: past the ends, 'pad' (the end colours carry "
+       "on), 'reflect' or 'repeat'.");
+    m.def("radial", [](py::handle stops, py::handle center, py::handle edge, py::object focal, double aspect,
+                       const std::string& spread) {
+        core::Gradient g;
+        g.kind = core::GradientKind::Radial;
+        g.stops = stopsArg(stops);
+        g.sortStops();
+        std::tie(g.x1, g.y1) = pairOf(center, "center");
+        std::tie(g.x2, g.y2) = pairOf(edge, "edge");
+        if (!focal.is_none()) {
+            const auto [fx, fy] = pairOf(focal, "focal");
+            g.fx = fx - g.x1;
+            g.fy = fy - g.y1;
+        }
+        if (aspect <= 0.0) {
+            throw py::value_error("aspect must be more than 0");
+        }
+        g.aspect = aspect;
+        g.spread = spreadArg(spread);
+        return g;
+    }, py::arg("stops"), py::arg("center") = py::make_tuple(0.5, 0.5), py::arg("edge") = py::make_tuple(1.0, 0.5),
+       py::arg("focal") = py::none(), py::arg("aspect") = 1.0, py::arg("spread") = "pad",
+       "A radial gradient for color= (fills, strokes, text): the first stop at the centre, the last at the "
+       "circle through `edge` (positions as fractions of the item's box, (0, 0) bottom-left, (1, 1) top-right; "
+       "the circle stays round in the drawing). focal: where the first colour is, if not the centre (a highlight "
+       "to one side). aspect: its width across over its radius, for an ellipse (its first axis towards edge). "
+       "spread: past the edge, 'pad', 'reflect' or 'repeat'.");
+
     // --- items -------------------------------------------------------------------------------
 
     py::class_<Item>(m, "Item", "Base of all sketch items.")
@@ -667,8 +805,12 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
                 d["color"] = style->color.hex();
                 d["width"] = style->none() ? py::object(py::str("none")) : py::object(py::float_(style->width));
                 d["dash"] = std::string(core::toString(style->dash));
+                if (style->gradient.active()) {
+                    d["gradient"] = style->gradient;
+                }
                 return d;
-            }, "The curve's stroke as {'color', 'width', 'dash'}, or None (see Sketch.stroke).");
+            }, "The curve's stroke as {'color', 'width', 'dash'}, or None (see Sketch.stroke); with a gradient "
+               "colouring the line instead of color, also 'gradient' (a drawapp.Gradient).");
     };
 
     py::class_<PointH, Item> point(m, "Point");
@@ -886,10 +1028,30 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
             [fillOf](const FillH& f, py::handle color) {
                 const core::Fill& current = fillOf(f.id);
                 const core::Point seed = current.seed;
-                const core::Color c = colorArg(color);
-                editReturningId("Fill", [&](Editor& ed) { return ed.fill({seed.x, seed.y}, c); });
+                const PaintArg p = paintArg(color);
+                editReturningId("Fill", [&](Editor& ed) { return ed.fill({seed.x, seed.y}, p.color, p.gradient); });
             },
-            "'#rrggbb' (or '#rrggbbaa'); set it to recolour.")
+            "'#rrggbb' (or '#rrggbbaa'); set it to recolour (or to a drawapp.linear / drawapp.radial gradient).")
+        .def_property(
+            "gradient", [fillOf](const FillH& f) -> py::object {
+                const core::Fill& fill = fillOf(f.id);
+                return fill.gradient.active() ? py::cast(fill.gradient) : py::none();
+            },
+            [fillOf](const FillH& f, py::object gradient) {
+                fillOf(f.id);
+                core::Gradient g;
+                if (!gradient.is_none()) {
+                    g = paintArg(gradient).gradient;
+                    if (!g.active()) {
+                        throw py::type_error("gradient: a drawapp.linear / drawapp.radial gradient, or None");
+                    }
+                }
+                editReturningId("Gradient", [&](Editor& ed) {
+                    ed.setFillGradient(f.id, g);
+                    return f.id;
+                });
+            },
+            "Its gradient (drawapp.Gradient), or None for its plain colour. Set it to change; None takes it off.")
         .def_property_readonly("at", [fillOf](const FillH& f) {
             const core::Fill& fill = fillOf(f.id);
             return py::make_tuple(fill.seed.x, fill.seed.y);
@@ -920,7 +1082,10 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
             if (!sketch().hasFill(f.id)) {
                 return "<Fill " + std::to_string(f.id) + " (deleted)>";
             }
-            return "<Fill f" + std::to_string(f.id) + " " + sketch().fill(f.id).color.hex() + ">";
+            const core::Fill& fill = sketch().fill(f.id);
+            return "<Fill f" + std::to_string(f.id) + " "
+                   + (fill.gradient.active() ? std::string(core::toString(fill.gradient.kind)) + " gradient" : fill.color.hex())
+                   + ">";
         });
 
     auto textOf = [](Id id) -> const core::Text& {
@@ -960,6 +1125,10 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
             const core::Text& text = textOf(t.id);
             return text.hasColor ? py::cast(text.color.hex()) : py::none();
         })
+        .def_property_readonly("gradient", [textOf](const TextH& t) -> py::object {
+            const core::Text& text = textOf(t.id);
+            return text.hasColor && text.gradient.active() ? py::cast(text.gradient) : py::none();
+        }, "Its gradient (drawapp.Gradient; set with color= in Sketch.edit_text), or None.")
         .def_property_readonly("anchor", [textOf](const TextH& t) { return wrap(textOf(t.id).anchor); },
                                "The point at the start of its baseline.")
         .def_property_readonly("contours", [textOf](const TextH& t) {
@@ -1390,7 +1559,9 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
                 entity(id);
                 core::StrokeStyle style = sketch().stroke(id) ? *sketch().stroke(id) : core::StrokeStyle{};
                 if (!color.is_none()) {
-                    style.color = colorArg(color);
+                    const PaintArg p = paintArg(color);
+                    style.color = p.color;
+                    style.gradient = p.gradient;
                 }
                 if (py::isinstance<py::str>(width)) {
                     const std::string name = width.cast<std::string>();
@@ -1434,13 +1605,15 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
         }, py::arg("curves"), py::arg("color") = py::none(), py::arg("width") = py::none(),
            py::arg("dash") = py::none(),
            "Give curves a stroke: color as '#rrggbb' (or '#rrggbbaa', or an (r, g, b[, a]) tuple), width in mm "
-           "(0 = hairline; \"none\": no line, e.g. for a fill without an outline), dash 'solid', 'dashed', 'dotted', 'dash_dot' or 'dash_dot_dot'.")
+           "(0 = hairline; \"none\": no line, e.g. for a fill without an outline; color may be a drawapp.linear / "
+           "drawapp.radial gradient), dash 'solid', 'dashed', 'dotted', 'dash_dot' or 'dash_dot_dot'.")
         .def("fill", [](const SketchH&, py::handle at, py::handle color) {
             const core::Vec2 where = vecArg(at);
-            const core::Color c = colorArg(color);
-            return wrap(editReturningId("Fill", [&](Editor& ed) { return ed.fill(where, c); }));
+            const PaintArg p = paintArg(color);
+            return wrap(editReturningId("Fill", [&](Editor& ed) { return ed.fill(where, p.color, p.gradient); }));
         }, py::arg("at"), py::arg("color") = "#c3c3c3",
-           "Fill the closed area around `at` (as a paint bucket would; a fill already there is recoloured). "
+           "Fill the closed area around `at` (as a paint bucket would; a fill already there is recoloured). color: a "
+           "colour, or a gradient (drawapp.linear / drawapp.radial). "
            "Raises ValueError if `at` isn't enclosed: see loose_ends().")
         .def("text", [](const SketchH&, const std::string& text, py::object at, double height, py::object font,
                         double angle, bool bold, bool italic, const std::string& outline, double minThickness,
@@ -1475,8 +1648,10 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
             }
             t.minThickness = minThickness;
             if (!color.is_none()) {
+                const PaintArg p = paintArg(color);
                 t.hasColor = true;
-                t.color = colorArg(color);
+                t.color = p.color;
+                t.gradient = p.gradient;
             }
             if (!box.is_none()) {
                 const py::sequence corners = box.cast<py::sequence>();
@@ -1526,8 +1701,10 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
             }
             if (!minThickness.is_none()) t.minThickness = minThickness.cast<double>();
             if (!color.is_none()) {
+                const PaintArg p = paintArg(color);
                 t.hasColor = true;
-                t.color = colorArg(color);
+                t.color = p.color;
+                t.gradient = p.gradient;
             }
             if (!spacing.is_none()) {
                 t.spacing = spacing.cast<double>();

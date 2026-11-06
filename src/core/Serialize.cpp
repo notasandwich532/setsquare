@@ -14,6 +14,55 @@ namespace
 {
 constexpr const char* kFormat = "drawing_app.sketch";
 
+// {"type": "linear", "spread": "pad", "stops": [[0, "#ff0000"], [1, "#0000ff80"]],
+//  "start": [x, y], "end": [x, y], radial only: "focal": [dx, dy], "aspect": a}
+json gradientToJson(const Gradient& g)
+{
+    json stops = json::array();
+    for (const GradientStop& s : g.stops) {
+        stops.push_back({s.offset, s.color.hex()});
+    }
+    json j{{"type", toString(g.kind)},
+           {"spread", toString(g.spread)},
+           {"stops", std::move(stops)},
+           {"start", {g.x1, g.y1}},
+           {"end", {g.x2, g.y2}}};
+    if (g.kind == GradientKind::Radial) {
+        j["focal"] = {g.fx, g.fy};
+        j["aspect"] = g.aspect;
+    }
+    return j;
+}
+
+Gradient gradientFromJson(const json& j)
+{
+    Gradient g;
+    if (!gradientKindFromString(j.value("type", std::string("linear")), g.kind)
+        || !gradientSpreadFromString(j.value("spread", std::string("pad")), g.spread)) {
+        throw SketchError("unknown gradient type or spread");
+    }
+    for (const json& s : j.value("stops", json::array())) {
+        GradientStop stop;
+        stop.offset = s.at(0).get<double>();
+        if (!Color::fromHex(s.at(1).get<std::string>(), stop.color)) {
+            throw SketchError("bad gradient colour '" + s.at(1).get<std::string>() + "'");
+        }
+        g.stops.push_back(stop);
+    }
+    g.sortStops();
+    auto pair = [&](const char* key, double& x, double& y) {
+        if (j.contains(key)) {
+            x = j.at(key).at(0).get<double>();
+            y = j.at(key).at(1).get<double>();
+        }
+    };
+    pair("start", g.x1, g.y1);
+    pair("end", g.x2, g.y2);
+    pair("focal", g.fx, g.fy);
+    g.aspect = j.value("aspect", 1.0);
+    return g;
+}
+
 json entityToJson(const Entity& e)
 {
     json j{{"id", e.id}, {"type", toString(e.kind())}};
@@ -191,19 +240,26 @@ std::string toJson(const Sketch& sketch, bool compact, const std::vector<std::st
         json strokes = json::array();
         for (const auto& [curve, style] : sketch.strokes()) {
             json width = style.none() ? json("none") : json(style.width);
-            strokes.push_back(
-                {{"curve", curve}, {"color", style.color.hex()}, {"width", std::move(width)}, {"dash", toString(style.dash)}});
+            json j{{"curve", curve}, {"color", style.color.hex()}, {"width", std::move(width)}, {"dash", toString(style.dash)}};
+            if (style.gradient.active()) {
+                j["gradient"] = gradientToJson(style.gradient);
+            }
+            strokes.push_back(std::move(j));
         }
         doc["strokes"] = std::move(strokes);
     }
     if (!sketch.fills().empty()) {
         json fills = json::array();
         for (const auto& [id, f] : sketch.fills()) {
-            fills.push_back({{"id", id},
-                             {"color", f.color.hex()},
-                             {"seed", {f.seed.x, f.seed.y}},
-                             {"boundary", f.boundary},
-                             {"layer", f.layer}});
+            json j{{"id", id},
+                   {"color", f.color.hex()},
+                   {"seed", {f.seed.x, f.seed.y}},
+                   {"boundary", f.boundary},
+                   {"layer", f.layer}};
+            if (f.gradient.active()) {
+                j["gradient"] = gradientToJson(f.gradient);
+            }
+            fills.push_back(std::move(j));
         }
         doc["fills"] = std::move(fills);
     }
@@ -256,6 +312,9 @@ std::string toJson(const Sketch& sketch, bool compact, const std::vector<std::st
             }
             if (t.hasColor) {
                 j["color"] = t.color.hex();
+                if (t.gradient.active()) {
+                    j["gradient"] = gradientToJson(t.gradient);
+                }
             }
             texts.push_back(std::move(j));
         }
@@ -359,6 +418,9 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
             if (!dashFromString(dash, style.dash)) {
                 throw SketchError("unknown line style '" + dash + "'");
             }
+            if (j.contains("gradient")) {
+                style.gradient = gradientFromJson(j.at("gradient"));
+            }
             sketch.setStroke(j.at("curve").get<Id>(), style);
         }
         for (const json& j : doc.value("fills", json::array())) {
@@ -367,6 +429,9 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
             const std::string color = j.value("color", std::string("#000000"));
             if (!Color::fromHex(color, f.color)) {
                 throw SketchError("bad fill colour '" + color + "'");
+            }
+            if (j.contains("gradient")) {
+                f.gradient = gradientFromJson(j.at("gradient"));
             }
             const auto& seed = j.at("seed");
             f.seed = Point{seed.at(0).get<double>(), seed.at(1).get<double>()};
@@ -406,6 +471,9 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
             }
             if (j.contains("color")) {
                 t.hasColor = Color::fromHex(j.at("color").get<std::string>(), t.color);
+            }
+            if (t.hasColor && j.contains("gradient")) {
+                t.gradient = gradientFromJson(j.at("gradient"));
             }
             for (const json& contour : j.value("shape", json::array())) {
                 const std::vector<double> flat = contour.get<std::vector<double>>();

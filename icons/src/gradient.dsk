@@ -1,0 +1,582 @@
+{
+  "active_sublayer": 1,
+  "axes": [
+    3,
+    5
+  ],
+  "constraints": [
+    {
+      "id": 13,
+      "refs": [
+        9
+      ],
+      "sublayer": 1,
+      "type": "horizontal"
+    },
+    {
+      "id": 14,
+      "refs": [
+        10
+      ],
+      "sublayer": 1,
+      "type": "vertical"
+    },
+    {
+      "id": 15,
+      "refs": [
+        11
+      ],
+      "sublayer": 1,
+      "type": "horizontal"
+    },
+    {
+      "id": 16,
+      "refs": [
+        12
+      ],
+      "sublayer": 1,
+      "type": "vertical"
+    },
+    {
+      "id": 17,
+      "refs": [
+        9
+      ],
+      "sublayer": 1,
+      "type": "distance",
+      "value": 24.0
+    },
+    {
+      "id": 18,
+      "refs": [
+        12
+      ],
+      "sublayer": 1,
+      "type": "distance",
+      "value": 24.0
+    },
+    {
+      "id": 27,
+      "refs": [
+        23
+      ],
+      "sublayer": 1,
+      "type": "horizontal"
+    },
+    {
+      "id": 28,
+      "refs": [
+        24
+      ],
+      "sublayer": 1,
+      "type": "vertical"
+    },
+    {
+      "id": 29,
+      "refs": [
+        25
+      ],
+      "sublayer": 1,
+      "type": "horizontal"
+    },
+    {
+      "id": 30,
+      "refs": [
+        26
+      ],
+      "sublayer": 1,
+      "type": "vertical"
+    },
+    {
+      "id": 31,
+      "refs": [
+        1,
+        19
+      ],
+      "sublayer": 1,
+      "type": "horizontalDistance",
+      "value": 3.0
+    },
+    {
+      "id": 32,
+      "refs": [
+        1,
+        19
+      ],
+      "sublayer": 1,
+      "type": "verticalDistance",
+      "value": 4.0
+    },
+    {
+      "id": 33,
+      "refs": [
+        23
+      ],
+      "sublayer": 1,
+      "type": "distance",
+      "value": 18.0
+    },
+    {
+      "id": 34,
+      "refs": [
+        24
+      ],
+      "sublayer": 1,
+      "type": "distance",
+      "value": 16.0
+    },
+    {
+      "id": 39,
+      "refs": [
+        1,
+        36
+      ],
+      "sublayer": 1,
+      "type": "horizontalDistance",
+      "value": 8.3
+    },
+    {
+      "id": 40,
+      "refs": [
+        1,
+        36
+      ],
+      "sublayer": 1,
+      "type": "verticalDistance",
+      "value": 12.0
+    },
+    {
+      "id": 41,
+      "refs": [
+        1,
+        37
+      ],
+      "sublayer": 1,
+      "type": "horizontalDistance",
+      "value": 15.7
+    },
+    {
+      "id": 42,
+      "refs": [
+        1,
+        37
+      ],
+      "sublayer": 1,
+      "type": "verticalDistance",
+      "value": 12.0
+    },
+    {
+      "id": 45,
+      "refs": [
+        1,
+        43
+      ],
+      "sublayer": 1,
+      "type": "horizontalDistance",
+      "value": 6.5
+    },
+    {
+      "id": 46,
+      "refs": [
+        1,
+        43
+      ],
+      "sublayer": 1,
+      "type": "verticalDistance",
+      "value": 12.0
+    },
+    {
+      "id": 47,
+      "refs": [
+        44
+      ],
+      "sublayer": 1,
+      "type": "radius",
+      "value": 1.8
+    },
+    {
+      "id": 51,
+      "refs": [
+        1,
+        49
+      ],
+      "sublayer": 1,
+      "type": "horizontalDistance",
+      "value": 17.5
+    },
+    {
+      "id": 52,
+      "refs": [
+        1,
+        49
+      ],
+      "sublayer": 1,
+      "type": "verticalDistance",
+      "value": 12.0
+    },
+    {
+      "id": 53,
+      "refs": [
+        50
+      ],
+      "sublayer": 1,
+      "type": "radius",
+      "value": 1.8
+    }
+  ],
+  "entities": [
+    {
+      "fixed": true,
+      "id": 1,
+      "type": "point",
+      "x": 0.0,
+      "y": 0.0
+    },
+    {
+      "fixed": true,
+      "id": 2,
+      "type": "point",
+      "x": 1.0,
+      "y": 0.0
+    },
+    {
+      "construction": true,
+      "fixed": true,
+      "id": 3,
+      "p1": 1,
+      "p2": 2,
+      "type": "line"
+    },
+    {
+      "fixed": true,
+      "id": 4,
+      "type": "point",
+      "x": 0.0,
+      "y": 1.0
+    },
+    {
+      "construction": true,
+      "fixed": true,
+      "id": 5,
+      "p1": 1,
+      "p2": 4,
+      "type": "line"
+    },
+    {
+      "id": 6,
+      "sublayer": 1,
+      "type": "point",
+      "x": 24.0,
+      "y": 24.0
+    },
+    {
+      "id": 7,
+      "sublayer": 1,
+      "type": "point",
+      "x": 24.0,
+      "y": 0.0
+    },
+    {
+      "id": 8,
+      "sublayer": 1,
+      "type": "point",
+      "x": 0.0,
+      "y": 24.0
+    },
+    {
+      "construction": true,
+      "id": 9,
+      "p1": 1,
+      "p2": 7,
+      "sublayer": 1,
+      "type": "line"
+    },
+    {
+      "construction": true,
+      "id": 10,
+      "p1": 7,
+      "p2": 6,
+      "sublayer": 1,
+      "type": "line"
+    },
+    {
+      "construction": true,
+      "id": 11,
+      "p1": 6,
+      "p2": 8,
+      "sublayer": 1,
+      "type": "line"
+    },
+    {
+      "construction": true,
+      "id": 12,
+      "p1": 8,
+      "p2": 1,
+      "sublayer": 1,
+      "type": "line"
+    },
+    {
+      "id": 19,
+      "sublayer": 1,
+      "type": "point",
+      "x": 3.0,
+      "y": 4.0
+    },
+    {
+      "id": 20,
+      "sublayer": 1,
+      "type": "point",
+      "x": 21.0,
+      "y": 20.0
+    },
+    {
+      "id": 21,
+      "sublayer": 1,
+      "type": "point",
+      "x": 21.0,
+      "y": 4.0
+    },
+    {
+      "id": 22,
+      "sublayer": 1,
+      "type": "point",
+      "x": 3.0,
+      "y": 20.0
+    },
+    {
+      "id": 23,
+      "p1": 19,
+      "p2": 21,
+      "sublayer": 1,
+      "type": "line"
+    },
+    {
+      "id": 24,
+      "p1": 21,
+      "p2": 20,
+      "sublayer": 1,
+      "type": "line"
+    },
+    {
+      "id": 25,
+      "p1": 20,
+      "p2": 22,
+      "sublayer": 1,
+      "type": "line"
+    },
+    {
+      "id": 26,
+      "p1": 22,
+      "p2": 19,
+      "sublayer": 1,
+      "type": "line"
+    },
+    {
+      "id": 36,
+      "sublayer": 1,
+      "type": "point",
+      "x": 8.3,
+      "y": 12.0
+    },
+    {
+      "id": 37,
+      "sublayer": 1,
+      "type": "point",
+      "x": 15.7,
+      "y": 12.0
+    },
+    {
+      "id": 38,
+      "p1": 36,
+      "p2": 37,
+      "sublayer": 1,
+      "type": "line"
+    },
+    {
+      "id": 43,
+      "sublayer": 1,
+      "type": "point",
+      "x": 6.5,
+      "y": 12.0
+    },
+    {
+      "center": 43,
+      "id": 44,
+      "radius": 1.8,
+      "sublayer": 1,
+      "type": "circle"
+    },
+    {
+      "id": 49,
+      "sublayer": 1,
+      "type": "point",
+      "x": 17.5,
+      "y": 12.0
+    },
+    {
+      "center": 49,
+      "id": 50,
+      "radius": 1.8,
+      "sublayer": 1,
+      "type": "circle"
+    }
+  ],
+  "fills": [
+    {
+      "boundary": [
+        23,
+        24,
+        25,
+        26
+      ],
+      "color": "#f2b33d80",
+      "gradient": {
+        "end": [
+          1.0,
+          0.5
+        ],
+        "spread": "pad",
+        "start": [
+          0.0,
+          0.5
+        ],
+        "stops": [
+          [
+            0.0,
+            "#f2b33d"
+          ],
+          [
+            1.0,
+            "#f2b33d00"
+          ]
+        ],
+        "type": "linear"
+      },
+      "id": 35,
+      "layer": 1,
+      "seed": [
+        12.0,
+        12.0
+      ]
+    },
+    {
+      "boundary": [
+        44
+      ],
+      "color": "#f2b33d",
+      "id": 48,
+      "layer": 1,
+      "seed": [
+        6.5,
+        12.0
+      ]
+    },
+    {
+      "boundary": [
+        50
+      ],
+      "color": "#d5d9de",
+      "id": 54,
+      "layer": 1,
+      "seed": [
+        17.5,
+        12.0
+      ]
+    }
+  ],
+  "format": "drawing_app.sketch",
+  "history": [
+    "p6 = s.point(24, 24)\ns.rectangle(s.origin, p6)",
+    "l9.construction = True",
+    "l10.construction = True",
+    "l11.construction = True",
+    "l12.construction = True",
+    "d17 = s.distance(l9, value=24)",
+    "d18 = s.distance(l12, value=24)",
+    "p19 = s.point(3, 4)\np20 = s.point(21, 20)\ns.rectangle(p19, p20)",
+    "s.stroke([l23, l24, l25, l26], color=\"#d5d9de\", width=1.5, dash=\"solid\")",
+    "d31 = s.horizontal_distance(s.origin, p19, value=3)",
+    "d32 = s.vertical_distance(s.origin, p19, value=4)",
+    "d33 = s.distance(l23, value=18)",
+    "d34 = s.distance(l24, value=16)",
+    "f35 = s.fill(at=(12, 12), color=drawapp.linear([(0, \"#f2b33d\"), (1, \"#f2b33d00\")], start=(0, 0.5), end=(1, 0.5)))",
+    "p36 = s.point(8.3, 12)\np37 = s.point(15.7, 12)\nl38 = s.line(p36, p37)",
+    "s.stroke([l38], color=\"#d5d9de\", width=1, dash=\"solid\")",
+    "d39 = s.horizontal_distance(s.origin, p36, value=8.3)",
+    "d40 = s.vertical_distance(s.origin, p36, value=12)",
+    "d41 = s.horizontal_distance(s.origin, p37, value=15.7)",
+    "d42 = s.vertical_distance(s.origin, p37, value=12)",
+    "p43 = s.point(6.5, 12)\nc44 = s.circle(p43, 1.8)",
+    "s.stroke([c44], color=\"#d5d9de\", width=1, dash=\"solid\")",
+    "d45 = s.horizontal_distance(s.origin, p43, value=6.5)",
+    "d46 = s.vertical_distance(s.origin, p43, value=12)",
+    "d47 = s.radius(c44, value=1.8)",
+    "f48 = s.fill(at=(6.5, 12), color=\"#f2b33d\")",
+    "p49 = s.point(17.5, 12)\nc50 = s.circle(p49, 1.8)",
+    "s.stroke([c50], color=\"#d5d9de\", width=1, dash=\"solid\")",
+    "d51 = s.horizontal_distance(s.origin, p49, value=17.5)",
+    "d52 = s.vertical_distance(s.origin, p49, value=12)",
+    "d53 = s.radius(c50, value=1.8)",
+    "f54 = s.fill(at=(17.5, 12), color=\"#d5d9de\")"
+  ],
+  "layers": [
+    {
+      "active_sublayer": 1,
+      "id": 1,
+      "name": "Layer 1"
+    }
+  ],
+  "origin": 1,
+  "strokes": [
+    {
+      "color": "#d5d9de",
+      "curve": 23,
+      "dash": "solid",
+      "width": 1.5
+    },
+    {
+      "color": "#d5d9de",
+      "curve": 24,
+      "dash": "solid",
+      "width": 1.5
+    },
+    {
+      "color": "#d5d9de",
+      "curve": 25,
+      "dash": "solid",
+      "width": 1.5
+    },
+    {
+      "color": "#d5d9de",
+      "curve": 26,
+      "dash": "solid",
+      "width": 1.5
+    },
+    {
+      "color": "#d5d9de",
+      "curve": 38,
+      "dash": "solid",
+      "width": 1.0
+    },
+    {
+      "color": "#d5d9de",
+      "curve": 44,
+      "dash": "solid",
+      "width": 1.0
+    },
+    {
+      "color": "#d5d9de",
+      "curve": 50,
+      "dash": "solid",
+      "width": 1.0
+    }
+  ],
+  "sublayers": [
+    {
+      "id": 1,
+      "layer": 1,
+      "name": "Sublayer 1"
+    }
+  ],
+  "version": 1
+}

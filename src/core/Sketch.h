@@ -225,6 +225,7 @@ struct Fill
 {
     Id id = kNoId;
     Color color;
+    Gradient gradient;         // when active: filled with this rather than `color`
     Point seed;                // a point inside the area
     Id layer = kNoId;          // the layer whose geometry outlines it
     std::vector<Id> boundary;  // the curves around it when it was last found (sorted)
@@ -295,6 +296,7 @@ struct Text
     std::size_t layoutKey = 0;  // (not saved) what the shape was last made from, to skip remaking
     bool hasColor = false;
     Color color;  // when set: filled in this colour in the drawing (else like plain geometry)
+    Gradient gradient;  // when active (hasColor too): filled with this rather than `color`
 
     // The letters: closed contours in text space (mm; x along the baseline from the anchor, y
     // up), filled by the non-zero winding rule. Made by the app from the settings above.

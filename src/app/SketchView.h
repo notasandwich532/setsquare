@@ -5,6 +5,7 @@
 
 #include <core/Dimensions.h>
 #include <core/Geometry.h>
+#include <core/Gradient.h>
 #include <core/Regions.h>
 
 #include <QPainterPath>
@@ -158,14 +159,23 @@ public:
         double width = 0.35;
         core::Dash dash = core::Dash::Solid;
 
-        core::StrokeStyle stroke() const { return {color1, width, dash}; }
+        core::StrokeStyle stroke() const { return {color1, width, dash, {}}; }  // (plain: no gradient)
         bool operator==(const Paint&) const = default;
     };
     const Paint& paint() const { return m_paint; }
     void setPaint(const Paint& paint);
+    // A colour picked in the colour bar: true if the current tool took it (see Tool::takeColor).
+    bool offerColor(const core::Color& color, bool second);
+    // The gradient tool's gradient (kept while switching tools).
+    const core::Gradient& gradient() const { return m_gradient; }
+    void setGradient(const core::Gradient& gradient);
+    class GradientTool* gradientTool() const;  // the current tool, if it's the gradient tool
 
     // How a stroke style is drawn at the current zoom.
     QPen strokePen(const core::StrokeStyle& style) const;
+    // A gradient placed on an item's box (see core/Gradient.h), on screen; `alpha` scales its
+    // opacity (faded while sketching).
+    QBrush gradientBrush(const core::Gradient& g, const core::gradient::Frame& frame, double alpha = 1.0) const;
     // A closed area (with its holes) on screen, for filling.
     QPainterPath regionPath(const core::regions::Region& region) const;
     QPainterPath textPath(const core::Text& text) const;  // its letters, on screen
@@ -186,6 +196,7 @@ signals:
     void recentToolsRequested(QPoint globalPos);  // right-click with nothing to cancel
     void presentationChanged(bool on);
     void paintChanged();
+    void gradientChanged();
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -237,6 +248,7 @@ private:
     core::Sketch m_pasteFragment;
     bool m_presentation = false;
     Paint m_paint;
+    core::Gradient m_gradient;
     core::Id m_editFeature = core::kNoId;  // the pattern the next pattern command edits
     // Settings panel for the tools that have settings but no command (fillet, polygon, ...).
     class CommandPanel* m_optionsPanel = nullptr;

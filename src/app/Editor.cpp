@@ -509,9 +509,35 @@ std::map<Id, Id> Editor::paste(const core::Sketch& fragment, core::Vec2 at)
 
 QString Editor::strokeArgs(const core::StrokeStyle& style)
 {
-    return QStringLiteral("color=\"%1\", width=%2, dash=\"%3\"")
-        .arg(QString::fromStdString(style.color.hex()), style.none() ? QStringLiteral("\"none\"") : number(style.width),
+    const QString color = style.gradient.active() ? gradientCall(style.gradient)
+                                                  : QStringLiteral("\"%1\"").arg(QString::fromStdString(style.color.hex()));
+    return QStringLiteral("color=%1, width=%2, dash=\"%3\"")
+        .arg(color, style.none() ? QStringLiteral("\"none\"") : number(style.width),
              QString::fromLatin1(core::toString(style.dash)));
+}
+
+QString Editor::gradientCall(const core::Gradient& g)
+{
+    QStringList stops;
+    for (const core::GradientStop& s : g.stops) {
+        stops << QStringLiteral("(%1, \"%2\")").arg(number(s.offset), QString::fromStdString(s.color.hex()));
+    }
+    QStringList args;
+    args << QLatin1Char('[') + stops.join(QStringLiteral(", ")) + QLatin1Char(']');
+    const bool radial = g.kind == core::GradientKind::Radial;
+    args << (radial ? QStringLiteral("center=") : QStringLiteral("start=")) + pair({g.x1, g.y1});
+    args << (radial ? QStringLiteral("edge=") : QStringLiteral("end=")) + pair({g.x2, g.y2});
+    if (radial && (g.fx != 0.0 || g.fy != 0.0)) {
+        args << QStringLiteral("focal=") + pair({g.x1 + g.fx, g.y1 + g.fy});
+    }
+    if (radial && g.aspect != 1.0) {
+        args << QStringLiteral("aspect=") + number(g.aspect);
+    }
+    if (g.spread != core::GradientSpread::Pad) {
+        args << QStringLiteral("spread=\"%1\"").arg(QString::fromLatin1(core::toString(g.spread)));
+    }
+    return QStringLiteral("drawapp.%1(%2)").arg(radial ? QStringLiteral("radial") : QStringLiteral("linear"),
+                                                args.join(QStringLiteral(", ")));
 }
 
 void Editor::setStroke(const std::vector<Id>& curves, const core::StrokeStyle& style)
@@ -571,7 +597,8 @@ QString textArgs(const core::Text& t)
         args << QStringLiteral("min_thickness=") + Editor::number(t.minThickness);
     }
     if (t.hasColor) {
-        args << QStringLiteral("color=\"%1\"").arg(QString::fromStdString(t.color.hex()));
+        args << (t.gradient.active() ? QStringLiteral("color=") + Editor::gradientCall(t.gradient)
+                                     : QStringLiteral("color=\"%1\"").arg(QString::fromStdString(t.color.hex())));
     }
     if (t.spacing != 0.0) {
         args << QStringLiteral("spacing=") + Editor::number(t.spacing);
@@ -861,7 +888,16 @@ void Editor::breakLink(const std::vector<Id>& items)
     log(QStringLiteral("s.break_link(%1)").arg(list(m_sketch, items)));
 }
 
-Id Editor::fill(core::Vec2 at, const core::Color& color)
+void Editor::setFillGradient(Id id, const core::Gradient& gradient)
+{
+    core::Fill f = m_sketch.fill(id);
+    f.gradient = gradient;
+    m_sketch.setFill(f);
+    log(QStringLiteral("%1.gradient = %2")
+            .arg(name(m_sketch, id), gradient.active() ? gradientCall(gradient) : QStringLiteral("None")));
+}
+
+Id Editor::fill(core::Vec2 at, const core::Color& color, const core::Gradient& gradient)
 {
     const core::regions::Arrangement arrangement(m_sketch, m_sketch.activeLayer());
     const auto region = arrangement.regionAt(at);
@@ -887,17 +923,21 @@ Id Editor::fill(core::Vec2 at, const core::Color& color)
     if (id != core::kNoId) {
         core::Fill f = m_sketch.fill(id);
         f.color = color;
+        f.gradient = gradient;
         m_sketch.setFill(f);
     }
     else {
         core::Fill f;
         f.color = color;
+        f.gradient = gradient;
         f.seed = core::Point{at.x, at.y};
         f.boundary = region->boundary;
         id = m_sketch.addFill(f);
     }
-    log(QStringLiteral("%1 = s.fill(at=%2, color=\"%3\")")
-            .arg(name(m_sketch, id), pair(at), QString::fromStdString(color.hex())));
+    log(QStringLiteral("%1 = s.fill(at=%2, color=%3)")
+            .arg(name(m_sketch, id), pair(at),
+                 gradient.active() ? gradientCall(gradient)
+                                   : QStringLiteral("\"%1\"").arg(QString::fromStdString(color.hex()))));
     return id;
 }
 

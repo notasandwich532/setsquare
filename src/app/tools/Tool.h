@@ -75,6 +75,7 @@ enum class ToolKind
     Ellipse,
     SplineFit,
     SplineControl,
+    Gradient,
 };
 
 struct ToolEvent
@@ -112,6 +113,10 @@ public:
 
     // Other keys go to the tool first; return true if it used the key.
     virtual bool keyPress(int /*key*/, const QString& /*text*/) { return false; }
+
+    // A colour picked in the colour bar (`second`: as Colour 2). Return true to take it for the
+    // tool's own use instead of it becoming the current colour.
+    virtual bool takeColor(const core::Color& /*color*/, bool /*second*/) { return false; }
 
     // Called once per frame before painting. Tools defer expensive work (like the drag solve)
     // to here so it runs at most once per displayed frame, with the newest input.

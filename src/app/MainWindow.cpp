@@ -176,6 +176,7 @@ const std::pair<ToolKind, const char*> kToolNames[] = {
     {ToolKind::Ellipse, "ellipse"},
     {ToolKind::SplineFit, "spline"},
     {ToolKind::SplineControl, "spline_control"},
+    {ToolKind::Gradient, "gradient"},
 };
 
 QString macrosFolder()
@@ -772,6 +773,7 @@ void MainWindow::createActions()
     addTools(appearanceBar, {
                                 {ToolKind::StrokeBrush, tr("Stroke Brush"), QKeySequence(Qt::Key_B)},
                                 {ToolKind::Fill, tr("Fill"), QKeySequence(Qt::Key_G)},
+                                {ToolKind::Gradient, tr("Gradient"), QKeySequence(Qt::SHIFT | Qt::Key_G)},
                             });
     auto* colorBar = new ColorBar(*m_view, appearanceBar);
     appearanceBar->addWidget(colorBar);

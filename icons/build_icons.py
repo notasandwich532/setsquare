@@ -1058,6 +1058,28 @@ def icon_fill():
     return finish("fill")
 
 
+def icon_gradient():
+    """A square shading from the paint to nothing, and the gradient's handle across it."""
+    start()
+    r = stroke(s.rectangle((3, 4), (21, 20)), GREY, width=1.5)
+    pin(r[0].p1, 3, 4)
+    s.distance(r[0], value=18)
+    s.distance(r[1], value=16)
+    s.solve()
+    s.fill(at=(12, 12), color=drawapp.linear([AMBER, AMBER + "00"]))
+    # The handle: a dot at each end (the first in the paint) and the line between them.
+    handle = line((8.3, 12), (15.7, 12), GREY, width=1)
+    pin(handle.p1, 8.3, 12)
+    pin(handle.p2, 15.7, 12)
+    for (x, y), color in (((6.5, 12), AMBER), ((17.5, 12), GREY)):
+        dot = stroke(s.circle((x, y), 1.8), GREY, width=1)
+        pin(dot.center, x, y)
+        s.radius(dot, value=1.8)
+        s.solve()
+        s.fill(at=(x, y), color=color)
+    return finish("gradient")
+
+
 def icon_presentation():
     """An eye: the drawing as it will be seen."""
     start()
@@ -1089,7 +1111,7 @@ ICONS.update({
               icon_slot_overall, icon_slot_center_point, icon_arc_slot, icon_arc_slot_3point, icon_trim,
               icon_trim_construction, icon_extend, icon_break, icon_fillet, icon_chamfer_equal, icon_chamfer_2distances,
               icon_chamfer_angle, icon_move, icon_scale, icon_mirror, icon_rectangular_pattern, icon_circular_pattern,
-              icon_offset, icon_divide, icon_stroke_brush, icon_fill, icon_presentation]
+              icon_offset, icon_divide, icon_stroke_brush, icon_fill, icon_gradient, icon_presentation]
 })
 
 wanted = sys.argv[1:] or list(ICONS)

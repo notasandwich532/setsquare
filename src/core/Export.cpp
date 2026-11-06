@@ -2,12 +2,14 @@
 
 #include "Curves.h"
 #include "Geometry.h"
+#include "Gradient.h"
 #include "Regions.h"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <map>
 #include <numbers>
 #include <sstream>
 #include <vector>
@@ -93,13 +95,17 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
     struct Area
     {
         Color color;
+        Gradient gradient;
         regions::Region region;
     };
     struct TextArea
     {
         Color color;
+        Gradient gradient;
+        gradient::Frame frame;
         std::vector<std::vector<Vec2>> contours;
     };
+    const std::map<Id, gradient::Frame> strokeFrames = gradient::strokeFrames(s);
     struct Group
     {
         const Layer* layer = nullptr;
@@ -111,7 +117,7 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
             return strokes.empty() && plain.empty() && construction.empty() && fills.empty() && texts.empty();
         }
     };
-    const StrokeStyle constructionStyle{{0x9a, 0xa0, 0xa6, 255}, 0.18, Dash::Dashed};
+    const StrokeStyle constructionStyle{{0x9a, 0xa0, 0xa6, 255}, 0.18, Dash::Dashed, {}};
     const regions::Arrangements arrangements(s, kPi / 720);  // quarter-degree steps on arcs
     std::vector<Group> groups;
     for (auto it = s.layers().rbegin(); it != s.layers().rend(); ++it) {
@@ -144,7 +150,7 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
                     continue;
                 }
                 if (auto region = regions::resolve(arrangements, f)) {
-                    g.fills.push_back({f.color, std::move(*region)});
+                    g.fills.push_back({f.color, f.gradient, std::move(*region)});
                 }
             }
         }
@@ -153,7 +159,8 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
             if (t.shape.empty() || !s.hasEntity(t.anchor) || s.layerOf(id) != it->id) {
                 continue;
             }
-            TextArea area{t.hasColor ? t.color : o.plain.color, {}};
+            TextArea area{t.hasColor ? t.color : o.plain.color, t.hasColor ? t.gradient : Gradient{},
+                          gradient::textFrame(s, t), {}};
             for (const auto& contour : t.shape) {
                 std::vector<Vec2> pts;
                 for (const Point& p : contour) {
@@ -224,6 +231,64 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
         << "     width=\"" << num(width) << unit << "\" height=\"" << num(height) << unit << "\" viewBox=\"0 0 "
         << num(width) << ' ' << num(height) << "\">\n"
         << (o.canvas ? "  <!-- Drawing App icon -->\n" : "  <!-- Drawing App export: 1 unit = 1 mm -->\n");
+    // The drawing goes in after the gradients it uses (collected as it's written).
+    const std::string head = out.str();
+    out.str({});
+    std::string defs;
+    int gradients = 0;
+    // A gradient's definition, in drawing units (userSpaceOnUse: it doesn't depend on how SVG
+    // would measure the shape's box); returns the paint that refers to it.
+    auto gradientPaint = [&](const Gradient& g, const gradient::Frame& frame) {
+        const gradient::Placed p = gradient::place(g, frame);
+        const std::string id = "gradient" + std::to_string(++gradients);
+        std::string d;
+        if (p.kind == GradientKind::Linear) {
+            d = "    <linearGradient id=\"" + id + "\" gradientUnits=\"userSpaceOnUse\" x1=\"" + X(p.start.x) + "\" y1=\""
+                + Y(p.start.y) + "\" x2=\"" + X(p.end.x) + "\" y2=\"" + Y(p.end.y) + '"';
+        }
+        else {
+            // A circle round the origin, moved, turned and squashed into place (y down: turned the
+            // other way, and the focal point's sideways offset flips).
+            d = "    <radialGradient id=\"" + id + "\" gradientUnits=\"userSpaceOnUse\" cx=\"0\" cy=\"0\" r=\""
+                + num(p.radius) + '"';
+            if (std::hypot(p.focalLocal.x, p.focalLocal.y) > 1e-9) {
+                d += " fx=\"" + num(p.focalLocal.x) + "\" fy=\"" + num(-p.focalLocal.y) + '"';
+            }
+            d += " gradientTransform=\"translate(" + X(p.center.x) + ' ' + Y(p.center.y) + ')';
+            if (std::abs(p.angle) > 1e-12) {
+                d += " rotate(" + num(-p.angle * 180 / kPi) + ')';
+            }
+            if (std::abs(p.aspect - 1.0) > 1e-12) {
+                d += " scale(1 " + num(p.aspect) + ')';
+            }
+            d += '"';
+        }
+        if (p.spread != GradientSpread::Pad) {
+            d += std::string(" spreadMethod=\"") + toString(p.spread) + '"';
+        }
+        d += ">\n";
+        for (const GradientStop& stop : p.stops) {
+            d += "      <stop offset=\"" + num(stop.offset) + "\" stop-color=\"" + rgb(stop.color) + '"';
+            if (stop.color.a != 255) {
+                d += " stop-opacity=\"" + num(stop.color.a / 255.0) + '"';
+            }
+            d += "/>\n";
+        }
+        d += p.kind == GradientKind::Linear ? "    </linearGradient>\n" : "    </radialGradient>\n";
+        defs += d;
+        return "url(#" + id + ")";
+    };
+    // fill="..." or stroke="..." (with its opacity), in a colour or a gradient.
+    auto paintAttrs = [&](const char* what, const Color& color, const Gradient& g, const gradient::Frame& frame) {
+        if (g.active()) {
+            return std::string(" ") + what + "=\"" + gradientPaint(g, frame) + '"';
+        }
+        std::string a = std::string(" ") + what + "=\"" + rgb(color) + '"';
+        if (color.a != 255) {
+            a += std::string(" ") + what + "-opacity=\"" + num(color.a / 255.0) + '"';
+        }
+        return a;
+    };
 
     // With several layers, each is an Inkscape layer holding its parts as sublayers.
     const bool layered = s.layers().size() > 1;
@@ -238,10 +303,11 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
     auto writeCurve = [&](const Item& item) {
         const StrokeStyle& st = item.style;
         const double w = st.width > 0.0 ? st.width : kHairline;
-        std::string style = " fill=\"none\" stroke=\"" + rgb(st.color) + '"';
-        if (st.color.a != 255) {
-            style += " stroke-opacity=\"" + num(st.color.a / 255.0) + '"';
-        }
+        const auto frame = strokeFrames.find(item.curve);
+        std::string style = " fill=\"none\""
+                            + paintAttrs("stroke", st.color,
+                                         frame != strokeFrames.end() ? st.gradient : Gradient{},
+                                         frame != strokeFrames.end() ? frame->second : gradient::Frame{});
         style += " stroke-width=\"" + num(w) + '"';
         const std::vector<double> dashes = dashPattern(st.dash);
         if (dashes.empty()) {
@@ -332,11 +398,9 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
                     loop(hole);
                 }
                 d.pop_back();
-                out << indent << "  <path d=\"" << d << "\" fill=\"" << rgb(a.color) << '"';
-                if (a.color.a != 255) {
-                    out << " fill-opacity=\"" << num(a.color.a / 255.0) << '"';
-                }
-                out << " fill-rule=\"evenodd\" stroke=\"none\"/>\n";
+                out << indent << "  <path d=\"" << d << '"'
+                    << paintAttrs("fill", a.color, a.gradient, gradient::fillFrame(a.region))
+                    << " fill-rule=\"evenodd\" stroke=\"none\"/>\n";
             }
             close();
         }
@@ -355,11 +419,8 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
                     continue;
                 }
                 d.pop_back();
-                out << indent << "  <path d=\"" << d << "\" fill=\"" << rgb(t.color) << '"';
-                if (t.color.a != 255) {
-                    out << " fill-opacity=\"" << num(t.color.a / 255.0) << '"';
-                }
-                out << " fill-rule=\"nonzero\" stroke=\"none\"/>\n";
+                out << indent << "  <path d=\"" << d << '"' << paintAttrs("fill", t.color, t.gradient, t.frame)
+                    << " fill-rule=\"nonzero\" stroke=\"none\"/>\n";
             }
             close();
         }
@@ -389,7 +450,7 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
         }
     }
     out << "</svg>\n";
-    return out.str();
+    return head + (defs.empty() ? std::string() : "  <defs>\n" + defs + "  </defs>\n") + out.str();
 }
 // ---------------------------------------------------------------------------------------------
 // DXF
@@ -531,7 +592,8 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
             }
         }
         else if (const StrokeStyle* style = s.stroke(id); style && o.styles && !style->none()) {
-            items.push_back({id, "STROKES", lineTypeFor(style->dash), nearestAci(style->color)});
+            items.push_back({id, "STROKES", lineTypeFor(style->dash),
+                             nearestAci(style->gradient.active() ? style->gradient.average() : style->color)});  // (DXF lines are one colour)
         }
         else {
             items.push_back({id, "GEOMETRY"});
@@ -548,7 +610,7 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
         if (!s.hasEntity(t.anchor) || !layerShown(s, id)) {
             continue;
         }
-        const int color = t.hasColor && o.styles ? nearestAci(t.color) : 256;
+        const int color = t.hasColor && o.styles ? nearestAci(t.gradient.active() ? t.gradient.average() : t.color) : 256;
         for (const auto& contour : t.shape) {
             TextOutline out{color, {}};
             for (const Point& p : contour) {

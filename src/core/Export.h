@@ -16,7 +16,7 @@ struct SvgOptions
     bool fills = true;
     bool undecorated = true;    // curves without a stroke, drawn in `plain`
     bool construction = false;  // construction geometry, dashed grey
-    StrokeStyle plain{{0, 0, 0, 255}, 0.25, Dash::Solid};
+    StrokeStyle plain{{0, 0, 0, 255}, 0.25, Dash::Solid, {}};
     double margin = 2.0;        // mm around the drawing
 
     // For icons: a fixed canvas (sketch x0, y0, x1, y1) instead of fitting the drawing. The SVG

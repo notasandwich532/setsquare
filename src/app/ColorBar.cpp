@@ -297,6 +297,9 @@ void ColorBar::syncFromSelection()
 
 void ColorBar::pickColor(const core::Color& color, bool second)
 {
+    if (m_view.offerColor(color, second)) {
+        return;  // the tool took it (the gradient tool: for its selected stop)
+    }
     SketchView::Paint p = m_view.paint();
     (second ? p.color2 : p.color1) = color;
     m_view.setPaint(p);
@@ -377,6 +380,7 @@ void ColorBar::applyToSelection(int parts)
         core::StrokeStyle style = s.stroke(id) ? *s.stroke(id) : paint;
         if (parts & ColorPart) {
             style.color = paint.color;
+            style.gradient = {};  // a plain colour replaces a gradient
         }
         if (parts & WidthPart) {
             style.width = paint.width;

@@ -16,6 +16,8 @@ drawapp_warnings(drawdoc)
 add_library(drawapp_lib STATIC
     ColorBar.cpp
     ColorBar.h
+    GradientEditor.cpp
+    GradientEditor.h
     CommandPanel.cpp
     CommandPanel.h
     NumberInput.cpp
@@ -56,6 +58,8 @@ add_library(drawapp_lib STATIC
     tools/ShapeTools.h
     tools/StyleTools.cpp
     tools/StyleTools.h
+    tools/GradientTool.cpp
+    tools/GradientTool.h
     tools/Tool.h
     tools/Handles.cpp
     tools/Handles.h

@@ -13,6 +13,7 @@
 #include "tools/ShapeTools.h"
 #include "tools/CurveTools.h"
 #include "tools/ProjectTool.h"
+#include "tools/GradientTool.h"
 #include "tools/StyleTools.h"
 #include "tools/TextTool.h"
 #include "tools/TransformTools.h"
@@ -129,7 +130,7 @@ void SketchView::setTool(ToolKind kind)
         m_tool->cancel();
         m_tool.reset();  // before the new one starts (a command tidies up as it goes)
     }
-    if (kind != ToolKind::Select && kind != ToolKind::StrokeBrush && kind != ToolKind::Fill) {
+    if (kind != ToolKind::Select && kind != ToolKind::StrokeBrush && kind != ToolKind::Fill && kind != ToolKind::Gradient) {
         setPresentation(false);  // editing geometry: see it (and its constraints) properly
     }
     showOptionsPanel(kind);
@@ -193,6 +194,7 @@ void SketchView::setTool(ToolKind kind)
         case ToolKind::Paste: m_tool = std::make_unique<PasteTool>(*this, m_pasteFragment); break;
         case ToolKind::StrokeBrush: m_tool = std::make_unique<StrokeBrushTool>(*this); break;
         case ToolKind::Fill: m_tool = std::make_unique<FillTool>(*this); break;
+        case ToolKind::Gradient: m_tool = std::make_unique<GradientTool>(*this); break;
         case ToolKind::Project: m_tool = std::make_unique<ProjectTool>(*this); break;
         case ToolKind::Ellipse: m_tool = std::make_unique<EllipseTool>(*this); break;
         case ToolKind::SplineFit: m_tool = std::make_unique<SplineTool>(*this, core::SplineKind::Fit); break;
@@ -282,6 +284,26 @@ void SketchView::setPaint(const Paint& paint)
     m_paint = paint;
     refreshTool();  // e.g. the stroke brush's preview
     emit paintChanged();
+}
+
+bool SketchView::offerColor(const core::Color& color, bool second)
+{
+    return m_tool && m_tool->takeColor(color, second);
+}
+
+void SketchView::setGradient(const core::Gradient& gradient)
+{
+    if (gradient == m_gradient) {
+        return;
+    }
+    m_gradient = gradient;
+    refreshTool();
+    emit gradientChanged();
+}
+
+GradientTool* SketchView::gradientTool() const
+{
+    return m_toolKind == ToolKind::Gradient ? static_cast<GradientTool*>(m_tool.get()) : nullptr;
 }
 
 QPainterPath SketchView::textPath(const core::Text& t) const
@@ -386,6 +408,43 @@ QPen SketchView::strokePen(const core::StrokeStyle& style) const
         }
     }
     return pen;
+}
+
+QBrush SketchView::gradientBrush(const core::Gradient& g, const core::gradient::Frame& frame, double alpha) const
+{
+    const core::gradient::Placed p = core::gradient::place(g, frame);
+    QGradientStops stops;
+    for (const core::GradientStop& s : p.stops) {
+        QColor c(s.color.r, s.color.g, s.color.b, s.color.a);
+        c.setAlphaF(c.alphaF() * alpha);
+        stops.append({s.offset, c});
+    }
+    if (stops.size() == 1) {
+        stops.append({1.0, stops.front().second});
+    }
+    const QGradient::Spread spread = p.spread == core::GradientSpread::Reflect ? QGradient::ReflectSpread
+                                     : p.spread == core::GradientSpread::Repeat ? QGradient::RepeatSpread
+                                                                                 : QGradient::PadSpread;
+    if (p.kind == core::GradientKind::Linear) {
+        QLinearGradient lg(toScreen(p.start), toScreen(p.end));
+        lg.setStops(stops);
+        lg.setSpread(spread);
+        return QBrush(lg);
+    }
+    // A circle round the origin, then moved, turned and squashed into place on screen (y down,
+    // as in the SVG export).
+    const double r = std::max(p.radius * m_zoom, 1e-6);
+    QRadialGradient rg(QPointF(0, 0), r, QPointF(p.focalLocal.x * m_zoom, -p.focalLocal.y * m_zoom));
+    rg.setStops(stops);
+    rg.setSpread(spread);
+    QBrush brush(rg);
+    QTransform t;
+    const QPointF c = toScreen(p.center);
+    t.translate(c.x(), c.y());
+    t.rotateRadians(-p.angle);
+    t.scale(1.0, p.aspect);
+    brush.setTransform(t);
+    return brush;
 }
 
 void SketchView::setPasteFragment(core::Sketch fragment)
@@ -940,6 +999,7 @@ void SketchView::drawSketch(QPainter& painter) const
 
     // Layer by layer, from the bottom: fills, strokes, texts, then the geometry.
     const core::regions::Arrangements arrangements(sketch);
+    const std::map<core::Id, core::gradient::Frame> strokeFrames = core::gradient::strokeFrames(sketch);
     for (auto layerIt = sketch.layers().rbegin(); layerIt != sketch.layers().rend(); ++layerIt) {
     const core::Id layer = layerIt->id;
     if (!layerIt->visible) {
@@ -957,10 +1017,13 @@ void SketchView::drawSketch(QPainter& painter) const
             if (!region) {
                 continue;  // its outline is open: nothing to fill until it's closed again
             }
-            QColor color(f.color.r, f.color.g, f.color.b, f.color.a);
-            if (!m_presentation) {
-                color.setAlphaF(color.alphaF() * 0.35);
+            const double alpha = m_presentation ? 1.0 : 0.35;
+            if (f.gradient.active()) {
+                painter.fillPath(regionPath(*region), gradientBrush(f.gradient, core::gradient::fillFrame(*region), alpha));
+                continue;
             }
+            QColor color(f.color.r, f.color.g, f.color.b, f.color.a);
+            color.setAlphaF(color.alphaF() * alpha);
             painter.fillPath(regionPath(*region), color);
         }
     }
@@ -978,7 +1041,10 @@ void SketchView::drawSketch(QPainter& painter) const
             continue;
         }
         QPen pen = strokePen(style);
-        if (!m_presentation) {
+        if (const auto frame = strokeFrames.find(id); frame != strokeFrames.end()) {
+            pen.setBrush(gradientBrush(style.gradient, frame->second, m_presentation ? 1.0 : 0.3));
+        }
+        else if (!m_presentation) {
             QColor faded = pen.color();
             faded.setAlphaF(faded.alphaF() * 0.3);
             pen.setColor(faded);
@@ -997,11 +1063,17 @@ void SketchView::drawSketch(QPainter& painter) const
         const QPainterPath path = textPath(t);
         QColor color = t.hasColor ? QColor(t.color.r, t.color.g, t.color.b, t.color.a)
                                   : styleFor(sketch.entity(t.anchor)).color();
+        const bool graded = t.hasColor && t.gradient.active();
         if (m_presentation) {
             if (!t.hasColor) {
                 color = colors.fullyConstrained;  // as plain geometry shows
             }
-            painter.fillPath(path, color);
+            if (graded) {
+                painter.fillPath(path, gradientBrush(t.gradient, core::gradient::textFrame(sketch, t)));
+            }
+            else {
+                painter.fillPath(path, color);
+            }
             if (m_selection.contains(id) || id == m_hovered) {
                 painter.strokePath(path, QPen(m_selection.contains(id) ? colors.selection : colors.hover, 1.0));
             }
@@ -1012,7 +1084,12 @@ void SketchView::drawSketch(QPainter& painter) const
         }
         QColor faint = color;
         faint.setAlphaF(faint.alphaF() * 0.3);
-        painter.fillPath(path, faint);
+        if (graded) {
+            painter.fillPath(path, gradientBrush(t.gradient, core::gradient::textFrame(sketch, t), 0.3));
+        }
+        else {
+            painter.fillPath(path, faint);
+        }
         const bool hot = m_selection.contains(id) || id == m_hovered;
         const QColor edge = m_selection.contains(id) ? colors.selection : id == m_hovered ? colors.hover : color;
         painter.strokePath(path, QPen(edge, hot ? kHighlightWidth : 1.0));
