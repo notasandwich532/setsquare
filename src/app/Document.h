@@ -69,6 +69,9 @@ public:
     // Changes a dimension or feature value (pattern spacing/angle, offset distance), rejecting
     // values the solver can't satisfy. A feature's source geometry stays put.
     bool setDimensionValue(core::Id dimension, double value, QString* error = nullptr);
+    // Groups items (curves, points) so they keep their places relative to each other (see
+    // core/Groups.h). Checked like a constraint; kNoId (and why) if it can't be.
+    core::Id addGroup(const std::vector<core::Id>& items, QString* error = nullptr);
 
     // Sublayers: which one is being edited, and which are shown. Not undo steps (like scrolling
     // the view), but saved with the drawing. (Adding, renaming, deleting and moving things between

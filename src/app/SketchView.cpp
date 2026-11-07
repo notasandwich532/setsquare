@@ -203,6 +203,7 @@ void SketchView::setTool(ToolKind kind)
         case ToolKind::ResetFill: m_tool = std::make_unique<ResetFillTool>(*this); break;
         case ToolKind::Image: m_tool = std::make_unique<ImageTool>(*this); break;
         case ToolKind::Eyedropper: m_tool = std::make_unique<EyedropperTool>(*this); break;
+        case ToolKind::Group: m_tool = std::make_unique<GroupTool>(*this); break;
         case ToolKind::Project: m_tool = std::make_unique<ProjectTool>(*this); break;
         case ToolKind::Ellipse: m_tool = std::make_unique<EllipseTool>(*this); break;
         case ToolKind::SplineFit: m_tool = std::make_unique<SplineTool>(*this, core::SplineKind::Fit); break;

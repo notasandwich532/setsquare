@@ -199,6 +199,9 @@ enum class ConstraintType
     Concentric,     // (circle|arc, circle|arc)
     Symmetric,      // (point, point, line)
     Collinear,      // (line, line)
+    Group,          // (points..., circles...): held rigidly together (they move and turn as one);
+                    // params = {anchor distance, then each further point's place from the
+                    // anchors, then each circle's radius} (see core/Groups.h)
     Ratio,          // (line, line) lengths, or (circle|arc, circle|arc) radii: the first is 
                     // alue times the second (value > 0; editable like a dimension's)
 

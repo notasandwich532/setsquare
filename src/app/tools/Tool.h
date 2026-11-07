@@ -79,6 +79,7 @@ enum class ToolKind
     ResetFill,
     Image,
     Eyedropper,
+    Group,
 };
 
 struct ToolEvent

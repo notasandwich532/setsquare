@@ -180,6 +180,27 @@ def perpendicular():
     return finish("perpendicular")
 
 
+def group():
+    """A square and a circle held together in a frame."""
+    start()
+    frame = stroke(s.rectangle((2, 2), (22, 22)), GREY, width=1.5, dash="dashed")
+    pin(frame[0].p1, 2, 2)
+    s.distance(frame[0], value=20)
+    s.distance(frame[1], value=20)
+    square = stroke(s.rectangle((5, 10.5), (13.5, 19)), RED)
+    pin(square[0].p1, 5, 10.5)
+    s.distance(square[0], value=8.5)
+    s.distance(square[1], value=8.5)
+    s.solve()
+    s.fill(at=(9, 15), color=RED + "66")
+    ring = stroke(s.circle((15.5, 8.5), 4), RED)
+    pin(ring.center, 15.5, 8.5)
+    s.radius(ring, value=4)
+    s.solve()
+    s.fill(at=(15.5, 8.5), color=RED + "66")
+    return finish("group")
+
+
 def fix():
     """A padlock."""
     start()
@@ -1157,7 +1178,7 @@ def icon_presentation():
 ICONS = {
     f.__name__: f
     for f in [horizontal_vertical, coincident, tangent, equal, ratio, parallel, perpendicular, fix, midpoint, concentric,
-              collinear, symmetric, dimension]
+              collinear, symmetric, dimension, group]
 }
 ICONS.update({
     f.__name__.removeprefix("icon_"): f

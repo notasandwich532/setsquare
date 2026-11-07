@@ -74,6 +74,9 @@ QString Editor::constraintCall(const core::Sketch& s, Id id)
     for (Id r : c.refs) {
         args << name(s, r);
     }
+    if (c.type == core::ConstraintType::Group) {
+        return QStringLiteral("%1 = s.group([%2])").arg(name(s, id), args.join(QStringLiteral(", ")));
+    }
     if (c.type == core::ConstraintType::Ratio) {
         args << QStringLiteral("value=") + number(c.value);
     }

@@ -132,6 +132,31 @@ std::vector<Id> expand(const Sketch& s, const std::vector<Id>& selection)
     return {out.begin(), out.end()};
 }
 
+namespace
+{
+// A group's settings for a copy of it scaled (and maybe mirrored): its sizes scale, and its points'
+// places across its anchor line flip in a mirror image. Other constraints keep theirs.
+std::vector<double> groupParams(const Sketch& s, const Constraint& c, double scale, bool mirrored)
+{
+    if (c.type != ConstraintType::Group) {
+        return c.params;
+    }
+    std::vector<double> p = c.params;
+    const size_t points = static_cast<size_t>(std::ranges::count_if(
+        c.refs, [&](Id r) { return s.hasEntity(r) && s.entity(r).kind() == EntityKind::Point; }));
+    // (anchor distance, then (along, across) per further point, then radii)
+    p[0] *= scale;
+    for (size_t i = 2; i < points; ++i) {
+        if (mirrored) {
+            p[2 + 2 * (i - 2)] = -p[2 + 2 * (i - 2)];
+        }
+    }
+    for (size_t i = 1 + 2 * (points - 2); i < p.size(); ++i) {
+        p[i] *= scale;
+    }
+    return p;
+}}  // namespace
+
 std::map<Id, Id> copy(const Sketch& from, Sketch& to, const std::vector<Id>& selection, const Affine& t,
                       bool constraints)
 {
@@ -246,7 +271,7 @@ std::map<Id, Id> copy(const Sketch& from, Sketch& to, const std::vector<Id>& sel
                 refs.push_back(map.at(r));
             }
             const double value = isLength(type) ? c.value * scale : c.value;
-            const Id made = to.addConstraint(type, std::move(refs), value);
+            const Id made = to.addConstraint(type, std::move(refs), value, groupParams(from, c, scale, t.mirrors()));
             const Vec2 label = t.applyLinear({c.labelX, c.labelY});
             to.setConstraintLabel(made, label.x, label.y);
             to.setConstraintFlip(made, c.flip);
@@ -293,6 +318,16 @@ void apply(Sketch& s, const std::vector<Id>& selection, const Affine& t)
         if (isLength(c.type) && std::ranges::all_of(c.refs, [&](Id r) { return moving.contains(r); })) {
             scaled.push_back(id);
         }
+    }
+    // Groups moved whole keep their shape at the new size.
+    std::vector<std::pair<Id, std::vector<double>>> regrouped;
+    for (const auto& [id, c] : s.constraints()) {
+        if (c.type == ConstraintType::Group && std::ranges::all_of(c.refs, [&](Id r) { return moving.contains(r); })) {
+            regrouped.push_back({id, groupParams(s, c, scale, false)});
+        }
+    }
+    for (auto& [id, params] : regrouped) {
+        s.setConstraintParams(id, std::move(params));
     }
     for (Id id : scaled) {
         const Constraint& c = s.constraint(id);

@@ -3,6 +3,7 @@
 #include "TextShapes.h"
 
 #include <core/Features.h>
+#include <core/Groups.h>
 #include <core/Regions.h>
 #include <core/Serialize.h>
 
@@ -139,8 +140,40 @@ core::Id Document::midpointOnLine(const std::vector<core::Id>& refs, QString* er
     return id;
 }
 
+core::Id Document::addGroup(const std::vector<core::Id>& items, QString* error)
+{
+    core::Sketch working = m_sketch;
+    core::Id id = core::kNoId;
+    try {
+        id = core::group::create(working, items);
+    }
+    catch (const core::SketchError& e) {
+        if (error) {
+            *error = errorText(e);
+        }
+        return core::kNoId;
+    }
+    if (!commitChecked(std::move(working), error, {}, {id})) {
+        return core::kNoId;
+    }
+    QStringList names;
+    for (core::Id item : items) {
+        if (m_sketch.hasEntity(item) && !m_sketch.isReference(item)) {
+            names << Editor::name(m_sketch, item);
+        }
+    }
+    record(QStringLiteral("%1 = s.group([%2])").arg(Editor::name(m_sketch, id), names.join(QStringLiteral(", "))));
+    return id;
+}
+
 bool Document::setDimensionValue(core::Id dimension, double value, QString* error)
 {
+    if (core::group::holder(m_sketch, dimension) != core::kNoId) {
+        if (error) {
+            *error = tr("It's inside a group, which holds its size: ungroup it (delete the group) to change it");
+        }
+        return false;
+    }
     core::Sketch working = m_sketch;
     std::vector<core::Id> hold;
     try {

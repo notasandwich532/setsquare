@@ -1,5 +1,7 @@
 #include "Solver.h"
 
+#include "Groups.h"
+
 #include "Curves.h"
 #include "Features.h"
 
@@ -384,6 +386,8 @@ struct Solver::Impl
         return arc;
     }
     std::map<std::pair<Id, Id>, Id> chainArc;  // (centre, end chain) -> an arc in it
+    std::set<Id> frozenGroups;   // groups holding two fixed points: all fixed
+    std::set<Id> frozenCircles;  // their circles
     // Whether a point is on a spline by its making: one it passes through, or its own end.
     static bool splineEndOnCurve(const Spline& sp, Id p)
     {
@@ -569,6 +573,20 @@ void Solver::Impl::build(const Sketch& sketch)
         }
     }
 
+    // A group holding two fixed points can't move at all: all of it is fixed (its equations would
+    // only relate fixed values).
+    for (const auto& [id, c] : sketch.constraints()) {
+        if (c.type != ConstraintType::Group) {
+            continue;
+        }
+        const group::Members m = group::members(sketch, c);
+        if (std::ranges::count_if(m.points, [&](Id p) { return fixedPoints.contains(p); }) >= 2) {
+            frozenGroups.insert(id);
+            fixedPoints.insert(m.points.begin(), m.points.end());
+            frozenCircles.insert(m.circles.begin(), m.circles.end());
+        }
+    }
+
     std::set<double*> unknownSet;
     auto declare = [&](double* p) {
         unknowns.push_back(p);
@@ -598,7 +616,7 @@ void Solver::Impl::build(const Sketch& sketch)
             GCS::Circle gc;
             gc.center = points.at(c->center);
             gc.rad = alloc(c->radius);
-            if (!fixed) {
+            if (!fixed && !frozenCircles.contains(id)) {
                 declare(gc.rad);
             }
             circles.emplace(id, gc);
@@ -744,7 +762,31 @@ void Solver::Impl::build(const Sketch& sketch)
         entityUnknowns.emplace(id, std::move(params));
     }
 
+    // Constraints wholly inside a group are carried by it (see core/Groups.h), except the first
+    // in each that sets an orientation: that one stops the group turning.
+    struct Held
+    {
+        group::Members members;
+        bool oriented = false;
+    };
+    std::vector<Held> groups;
     for (const auto& [id, c] : sketch.constraints()) {
+        if (c.type == ConstraintType::Group) {
+            groups.push_back({group::members(sketch, c)});
+        }
+    }
+    for (const auto& [id, c] : sketch.constraints()) {
+        if (c.type != ConstraintType::Group && !c.refs.empty()) {
+            const auto inside = std::ranges::find_if(groups, [&](const Held& g) {
+                return std::ranges::all_of(c.refs, [&](Id r) { return group::covers(sketch, g.members, r); });
+            });
+            if (inside != groups.end()) {
+                if (!group::setsOrientation(c.type) || inside->oriented) {
+                    continue;
+                }
+                inside->oriented = true;
+            }
+        }
         addConstraint(sketch, c);
     }
 
@@ -1256,6 +1298,44 @@ void Solver::Impl::addConstraint(const Sketch& sketch, const Constraint& c)
             const double rad = c.value * kPi / 180.0;
             const double betweenRays = current >= 0.0 ? rad : -rad;
             sys.addConstraintL2LAngle(l1, l2, alloc(wrapPi(betweenRays - rayOffset)), tag);
+            break;
+        }
+
+        case ConstraintType::Group: {
+            if (frozenGroups.contains(c.id)) {
+                break;  // (all fixed)
+            }
+            // Each further point at its place in the anchors' frame, the anchors at their distance,
+            // the circles at their radii.
+            const group::Members m = group::members(sketch, c);
+            auto equation = [&](GCS::VEC_pD params, ConstraintNumeric::Fn fn) {
+                auto* eq = new ConstraintNumeric(std::move(params), std::move(fn));
+                eq->setTag(tag);
+                sys.addConstraint(eq);  // the system owns it
+            };
+            const GCS::Point& a0 = pt(m.points[0]);
+            const GCS::Point& a1 = pt(m.points[1]);
+            const double length = c.params[0];
+            equation({a0.x, a0.y, a1.x, a1.y},
+                     [length](const std::vector<double>& v) { return std::hypot(v[2] - v[0], v[3] - v[1]) - length; });
+            for (size_t i = 2; i < m.points.size(); ++i) {
+                const double along = c.params[1 + 2 * (i - 2)], across = c.params[2 + 2 * (i - 2)];
+                const GCS::Point& p = pt(m.points[i]);
+                for (int component = 0; component < 2; ++component) {
+                    equation({a0.x, a0.y, a1.x, a1.y, p.x, p.y},
+                             [along, across, component](const std::vector<double>& v) {
+                                 const double ux = v[2] - v[0], uy = v[3] - v[1];
+                                 return component == 0 ? v[4] - v[0] - (along * ux - across * uy)
+                                                       : v[5] - v[1] - (along * uy + across * ux);
+                             });
+                }
+            }
+            const size_t first = 1 + 2 * (m.points.size() - 2);
+            for (size_t i = 0; i < m.circles.size(); ++i) {
+                const double radius = c.params[first + i];
+                equation({circles.at(m.circles[i]).rad},
+                         [radius](const std::vector<double>& v) { return v[0] - radius; });
+            }
             break;
         }
 

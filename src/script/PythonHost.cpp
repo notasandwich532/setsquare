@@ -1551,6 +1551,20 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
         .def("concentric", constraintFn(ConstraintType::Concentric))
         .def("symmetric", constraintFn(ConstraintType::Symmetric), "(point, point, line)")
         .def("collinear", constraintFn(ConstraintType::Collinear), "(line, line)")
+        .def("group", [](const SketchH&, py::handle items) {
+            const std::vector<Id> ids = itemsOf(items);
+            Call call;
+            QString error;
+            const Id id = call.target().addGroup(ids, &error);
+            if (id == kNoId) {
+                throw py::value_error(error.toStdString());
+            }
+            return wrap(id);
+        }, py::arg("items"),
+           "Group items (curves, points): they keep their places relative to each other, like a rigid group "
+           "in Fusion, but move and turn together unless something else holds them (a fixed point, constraints to "
+           "the origin or axes). Constraints inside the group are carried by it; one setting an orientation "
+           "(horizontal, vertical) still stops it turning. Delete the group (s.delete(k)) to ungroup.")
         .def("ratio", [](const SketchH&, py::handle a, py::handle b, py::object value) {
             return addConstraint(ConstraintType::Ratio, {idOf(a), idOf(b)}, value, py::none());
         }, py::arg("a"), py::arg("b"), py::arg("value") = py::none(),

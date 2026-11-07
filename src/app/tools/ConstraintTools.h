@@ -70,3 +70,35 @@ private:
     std::vector<core::Id> m_picks;
     core::Vec2 m_mouse;
 };
+
+// Group: holds geometry together, like a rigid group (see core/Groups.h): the members keep their
+// places relative to each other but move and turn as one, unless something else holds them.
+// Select things first and pick Group to group them at once; or click curves and points to
+// gather them (drag a box for many; click one again to leave it out), then Enter. Delete the
+// group's symbol to ungroup.
+class GroupTool : public Tool
+{
+public:
+    using Tool::Tool;
+
+    QString hint() const override;
+    void activate() override;
+    void press(const ToolEvent& e) override;
+    void move(const ToolEvent& e) override;
+    void release(const ToolEvent& e) override;
+    bool keyPress(int key, const QString& text) override;
+    bool cancel() override;
+    void paintOverlay(QPainter& painter) override;
+
+    const std::vector<core::Id>& gathered() const { return m_items; }
+    bool finish();  // groups what's gathered; false (with a message) if it can't
+
+private:
+    core::Id itemAt(QPointF screen) const;
+
+    std::vector<core::Id> m_items;
+    core::Id m_hover = core::kNoId;
+    bool m_pressed = false;
+    bool m_boxing = false;
+    QPointF m_pressScreen, m_boxEnd;
+};

@@ -185,6 +185,7 @@ const std::pair<ToolKind, const char*> kToolNames[] = {
     {ToolKind::ResetFill, "reset_fill"},
     {ToolKind::Image, "image"},
     {ToolKind::Eyedropper, "eyedropper"},
+    {ToolKind::Group, "group"},
 };
 
 QString macrosFolder()
@@ -889,6 +890,7 @@ void MainWindow::createActions()
                                 {ToolKind::Symmetric, tr("Symmetric"), {}},
                                 {ToolKind::Collinear, tr("Collinear"), {}},
                                 {ToolKind::Fix, tr("Fix/Unfix"), QKeySequence(Qt::Key_F)},
+                                {ToolKind::Group, tr("Group"), QKeySequence(Qt::CTRL | Qt::Key_G)},
                             });
 
     sketchMenu->addSeparator();

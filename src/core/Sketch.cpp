@@ -56,6 +56,7 @@ const char* toString(ConstraintType type)
         case ConstraintType::Concentric: return "concentric";
         case ConstraintType::Symmetric: return "symmetric";
         case ConstraintType::Collinear: return "collinear";
+        case ConstraintType::Group: return "group";
         case ConstraintType::Ratio: return "ratio";
         case ConstraintType::Distance: return "distance";
         case ConstraintType::HorizontalDistance: return "horizontalDistance";
@@ -1143,6 +1144,24 @@ void Sketch::validate(ConstraintType type, const std::vector<Id>& refs, double v
                 fail("value must be between 0 and 180 degrees");
             }
             break;
+        case ConstraintType::Group: {
+            size_t points = 0;
+            while (points < refs.size() && kindOf(refs[points]) == K::Point) {
+                ++points;
+            }
+            for (size_t i = points; i < refs.size(); ++i) {
+                if (kindOf(refs[i]) != K::Circle) {
+                    fail("expects points, then circles");
+                }
+            }
+            if (points < 2) {
+                fail("needs at least two points");
+            }
+            if (params.size() != 1 + 2 * (points - 2) + (refs.size() - points) || !(params[0] > 0.0)) {
+                fail("its shape doesn't match its members (make it with group::create)");
+            }
+            break;
+        }
         case ConstraintType::Offset:
         case ConstraintType::LinearPattern:
         case ConstraintType::CircularPattern:

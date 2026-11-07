@@ -351,6 +351,22 @@ std::vector<SketchView::Annotation> SketchView::layoutAnnotations() const
             }
             continue;
         }
+        if (c.type == ConstraintType::Group) {
+            // One symbol, the tool's icon, in the middle of its points (select it and Delete to
+            // ungroup).
+            QPointF sum;
+            int n = 0;
+            for (Id r : c.refs) {
+                if (s.hasEntity(r) && s.entity(r).kind() == core::EntityKind::Point) {
+                    sum += pos(r);
+                    ++n;
+                }
+            }
+            if (n > 0) {
+                glyphAt(sum / n, {}, QStringLiteral("group"));
+            }
+            continue;
+        }
         const QString symbol = symbolFor(c.type);
         const bool pointPair = (c.type == ConstraintType::Horizontal || c.type == ConstraintType::Vertical)
             && c.refs.size() == 2;

@@ -6,8 +6,10 @@
 
 #include <core/Curves.h>
 #include <core/Dimensions.h>
+#include <core/Geometry.h>
 
 #include <QPainter>
+#include <QPolygonF>
 
 #include <algorithm>
 #include <cmath>
@@ -517,5 +519,164 @@ void DimensionTool::paintOverlay(QPainter& painter)
         QColor color = theme::canvas().dimension;
         color.setAlpha(170);
         view().drawDimension(painter, layout, view().formatDimension(probe), color);
+    }
+}
+
+// =============================================================================================
+// GroupTool
+// =============================================================================================
+
+QString GroupTool::hint() const
+{
+    if (m_items.empty()) {
+        return QObject::tr("Group: click the curves and points to hold together (drag a box for many), then Enter. "
+                           "They'll keep their places relative to each other, moving and turning as one");
+    }
+    return QObject::tr("Group: %n gathered: click more (again: leave one out), then Enter to group them; Esc: none",
+                       nullptr, static_cast<int>(m_items.size()));
+}
+
+void GroupTool::activate()
+{
+    // Fusion's pre-selection: what's selected is grouped straight away.
+    const Sketch& s = doc().sketch();
+    std::vector<Id> selected;
+    for (Id id : view().selection()) {
+        if (s.hasEntity(id) && !s.isReference(id)) {
+            selected.push_back(id);
+        }
+    }
+    if (selected.empty()) {
+        return;
+    }
+    m_items = selected;
+    if (finish()) {
+        view().setSelection({});
+        QMetaObject::invokeMethod(&view(), [v = &view()] { v->setTool(ToolKind::Select); }, Qt::QueuedConnection);
+    }
+}
+
+bool GroupTool::finish()
+{
+    if (m_items.empty()) {
+        emit view().message(QObject::tr("Click what to group first"));
+        return false;
+    }
+    QString error;
+    const Id made = doc().addGroup(m_items, &error);
+    if (made == kNoId) {
+        emit view().message(error);
+        return false;
+    }
+    m_items.clear();
+    emit view().message(QObject::tr("Grouped: they now move as one (delete the group's symbol to ungroup)"));
+    refresh();
+    return true;
+}
+
+Id GroupTool::itemAt(QPointF screen) const
+{
+    core::PickOptions options = view().editableOptions(7.0);
+    const Id hit = core::pick(doc().sketch(), view().toWorld(screen), options);
+    return hit != kNoId && !doc().sketch().isReference(hit) ? hit : kNoId;
+}
+
+void GroupTool::move(const ToolEvent& e)
+{
+    if (m_pressed) {
+        const QPointF d = e.screen - m_pressScreen;
+        m_boxing = m_boxing || std::hypot(d.x(), d.y()) >= 4.0;
+        m_boxEnd = e.screen;
+    }
+    m_hover = m_boxing ? kNoId : itemAt(e.screen);
+    view().setHovered(m_hover);
+    refresh();
+}
+
+void GroupTool::press(const ToolEvent& e)
+{
+    if (e.button != Qt::LeftButton) {
+        return;
+    }
+    m_pressed = true;
+    m_boxing = false;
+    m_pressScreen = m_boxEnd = e.screen;
+}
+
+void GroupTool::release(const ToolEvent& e)
+{
+    if (e.button != Qt::LeftButton || !m_pressed) {
+        return;
+    }
+    m_pressed = false;
+    const Sketch& s = doc().sketch();
+    if (m_boxing) {
+        m_boxing = false;
+        const bool crossing = e.screen.x() < m_pressScreen.x();
+        for (Id id : core::boxSelect(s, view().toWorld(m_pressScreen), view().toWorld(e.screen), crossing,
+                                     s.activeSublayer())) {
+            if (!s.isReference(id) && std::ranges::find(m_items, id) == m_items.end()) {
+                m_items.push_back(id);
+            }
+        }
+    }
+    else if (const Id hit = itemAt(e.screen); hit != kNoId) {
+        if (const auto it = std::ranges::find(m_items, hit); it != m_items.end()) {
+            m_items.erase(it);
+        }
+        else {
+            m_items.push_back(hit);
+        }
+    }
+    refresh();
+}
+
+bool GroupTool::keyPress(int key, const QString& /*text*/)
+{
+    if (key == Qt::Key_Return || key == Qt::Key_Enter) {
+        finish();
+        return true;
+    }
+    return false;
+}
+
+bool GroupTool::cancel()
+{
+    if (m_boxing || !m_items.empty()) {
+        m_boxing = m_pressed = false;
+        m_items.clear();
+        refresh();
+        return true;
+    }
+    return false;
+}
+
+void GroupTool::paintOverlay(QPainter& painter)
+{
+    const Sketch& s = doc().sketch();
+    const QColor accent(0x4d, 0xa3, 0xff);
+    painter.setBrush(Qt::NoBrush);
+    for (Id id : m_items) {
+        if (!s.hasEntity(id)) {
+            continue;
+        }
+        if (s.entity(id).kind() == EntityKind::Point) {
+            painter.setPen(QPen(accent, 2.0));
+            painter.drawEllipse(view().toScreen(pos(s, id)), 5.0, 5.0);
+            continue;
+        }
+        QPolygonF line;
+        for (const Vec2& p : core::sample(s, id, 96)) {
+            line << view().toScreen(p);
+        }
+        painter.setPen(QPen(accent, 3.0));
+        painter.drawPolyline(line);
+    }
+    if (m_boxing) {
+        const bool crossing = m_boxEnd.x() < m_pressScreen.x();
+        QColor fill = crossing ? QColor(0x5a, 0xc8, 0x7a, 40) : QColor(0x4d, 0xa3, 0xff, 40);
+        painter.setPen(QPen(crossing ? QColor(0x5a, 0xc8, 0x7a) : accent, 1.0, crossing ? Qt::DashLine : Qt::SolidLine));
+        painter.setBrush(fill);
+        painter.drawRect(QRectF(m_pressScreen, m_boxEnd).normalized());
     }
 }
