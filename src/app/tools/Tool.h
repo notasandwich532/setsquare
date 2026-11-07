@@ -78,6 +78,7 @@ enum class ToolKind
     Gradient,
     ResetFill,
     Image,
+    Eyedropper,
 };
 
 struct ToolEvent

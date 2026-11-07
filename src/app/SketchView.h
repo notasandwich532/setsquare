@@ -50,6 +50,7 @@ public:
     // --- tools ---
     void setTool(ToolKind kind);
     ToolKind toolKind() const { return m_toolKind; }
+    ToolKind previousTool() const { return m_previousTool; }  // the one before this (not the eyedropper)
     QString hint() const;
     void refreshTool();  // repaint and re-publish the tool's hint
 
@@ -207,6 +208,7 @@ signals:
     void presentationChanged(bool on);
     void paintChanged();
     void gradientChanged();
+    void colorSampled(const core::Color& color);  // taken with the eyedropper
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -251,6 +253,7 @@ private:
 
     std::unique_ptr<Tool> m_tool;
     ToolKind m_toolKind = ToolKind::Select;
+    ToolKind m_previousTool = ToolKind::Select;
 
     std::set<core::Id> m_selection;
     core::Id m_hovered = core::kNoId;

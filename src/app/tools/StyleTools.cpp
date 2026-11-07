@@ -6,11 +6,18 @@
 #include <core/Features.h>
 #include <core/Geometry.h>
 
+#include <core/Gradient.h>
+
+#include <QClipboard>
+#include <QGuiApplication>
+#include <QMenu>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPolygonF>
 
+#include <algorithm>
 #include <cmath>
+#include <ranges>
 
 using core::Id;
 using core::kNoId;
@@ -366,4 +373,190 @@ void StrokeBrushTool::paintOverlay(QPainter& painter)
     }
     painter.setPen(view().strokePen(view().paint().stroke()));
     painter.drawPolyline(line);
+}
+
+// =============================================================================================
+// Eyedropper
+// =============================================================================================
+
+namespace
+{
+QIcon swatchIcon(const core::Color& c)
+{
+    QPixmap pm(16, 16);
+    pm.fill(QColor(c.r, c.g, c.b));
+    return QIcon(pm);
+}
+}  // namespace
+
+EyedropperTool::Chooser& EyedropperTool::chooser()
+{
+    static Chooser ask = [](const Sample& s, QPoint at) -> std::optional<bool> {
+        QMenu menu;
+        menu.setObjectName(QStringLiteral("eyedropperMenu"));
+        const QString hex = QString::fromStdString(s.color.hex());
+        QAction* title = menu.addAction(swatchIcon(s.color), QStringLiteral("%1  (%2)").arg(hex, s.what));
+        title->setEnabled(false);
+        menu.addSeparator();
+        QAction* one = menu.addAction(QObject::tr("Set as Colour &1 (strokes)"));
+        QAction* two = menu.addAction(QObject::tr("Set as Colour &2 (fills)"));
+        menu.addSeparator();
+        QAction* copy = menu.addAction(QObject::tr("&Copy %1").arg(hex));
+        QAction* chosen = menu.exec(at);
+        if (chosen == copy) {
+            QGuiApplication::clipboard()->setText(hex);
+        }
+        if (chosen == one || chosen == two) {
+            return chosen == two;
+        }
+        return std::nullopt;
+    };
+    return ask;
+}
+
+QString EyedropperTool::hint() const
+{
+    return QObject::tr("Eyedropper: click anything coloured (a stroke, fill, text or reference image) to take its "
+                       "colour, then choose Colour 1 or Colour 2");
+}
+
+std::optional<EyedropperTool::Sample> EyedropperTool::sample(QPointF screen, core::Vec2 world)
+{
+    const core::Sketch& s = doc().sketch();
+    // What's drawn on top first: strokes, text, fills, then images (under everything).
+    core::PickOptions options;
+    options.tolerance = kPickPixels / view().zoom();
+    options.points = false;
+    const Id hit = core::pick(s, world, options);
+    const core::StrokeStyle* style = hit != kNoId ? s.stroke(hit) : nullptr;
+    if (style && !style->none() && !s.entity(hit).construction && s.isShown(hit)) {
+        if (style->gradient.active()) {
+            if (const auto placed = core::gradient::place(style->gradient, s)) {
+                return Sample{core::gradient::colorAt(*placed, world), QObject::tr("stroke")};
+            }
+            return Sample{style->gradient.average(), QObject::tr("stroke")};
+        }
+        return Sample{style->color, QObject::tr("stroke")};
+    }
+    if (const Id text = view().textAt(screen); text != kNoId && s.text(text).hasColor) {
+        const core::Text& t = s.text(text);
+        if (t.gradient.active()) {
+            if (const auto placed = core::gradient::place(t.gradient, s)) {
+                return Sample{core::gradient::colorAt(*placed, world), QObject::tr("text")};
+            }
+        }
+        return Sample{t.color, QObject::tr("text")};
+    }
+    // Fills: the top layer's first, the topmost in it.
+    const core::regions::Arrangements arrangements(s);
+    for (const core::Layer& layer : s.layers()) {
+        if (!layer.visible) {
+            continue;
+        }
+        const core::Fill* found = nullptr;
+        for (const auto& [id, f] : s.fills()) {
+            if (f.layer != layer.id) {
+                continue;
+            }
+            const auto region = core::regions::resolve(arrangements, f);
+            if (region && region->contains(world)) {
+                found = &f;
+            }
+        }
+        if (found) {
+            if (found->gradient.active()) {
+                if (const auto placed = core::gradient::place(found->gradient, s)) {
+                    return Sample{core::gradient::colorAt(*placed, world), QObject::tr("fill")};
+                }
+                return Sample{found->gradient.average(), QObject::tr("fill")};
+            }
+            return Sample{found->color, QObject::tr("fill")};
+        }
+    }
+    // Reference images: their own pixel (not faded, nor under the grid).
+    if (!view().presentation()) {
+        std::optional<Sample> picked;
+        for (const core::Layer& layer : s.layers() | std::views::reverse) {  // (bottom first: top wins)
+            if (!layer.visible) {
+                continue;
+            }
+            for (const auto& [id, im] : s.images()) {
+                if (im.layer != layer.id || !im.visible || !im.contains({world.x, world.y})) {
+                    continue;
+                }
+                const QImage& picture = m_pictures.get(im, im.pixelWidth);
+                if (picture.isNull()) {
+                    continue;
+                }
+                core::Point f = im.fractions({world.x, world.y});
+                if (im.flipH) {
+                    f.x = 1.0 - f.x;
+                }
+                if (im.flipV) {
+                    f.y = 1.0 - f.y;
+                }
+                const int px = std::clamp(static_cast<int>(f.x * picture.width()), 0, picture.width() - 1);
+                const int py = std::clamp(static_cast<int>((1.0 - f.y) * picture.height()), 0, picture.height() - 1);
+                const QColor c = picture.pixelColor(px, py);
+                picked = Sample{{static_cast<std::uint8_t>(c.red()), static_cast<std::uint8_t>(c.green()),
+                                 static_cast<std::uint8_t>(c.blue()), static_cast<std::uint8_t>(c.alpha())},
+                                QObject::tr("image")};
+            }
+        }
+        return picked;
+    }
+    return std::nullopt;
+}
+
+void EyedropperTool::use(const core::Color& color, bool second)
+{
+    SketchView::Paint paint = view().paint();
+    (second ? paint.color2 : paint.color1) = color;
+    view().setPaint(paint);
+    emit view().colorSampled(color);
+    emit view().message(QObject::tr("Colour %1 is now %2").arg(second ? 2 : 1).arg(QString::fromStdString(color.hex())));
+    view().setTool(view().previousTool());  // (this tool is gone after this)
+}
+
+void EyedropperTool::move(const ToolEvent& e)
+{
+    m_hover = sample(e.screen, e.world);
+    m_hoverScreen = e.screen;
+    refresh();
+}
+
+void EyedropperTool::press(const ToolEvent& e)
+{
+    if (e.button != Qt::LeftButton) {
+        return;
+    }
+    const std::optional<Sample> picked = sample(e.screen, e.world);
+    if (!picked) {
+        emit view().message(QObject::tr("Nothing coloured there"));
+        return;
+    }
+    const std::optional<bool> second = chooser()(*picked, view().mapToGlobal(e.screen.toPoint()));
+    if (second) {
+        use(picked->color, *second);  // (this tool is gone after this)
+    }
+}
+
+void EyedropperTool::paintOverlay(QPainter& painter)
+{
+    if (!m_hover) {
+        return;
+    }
+    // A swatch by the cursor, with its code.
+    const QPointF at = m_hoverScreen + QPointF(16, 16);
+    const core::Color& c = m_hover->color;
+    painter.setPen(QPen(QColor(0xff, 0xff, 0xff), 1.5));
+    painter.setBrush(QColor(c.r, c.g, c.b));
+    painter.drawEllipse(QRectF(at, QSizeF(22, 22)));
+    const QString label = QString::fromStdString(c.hex());
+    const QRectF text(at + QPointF(28, 2), QSizeF(painter.fontMetrics().horizontalAdvance(label) + 10, 18));
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor(0x2b, 0x2f, 0x36, 230));
+    painter.drawRoundedRect(text, 3, 3);
+    painter.setPen(QColor(0xdf, 0xe5, 0xec));
+    painter.drawText(text, Qt::AlignCenter, label);
 }

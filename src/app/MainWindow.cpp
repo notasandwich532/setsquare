@@ -184,6 +184,7 @@ const std::pair<ToolKind, const char*> kToolNames[] = {
     {ToolKind::Gradient, "gradient"},
     {ToolKind::ResetFill, "reset_fill"},
     {ToolKind::Image, "image"},
+    {ToolKind::Eyedropper, "eyedropper"},
 };
 
 QString macrosFolder()
@@ -859,6 +860,7 @@ void MainWindow::createActions()
                                 {ToolKind::Fill, tr("Fill"), QKeySequence(Qt::Key_G)},
                                 {ToolKind::Gradient, tr("Gradient"), QKeySequence(Qt::SHIFT | Qt::Key_G)},
                                 {ToolKind::ResetFill, tr("Reset Fill"), {}},
+                                {ToolKind::Eyedropper, tr("Eyedropper"), QKeySequence(Qt::Key_I)},
                             });
     auto* colorBar = new ColorBar(*m_view, appearanceBar);
     appearanceBar->addWidget(colorBar);

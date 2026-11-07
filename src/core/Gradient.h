@@ -34,6 +34,11 @@ struct Placed
 // gradient's average colour until it's given geometry again.
 std::optional<Placed> place(const Gradient& g, const Sketch& sketch);
 
+// Where along a placed gradient a point is (0..1, with its spread applied past the ends), and so
+// the colour it's painted there.
+double offsetAt(const Placed& p, Vec2 world);
+Color colorAt(const Placed& p, Vec2 world);
+
 // What each part of a gradient can be: a point (linear ends, focal point) or a round or
 // elliptical curve (radial: circle, arc, ellipse, elliptical arc).
 bool canBePoint(const Sketch& sketch, Id id);

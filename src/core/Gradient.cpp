@@ -87,6 +87,46 @@ std::optional<Placed> place(const Gradient& g, const Sketch& s)
     return p;
 }
 
+double offsetAt(const Placed& p, Vec2 w)
+{
+    double t = 0.0;
+    if (p.kind == GradientKind::Linear) {
+        const double dx = p.end.x - p.start.x, dy = p.end.y - p.start.y;
+        const double len2 = dx * dx + dy * dy;
+        t = len2 > 0.0 ? ((w.x - p.start.x) * dx + (w.y - p.start.y) * dy) / len2 : 1.0;
+    }
+    else if (p.radius > 0.0) {
+        // In the radial's own frame (unsquashed): the circle through w of the family growing from
+        // the focal point (offset 0, radius 0) to the shape (offset 1, radius R).
+        const double c = std::cos(p.angle), s = std::sin(p.angle);
+        const double rx = w.x - p.center.x, ry = w.y - p.center.y;
+        const Vec2 local{rx * c + ry * s, (-rx * s + ry * c) / p.aspect};
+        const Vec2 d{local.x - p.focalLocal.x, local.y - p.focalLocal.y};
+        const Vec2 e{-p.focalLocal.x, -p.focalLocal.y};
+        const double a = e.x * e.x + e.y * e.y - p.radius * p.radius;  // < 0: the focal point is inside
+        const double b = -2.0 * (d.x * e.x + d.y * e.y);
+        const double c0 = d.x * d.x + d.y * d.y;
+        const double disc = std::max(0.0, b * b - 4.0 * a * c0);
+        t = a != 0.0 ? (-b - std::sqrt(disc)) / (2.0 * a) : 0.0;
+    }
+    switch (p.spread) {
+        case GradientSpread::Pad: return std::clamp(t, 0.0, 1.0);
+        case GradientSpread::Repeat: return t - std::floor(t);
+        case GradientSpread::Reflect: {
+            const double m = t - 2.0 * std::floor(t / 2.0);
+            return m > 1.0 ? 2.0 - m : m;
+        }
+    }
+    return std::clamp(t, 0.0, 1.0);
+}
+
+Color colorAt(const Placed& p, Vec2 world)
+{
+    Gradient g;
+    g.stops = p.stops;
+    return g.colorAt(offsetAt(p, world));
+}
+
 void check(const Sketch& s, const Gradient& g, Id layer)
 {
     if (!g.active()) {

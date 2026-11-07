@@ -261,6 +261,7 @@ ColorBar::ColorBar(SketchView& view, QWidget* parent)
 
     connect(&m_view, &SketchView::paintChanged, this, &ColorBar::syncFromView);
     connect(&m_view, &SketchView::selectionChanged, this, &ColorBar::syncFromSelection);
+    connect(&m_view, &SketchView::colorSampled, this, &ColorBar::addCustom);  // (eyedropped: kept to hand)
     syncFromView();
 }
 

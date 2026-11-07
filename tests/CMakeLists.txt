@@ -33,6 +33,7 @@ add_executable(app_tests
     app/test_constraint_tools.cpp
     app/test_document.cpp
     app/test_export.cpp
+    app/test_eyedropper.cpp
     app/test_gradient_tool.cpp
     app/test_icons.cpp
     app/test_images.cpp

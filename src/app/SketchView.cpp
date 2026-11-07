@@ -127,12 +127,15 @@ void SketchView::resetView()
 
 void SketchView::setTool(ToolKind kind)
 {
+    if (kind != m_toolKind && m_toolKind != ToolKind::Eyedropper) {
+        m_previousTool = m_toolKind;  // (the eyedropper goes back to it)
+    }
     if (m_tool) {
         m_tool->cancel();
         m_tool.reset();  // before the new one starts (a command tidies up as it goes)
     }
     if (kind != ToolKind::Select && kind != ToolKind::StrokeBrush && kind != ToolKind::Fill && kind != ToolKind::Gradient
-        && kind != ToolKind::ResetFill) {
+        && kind != ToolKind::ResetFill && kind != ToolKind::Eyedropper) {
         setPresentation(false);  // editing geometry: see it (and its constraints) properly
     }
     showOptionsPanel(kind);
@@ -199,6 +202,7 @@ void SketchView::setTool(ToolKind kind)
         case ToolKind::Gradient: m_tool = std::make_unique<GradientTool>(*this); break;
         case ToolKind::ResetFill: m_tool = std::make_unique<ResetFillTool>(*this); break;
         case ToolKind::Image: m_tool = std::make_unique<ImageTool>(*this); break;
+        case ToolKind::Eyedropper: m_tool = std::make_unique<EyedropperTool>(*this); break;
         case ToolKind::Project: m_tool = std::make_unique<ProjectTool>(*this); break;
         case ToolKind::Ellipse: m_tool = std::make_unique<EllipseTool>(*this); break;
         case ToolKind::SplineFit: m_tool = std::make_unique<SplineTool>(*this, core::SplineKind::Fit); break;

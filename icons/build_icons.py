@@ -1115,6 +1115,27 @@ def icon_image():
     return finish("image")
 
 
+def icon_eyedropper():
+    """A pipette, a drop of paint at its tip."""
+    start()
+    bulb = stroke(s.circle((18, 18), 3.5), GREY, width=1)
+    pin(bulb.center, 18, 18)
+    s.radius(bulb, value=3.5)
+    s.solve()
+    s.fill(at=(18, 18), color=GREY)
+    body = line((15, 15), (8.5, 8.5), GREY, width=3.5)
+    pin(body.p1, 15, 15)
+    pin(body.p2, 8.5, 8.5)
+    tip = line(body.p2, (5.6, 5.6), GREY, width=1.5)
+    pin(tip.p2, 5.6, 5.6)
+    drop = stroke(s.circle((4, 4), 1.7), AMBER, width=1)
+    pin(drop.center, 4, 4)
+    s.radius(drop, value=1.7)
+    s.solve()
+    s.fill(at=(4, 4), color=AMBER)
+    return finish("eyedropper")
+
+
 def icon_presentation():
     """An eye: the drawing as it will be seen."""
     start()
@@ -1146,7 +1167,7 @@ ICONS.update({
               icon_slot_overall, icon_slot_center_point, icon_arc_slot, icon_arc_slot_3point, icon_trim,
               icon_trim_construction, icon_extend, icon_break, icon_fillet, icon_chamfer_equal, icon_chamfer_2distances,
               icon_chamfer_angle, icon_move, icon_scale, icon_mirror, icon_rectangular_pattern, icon_circular_pattern,
-              icon_offset, icon_divide, icon_stroke_brush, icon_fill, icon_gradient, icon_reset_fill, icon_image, icon_presentation]
+              icon_offset, icon_divide, icon_stroke_brush, icon_fill, icon_gradient, icon_reset_fill, icon_image, icon_eyedropper, icon_presentation]
 })
 
 wanted = sys.argv[1:] or list(ICONS)
