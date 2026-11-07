@@ -7,11 +7,52 @@
 #include <QCommandLineParser>
 #include <QTimer>
 
+#include <QMainWindow>
+#include <QStatusBar>
+
 #include <cstdio>
+#include <exception>
+
+namespace
+{
+// An error that escapes an event handler (a bug) is reported rather than ending the app: Qt can't
+// carry exceptions through its event loop, so without this any one is a crash, and the drawing
+// with it.
+class SafeApplication : public QApplication
+{
+public:
+    using QApplication::QApplication;
+
+    bool notify(QObject* receiver, QEvent* event) override
+    {
+        try {
+            return QApplication::notify(receiver, event);
+        }
+        catch (const std::exception& e) {
+            report(QString::fromUtf8(e.what()));
+        }
+        catch (...) {
+            report(QStringLiteral("unknown error"));
+        }
+        return false;
+    }
+
+private:
+    static void report(const QString& what)
+    {
+        std::fprintf(stderr, "Internal error (the app carried on): %s\n", qPrintable(what));
+        for (QWidget* w : QApplication::topLevelWidgets()) {
+            if (auto* window = qobject_cast<QMainWindow*>(w)) {
+                window->statusBar()->showMessage(QObject::tr("Internal error (please report it): %1").arg(what), 8000);
+            }
+        }
+    }
+};
+}  // namespace
 
 int main(int argc, char* argv[])
 {
-    QApplication app(argc, argv);
+    SafeApplication app(argc, argv);
     QApplication::setApplicationName("drawing_app");
     QApplication::setOrganizationName("drawing_app");
     QApplication::setWindowIcon(icons::appIcon());

@@ -234,8 +234,8 @@ Id pick(const Sketch& sketch, Vec2 p, const PickOptions& options)
     if (bestPoint != kNoId) {
         return bestPoint;
     }
-    if (bestCurve != kNoId || !options.curves) {
-        return bestCurve;
+    if (bestCurve != kNoId || !options.curves || options.otherLayers != kNoId) {
+        return bestCurve;  // (the axes are in every layer: never another layer's)
     }
     // The axes are infinite and come last, so geometry drawn along them stays pickable.
     Id bestAxis = kNoId;

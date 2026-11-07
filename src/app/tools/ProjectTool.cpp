@@ -20,8 +20,7 @@ QString ProjectTool::hint() const
     if (s.layers().size() < 2) {
         return QObject::tr("Project: there's only one layer; add another in the Browser to project from it");
     }
-    if (m_hover != kNoId) {
-        const Id layer = s.layerOf(m_hover);
+    if (const Id layer = m_hover != kNoId ? s.layerOf(m_hover) : kNoId; s.hasLayer(layer)) {
         return QObject::tr("Project: click to bring this into %1 (from %2); double-click for its whole chain")
             .arg(QString::fromStdString(s.layer(s.activeLayer()).name), QString::fromStdString(s.layer(layer).name));
     }
