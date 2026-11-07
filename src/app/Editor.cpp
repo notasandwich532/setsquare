@@ -905,6 +905,34 @@ std::vector<Id> Editor::project(const std::vector<Id>& sources)
     return copies;
 }
 
+QString Editor::pageCall(const core::Page& p)
+{
+    QStringList args;
+    double w = 0, h = 0;
+    if (core::pageSizeByName(p.size, w, h)) {
+        args << QStringLiteral("\"%1\"").arg(QString::fromStdString(p.size));
+        if (p.landscape()) {
+            args << QStringLiteral("orientation=\"landscape\"");
+        }
+    }
+    else {
+        args << QStringLiteral("width=") + number(p.width) << QStringLiteral("height=") + number(p.height);
+    }
+    if (p.origin != core::PageOrigin::BottomLeft) {
+        args << QStringLiteral("origin=\"%1\"").arg(QString::fromLatin1(core::toString(p.origin)));
+    }
+    if (p.hasColor) {
+        args << QStringLiteral("color=\"%1\"").arg(QString::fromStdString(p.color.hex()));
+    }
+    return QStringLiteral("s.set_page(%1)").arg(args.join(QStringLiteral(", ")));
+}
+
+void Editor::setPage(const std::optional<core::Page>& page)
+{
+    m_sketch.setPage(page);
+    log(page ? pageCall(*page) : QStringLiteral("s.clear_page()"));
+}
+
 void Editor::breakLink(const std::vector<Id>& items)
 {
     for (Id id : items) {

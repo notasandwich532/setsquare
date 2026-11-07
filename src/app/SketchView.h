@@ -213,6 +213,7 @@ protected:
 
 private:
     void drawGrid(QPainter& painter) const;
+    void drawPage(QPainter& painter) const;  // the sheet (see core::Page)
     void drawSketch(QPainter& painter) const;
     void drawAnnotations(QPainter& painter) const;  // constraint symbols + dimensions
     void drawArcPath(QPainter& painter, const core::ArcShape& arc) const;

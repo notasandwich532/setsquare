@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <variant>
@@ -127,6 +128,41 @@ struct Layer
     bool visible = true;
     Id activeSublayer = kNoId;  // the sublayer last edited in it
 };
+
+// Where the sketch origin is on the page.
+enum class PageOrigin
+{
+    BottomLeft,
+    Center,
+    TopLeft,
+};
+const char* toString(PageOrigin origin);  // "bottom_left", "center", "top_left"
+bool pageOriginFromString(const std::string& name, PageOrigin& out);
+
+// The sheet the drawing is on (optional): shown on the canvas, and what the SVG export is the
+// size of. Millimetres; width and height as it's turned (landscape: width > height).
+struct Page
+{
+    std::string size = "A4";  // a standard size's name (see pageSizes()), or "custom"
+    double width = 210.0;
+    double height = 297.0;
+    PageOrigin origin = PageOrigin::BottomLeft;
+    bool hasColor = false;
+    Color color{0xff, 0xff, 0xff, 255};  // the paper's colour, when it has one
+
+    bool landscape() const { return width > height; }
+    std::array<double, 4> rect() const;  // in sketch coordinates: x0, y0, x1, y1
+    bool operator==(const Page&) const = default;
+};
+
+struct PageSize
+{
+    const char* name;
+    double width, height;  // portrait, mm
+};
+const std::vector<PageSize>& pageSizes();  // A0..A5, Letter, Legal, Tabloid
+// A standard size by name (either way round); false if there's none.
+bool pageSizeByName(const std::string& name, double& width, double& height);
 
 struct Entity
 {
@@ -427,6 +463,10 @@ public:
     // Loading: replaces the list (sublayers must already name these layers).
     void setLayers(std::vector<Layer> layers);
 
+    // --- page ---
+    const std::optional<Page>& page() const { return m_page; }
+    void setPage(std::optional<Page> page);  // throws unless its size is positive
+
     // --- projections ---
     // Copies `source` (an entity in another layer, with the points it's built on) into the active
     // layer, as fixed construction geometry linked to it; returns the copy. Already projected
@@ -527,6 +567,7 @@ private:
     std::vector<Sublayer> m_sublayers{{1, "Sublayer 1", true, 1}};
     Id m_activeSublayer = 1;
     std::vector<Layer> m_layers{{1, "Layer 1", true, 1}};
+    std::optional<Page> m_page;
     Id m_nextId = 1;
     Id m_origin = kNoId;
     std::array<Id, 2> m_axes{kNoId, kNoId};

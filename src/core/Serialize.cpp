@@ -337,6 +337,16 @@ std::string toJson(const Sketch& sketch, bool compact, const std::vector<std::st
     }
     doc["layers"] = std::move(layers);
     doc["active_sublayer"] = sketch.activeSublayer();
+    if (const auto& page = sketch.page()) {
+        json p{{"size", page->size},
+               {"width", page->width},
+               {"height", page->height},
+               {"origin", toString(page->origin)}};
+        if (page->hasColor) {
+            p["color"] = page->color.hex();
+        }
+        doc["page"] = std::move(p);
+    }
     if (history && !history->empty()) {
         doc["history"] = *history;
     }
@@ -372,6 +382,20 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
                                   j.value("active_sublayer", Id{kNoId})});
             }
             sketch.setLayers(std::move(layers));
+        }
+        if (doc.contains("page")) {
+            const json& j = doc.at("page");
+            Page page;
+            page.size = j.value("size", std::string("custom"));
+            page.width = j.value("width", page.width);
+            page.height = j.value("height", page.height);
+            if (!pageOriginFromString(j.value("origin", std::string("bottom_left")), page.origin)) {
+                throw SketchError("unknown page origin '" + j.value("origin", std::string()) + "'");
+            }
+            if (j.contains("color")) {
+                page.hasColor = Color::fromHex(j.at("color").get<std::string>(), page.color);
+            }
+            sketch.setPage(page);
         }
         // Points first, so curves can refer to them regardless of order in the file.
         std::vector<Entity> curves;

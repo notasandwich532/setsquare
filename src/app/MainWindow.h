@@ -47,6 +47,7 @@ private:
 
     // Clipboard: the selection (and the constraints among it) as a sketch fragment.
     void showHistory();  // the document's command history, to read, copy or save as a macro
+    void pageSetup();    // File > Page Setup
     void exportSvg();    // options, then where to
     void exportDxf();
     // Where to export to (next to the sketch file, with this suffix); empty if cancelled.

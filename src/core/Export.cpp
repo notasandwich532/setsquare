@@ -172,7 +172,9 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
             groups.push_back(std::move(g));
         }
     }
-    if (groups.empty()) {
+    // With a page (and asked for): the SVG is the page, at its size.
+    const std::optional<Page> page = o.page && !o.canvas ? s.page() : std::nullopt;
+    if (groups.empty() && !page) {
         throw SketchError("there's nothing to export");
     }
 
@@ -207,7 +209,15 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
         }
     }
     double m = std::max(0.0, o.margin);
-    if (o.canvas) {
+    if (page) {
+        m = 0.0;
+        const std::array<double, 4> r = page->rect();
+        x0 = r[0];
+        y0 = r[1];
+        x1 = r[2];
+        y1 = r[3];
+    }
+    else if (o.canvas) {
         // A fixed frame, in its own units.
         m = 0.0;
         x0 = (*o.canvas)[0];
@@ -231,6 +241,15 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
     // The drawing goes in after the gradients it uses (collected as it's written).
     const std::string head = out.str();
     out.str({});
+    if (page && page->hasColor) {
+        // The paper, under everything.
+        out << "  <rect id=\"page\" x=\"0\" y=\"0\" width=\"" << num(width) << "\" height=\"" << num(height)
+            << "\" fill=\"" << rgb(page->color) << '"';
+        if (page->color.a != 255) {
+            out << " fill-opacity=\"" << num(page->color.a / 255.0) << '"';
+        }
+        out << " stroke=\"none\"/>\n";
+    }
     std::string defs;
     int gradients = 0;
     // A gradient's definition, in drawing units (userSpaceOnUse: it doesn't depend on how SVG

@@ -1514,6 +1514,67 @@ bool Sketch::isPointUsed(Id point) const
 
 // --- texts ---
 
+const char* toString(PageOrigin origin)
+{
+    switch (origin) {
+        case PageOrigin::BottomLeft: return "bottom_left";
+        case PageOrigin::Center: return "center";
+        case PageOrigin::TopLeft: return "top_left";
+    }
+    return "bottom_left";
+}
+
+bool pageOriginFromString(const std::string& name, PageOrigin& out)
+{
+    for (PageOrigin o : {PageOrigin::BottomLeft, PageOrigin::Center, PageOrigin::TopLeft}) {
+        if (name == toString(o)) {
+            out = o;
+            return true;
+        }
+    }
+    return false;
+}
+
+std::array<double, 4> Page::rect() const
+{
+    switch (origin) {
+        case PageOrigin::Center: return {-width / 2, -height / 2, width / 2, height / 2};
+        case PageOrigin::TopLeft: return {0.0, -height, width, 0.0};
+        case PageOrigin::BottomLeft: break;
+    }
+    return {0.0, 0.0, width, height};
+}
+
+const std::vector<PageSize>& pageSizes()
+{
+    static const std::vector<PageSize> sizes = {
+        {"A0", 841, 1189},  {"A1", 594, 841},     {"A2", 420, 594},       {"A3", 297, 420},
+        {"A4", 210, 297},   {"A5", 148, 210},     {"Letter", 215.9, 279.4}, {"Legal", 215.9, 355.6},
+        {"Tabloid", 279.4, 431.8},
+    };
+    return sizes;
+}
+
+bool pageSizeByName(const std::string& name, double& width, double& height)
+{
+    for (const PageSize& s : pageSizes()) {
+        if (name == s.name) {
+            width = s.width;
+            height = s.height;
+            return true;
+        }
+    }
+    return false;
+}
+
+void Sketch::setPage(std::optional<Page> page)
+{
+    if (page && !(page->width > 0.0 && page->height > 0.0)) {
+        throw SketchError("a page's width and height must be more than 0");
+    }
+    m_page = std::move(page);
+}
+
 const char* toString(TextOutline outline)
 {
     switch (outline) {

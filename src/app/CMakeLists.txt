@@ -18,6 +18,8 @@ add_library(drawapp_lib STATIC
     ColorBar.h
     GradientEditor.cpp
     GradientEditor.h
+    PageSetup.cpp
+    PageSetup.h
     CommandPanel.cpp
     CommandPanel.h
     NumberInput.cpp

@@ -18,6 +18,9 @@ struct SvgOptions
     bool construction = false;  // construction geometry, dashed grey
     StrokeStyle plain{{0, 0, 0, 255}, 0.25, Dash::Solid, {}};
     double margin = 2.0;        // mm around the drawing
+    // With a page set (Sketch::page): the SVG is the page, at its size and in its colour, with
+    // what's off it cut off. Off, or without a page: fitted round the drawing, with `margin`.
+    bool page = true;
 
     // For icons: a fixed canvas (sketch x0, y0, x1, y1) instead of fitting the drawing. The SVG
     // is then in canvas units (no mm, no margin), e.g. a 24 x 24 icon grid.

@@ -1,4 +1,6 @@
 #include "MainWindow.h"
+
+#include "PageSetup.h"
 #include "NumberInput.h"
 
 #include "BrowserPanel.h"
@@ -314,6 +316,20 @@ namespace
 const QString kSketchMime = QStringLiteral("application/x-drawapp-sketch");
 }
 
+void MainWindow::pageSetup()
+{
+    PageSetupDialog dialog(m_doc->sketch().page(), this);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    const std::optional<core::Page> page = dialog.page();
+    if (page == m_doc->sketch().page()) {
+        return;
+    }
+    m_view->tryEdit(tr("Page setup"), [&](Editor& ed) { ed.setPage(page); });
+    m_view->fitAll();
+}
+
 void MainWindow::exportSvg()
 {
     QDialog dialog(this);
@@ -334,10 +350,24 @@ void MainWindow::exportSvg()
     margin->setDecimals(2);
     margin->setSuffix(QStringLiteral(" mm"));
     margin->setValue(m_svgOptions.margin);
+    auto* onPage = new QCheckBox(&dialog);
+    onPage->setObjectName(QStringLiteral("svgPage"));
+    if (const auto& page = m_doc->sketch().page()) {
+        onPage->setText(tr("The page (%1 × %2 mm): what's off it is cut off").arg(page->width).arg(page->height));
+        onPage->setChecked(m_svgOptions.page);
+    }
+    else {
+        onPage->setText(tr("The page (no page set: File > Page Setup)"));
+        onPage->setEnabled(false);
+    }
     form->addRow(fills);
     form->addRow(plain);
     form->addRow(construction);
+    form->addRow(onPage);
     form->addRow(tr("Margin"), margin);
+    auto marginUsed = [onPage, margin] { margin->setEnabled(!(onPage->isEnabled() && onPage->isChecked())); };
+    connect(onPage, &QCheckBox::toggled, &dialog, marginUsed);
+    marginUsed();
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
     buttons->button(QDialogButtonBox::Ok)->setText(tr("Export..."));
     form->addRow(buttons);
@@ -350,6 +380,9 @@ void MainWindow::exportSvg()
     m_svgOptions.undecorated = plain->isChecked();
     m_svgOptions.construction = construction->isChecked();
     m_svgOptions.margin = margin->value();
+    if (onPage->isEnabled()) {
+        m_svgOptions.page = onPage->isChecked();
+    }
 
     const QString path = exportPath(QStringLiteral("svg"), tr("Export SVG"), tr("SVG drawings (*.svg)"));
     if (path.isEmpty()) {
@@ -538,6 +571,10 @@ void MainWindow::createActions()
     saveAs->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S));
     connect(saveAs, &QAction::triggered, this, &MainWindow::saveAs);
     fileMenu->addSeparator();
+    auto* pageSetupAction = fileMenu->addAction(tr("Pa&ge Setup..."));
+    pageSetupAction->setObjectName(QStringLiteral("pageSetupAction"));
+    pageSetupAction->setToolTip(tr("The page the drawing is on: its size, orientation and colour (or none)"));
+    connect(pageSetupAction, &QAction::triggered, this, &MainWindow::pageSetup);
     QMenu* exportMenu = fileMenu->addMenu(tr("&Export"));
     auto* exportSvgAction = exportMenu->addAction(tr("&SVG..."));
     exportSvgAction->setToolTip(tr("The drawing as it looks in presentation view, at true size"));

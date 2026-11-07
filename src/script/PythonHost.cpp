@@ -1728,6 +1728,75 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
            py::arg("color") = py::none(), py::arg("spacing") = py::none(), py::arg("align") = py::none(),
            py::arg("valign") = py::none(), py::arg("flip_h") = py::none(), py::arg("flip_v") = py::none(),
            "Change a text's settings (any of them); its letters are remade.")
+        .def_property_readonly("page", [](const SketchH&) -> py::object {
+            const auto& page = sketch().page();
+            if (!page) {
+                return py::none();
+            }
+            py::dict d;
+            d["size"] = page->size;
+            d["width"] = page->width;
+            d["height"] = page->height;
+            d["orientation"] = page->landscape() ? "landscape" : "portrait";
+            d["origin"] = std::string(core::toString(page->origin));
+            d["color"] = page->hasColor ? py::cast(page->color.hex()) : py::none();
+            d["rect"] = py::make_tuple(page->rect()[0], page->rect()[1], page->rect()[2], page->rect()[3]);
+            return d;
+        }, "The page as {'size', 'width', 'height', 'orientation', 'origin', 'color', 'rect'} (mm; rect: "
+           "x0, y0, x1, y1 in sketch coordinates), or None (see set_page).")
+        .def("set_page", [](const SketchH&, py::object size, py::object orientation, py::object width,
+                            py::object height, const std::string& origin, py::object color) {
+            core::Page p;
+            if (!size.is_none() && size.cast<std::string>() != "custom") {
+                p.size = size.cast<std::string>();
+                if (!core::pageSizeByName(p.size, p.width, p.height)) {
+                    std::string names;
+                    for (const core::PageSize& ps : core::pageSizes()) {
+                        names += (names.empty() ? "" : ", ") + std::string(ps.name);
+                    }
+                    throw py::value_error("unknown page size '" + p.size + "' (" + names + ", or width= and height=)");
+                }
+            }
+            else if (!width.is_none() && !height.is_none()) {
+                p.size = "custom";
+                p.width = width.cast<double>();
+                p.height = height.cast<double>();
+            }
+            else {
+                throw py::value_error("give a page size ('A4', 'Letter', ...) or width= and height= (mm)");
+            }
+            if (!orientation.is_none()) {
+                const std::string o = orientation.cast<std::string>();
+                if (o != "portrait" && o != "landscape") {
+                    throw py::value_error("orientation: 'portrait' or 'landscape'");
+                }
+                if ((o == "landscape") != p.landscape() && p.width != p.height) {
+                    std::swap(p.width, p.height);
+                }
+            }
+            if (!core::pageOriginFromString(origin, p.origin)) {
+                throw py::value_error("origin: 'bottom_left', 'center' or 'top_left'");
+            }
+            if (!color.is_none()) {
+                p.hasColor = true;
+                p.color = colorArg(color);
+            }
+            editReturningId("Page", [&](Editor& ed) {
+                ed.setPage(p);
+                return kNoId;
+            });
+        }, py::arg("size") = py::none(), py::arg("orientation") = py::none(), py::arg("width") = py::none(),
+           py::arg("height") = py::none(), py::arg("origin") = "bottom_left", py::arg("color") = py::none(),
+           "Put the drawing on a page: a standard size ('A0'..'A5', 'Letter', 'Legal', 'Tabloid'; orientation "
+           "'portrait' (the default) or 'landscape'), or width= and height= in mm. origin: where the sketch origin "
+           "is on it, 'bottom_left' (the default), 'center' or 'top_left'. color: the paper's colour (default: none). "
+           "The SVG export is then the page.")
+        .def("clear_page", [](const SketchH&) {
+            editReturningId("Page", [&](Editor& ed) {
+                ed.setPage(std::nullopt);
+                return kNoId;
+            });
+        }, "No page: the drawing on an endless canvas (exports fit round it).")
         .def_property_readonly("texts", [](const SketchH&) {
             std::vector<Id> ids;
             for (const auto& [id, t] : sketch().texts()) {
@@ -2079,12 +2148,13 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
              "with doc.transaction(): ... groups changes into one undo step")
         .def("to_json", [](const DocumentH&) { return core::toJson(sketch()); })
         .def("export_svg", [](const DocumentH&, const std::string& path, bool fills, bool undecorated,
-                              bool construction, double margin, py::object canvas) {
+                              bool construction, double margin, py::object canvas, bool page) {
             core::exporter::SvgOptions o;
             o.fills = fills;
             o.undecorated = undecorated;
             o.construction = construction;
             o.margin = margin;
+            o.page = page;
             if (!canvas.is_none()) {
                 o.canvas = canvas.cast<std::array<double, 4>>();
             }
@@ -2094,16 +2164,18 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
                 throw std::runtime_error(error.toStdString());
             }
         }, py::arg("path"), py::arg("fills") = true, py::arg("undecorated") = true, py::arg("construction") = false,
-           py::arg("margin") = 2.0, py::arg("canvas") = py::none(),
+           py::arg("margin") = 2.0, py::arg("canvas") = py::none(), py::arg("page") = true,
            "Write the drawing as SVG, in millimetres: fills, strokes, and (undecorated=True) curves without a "
-           "stroke in thin black; construction only if asked. canvas=(x0, y0, x1, y1) frames a fixed area in "
+           "stroke in thin black; construction only if asked. With a page set (and page=True), the SVG is the "
+           "page; else fitted round the drawing with `margin`. canvas=(x0, y0, x1, y1) frames a fixed area in "
            "its own units instead (for icons).")
-        .def("to_svg", [](const DocumentH&, bool fills, bool undecorated, bool construction, double margin) {
+        .def("to_svg", [](const DocumentH&, bool fills, bool undecorated, bool construction, double margin, bool page) {
             core::exporter::SvgOptions o;
             o.fills = fills;
             o.undecorated = undecorated;
             o.construction = construction;
             o.margin = margin;
+            o.page = page;
             try {
                 return core::exporter::toSvg(sketch(), o);
             }
@@ -2111,7 +2183,7 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
                 throw py::value_error(e.what());
             }
         }, py::arg("fills") = true, py::arg("undecorated") = true, py::arg("construction") = false,
-           py::arg("margin") = 2.0, "The SVG export as a string.")
+           py::arg("margin") = 2.0, py::arg("page") = true, "The SVG export as a string (see export_svg).")
         .def("export_dxf", [](const DocumentH&, const std::string& path, bool styles, bool construction) {
             core::exporter::DxfOptions o;
             o.styles = styles;

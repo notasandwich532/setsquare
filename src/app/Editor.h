@@ -126,6 +126,9 @@ public:
     // copies, in order.
     std::vector<core::Id> project(const std::vector<core::Id>& sources);
     void breakLink(const std::vector<core::Id>& items);
+    // The page (none: no page). Recorded as s.set_page(...) / s.clear_page().
+    void setPage(const std::optional<core::Page>& page);
+    static QString pageCall(const core::Page& page);
     // Text at t.anchor (an existing point); its letter shapes are made here from its settings.
     core::Id text(core::Text t);
     // Text in a box: a construction rectangle between two corner points, made here.

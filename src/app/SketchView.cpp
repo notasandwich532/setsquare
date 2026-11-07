@@ -635,6 +635,11 @@ void SketchView::fitAll()
             include(p);
         }
     }
+    if (const auto& page = s.page()) {
+        const std::array<double, 4> r = page->rect();
+        include({r[0], r[1]});
+        include({r[2], r[3]});
+    }
     for (const auto& [id, c] : s.constraints()) {
         if (core::isDimension(c.type)) {
             if (const core::DimensionLayout L = core::layoutDimension(s, c); L.valid) {
@@ -722,6 +727,7 @@ void SketchView::paintEvent(QPaintEvent*)
     painter.fillRect(rect(), theme::canvas().background);
     drawGrid(painter);
     painter.setRenderHint(QPainter::Antialiasing);
+    drawPage(painter);
     drawSketch(painter);
     if (m_tool) {
         m_tool->paintOverlay(painter);
@@ -732,6 +738,37 @@ void SketchView::paintEvent(QPaintEvent*)
         drawStats(painter);
     }
     m_inPaint = false;
+}
+
+void SketchView::drawPage(QPainter& painter) const
+{
+    const auto& page = m_doc.sketch().page();
+    if (!page) {
+        return;
+    }
+    const std::array<double, 4> r = page->rect();
+    const QRectF sheet = QRectF(toScreen({r[0], r[3]}), toScreen({r[2], r[1]})).normalized();
+    const QColor paper = page->hasColor ? QColor(page->color.r, page->color.g, page->color.b, page->color.a)
+                                        : QColor(Qt::transparent);
+    if (m_presentation) {
+        // The drawing as it will be: off the page dimmed, the page in its colour.
+        QPainterPath outside;
+        outside.addRect(rect());
+        outside.addRect(sheet);
+        outside.setFillRule(Qt::OddEvenFill);
+        painter.fillPath(outside, QColor(0, 0, 0, 120));
+        painter.fillRect(sheet, paper);
+    }
+    else {
+        // A sheet under the sketch: a faint shadow, its colour faintly, and its edge.
+        painter.fillRect(sheet.translated(4, 4), QColor(0, 0, 0, 60));
+        QColor faint = page->hasColor ? paper : QColor(0xff, 0xff, 0xff);
+        faint.setAlphaF(faint.alphaF() * (page->hasColor ? 0.12 : 0.03));
+        painter.fillRect(sheet, faint);
+    }
+    painter.setPen(QPen(QColor(0x8a, 0x92, 0x9c), 1.0));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawRect(sheet);
 }
 
 void SketchView::setShowStats(bool show)
@@ -1020,6 +1057,8 @@ void SketchView::drawSketch(QPainter& painter) const
 
     // Layer by layer, from the bottom: fills, strokes, texts, then the geometry.
     const core::regions::Arrangements arrangements(sketch);
+    // Presentation view on coloured paper: plain geometry and text in black, as exported.
+    const bool onPaper = m_presentation && sketch.page() && sketch.page()->hasColor;
     for (auto layerIt = sketch.layers().rbegin(); layerIt != sketch.layers().rend(); ++layerIt) {
     const core::Id layer = layerIt->id;
     if (!layerIt->visible) {
@@ -1086,7 +1125,7 @@ void SketchView::drawSketch(QPainter& painter) const
         const bool graded = t.hasColor && t.gradient.active();
         if (m_presentation) {
             if (!t.hasColor) {
-                color = colors.fullyConstrained;  // as plain geometry shows
+                color = onPaper ? QColor(Qt::black) : colors.fullyConstrained;  // as plain geometry shows
             }
             if (graded) {
                 painter.fillPath(path, gradientBrush(t.gradient));
@@ -1134,7 +1173,13 @@ void SketchView::drawSketch(QPainter& painter) const
             drawCurve(id, e);
             continue;
         }
-        painter.setPen(styleFor(e));
+        if (onPaper && !m_selection.contains(id) && id != m_hovered && !constrained.contains(id)) {
+            // On paper, plain geometry shows as the SVG export draws it: thin and black.
+            painter.setPen(strokePen({{0, 0, 0, 255}, 0.25, core::Dash::Solid, {}}));
+        }
+        else {
+            painter.setPen(styleFor(e));
+        }
         drawCurve(id, e);
         if (e.kind() == core::EntityKind::Spline && !m_presentation && layer == activeLayer) {
             drawControlPolygon(painter, sketch, id);
