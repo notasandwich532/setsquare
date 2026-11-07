@@ -16,6 +16,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QComboBox>
+#include <QFormLayout>
+#include <QLabel>
 #include <QDoubleSpinBox>
 #include <QSpinBox>
 #include <QTest>
@@ -99,7 +101,7 @@ TEST_CASE("The gradient tool has its own panel", "[gradient]")
     for (const char* name : {"gradientTarget", "gradientType", "gradientSpread"}) {
         CHECK(f.input<QComboBox>(name));
     }
-    for (const char* name : {"gradientStart", "gradientEnd", "gradientShape", "gradientFocal"}) {
+    for (const char* name : {"gradientStart", "gradientEnd", "gradientShape", "gradientFocal", "gradientItems"}) {
         CHECK(f.input<SelectionButton>(name));
     }
     CHECK(f.input<GradientEditor>("gradientStops"));
@@ -136,7 +138,7 @@ TEST_CASE("A gradient is placed by sketch geometry picked on the canvas", "[grad
     f.pickLinear();
     CHECK(f.view.gradient().start == f.corner);
     CHECK(f.view.gradient().end == f.opposite);
-    CHECK(f.tool().currentInput() == -1);
+    CHECK(f.tool().currentInput() == GradientTool::Items);
 
     f.click(25, 15);
     const Id fill = f.onlyFill();
@@ -160,7 +162,7 @@ TEST_CASE("A gradient is placed by sketch geometry picked on the canvas", "[grad
     f.click(25, 12);  // on the circle (not the point at its centre)
     CHECK(f.fillGradient().kind == GradientKind::Radial);
     CHECK(f.fillGradient().shape == f.circle);
-    CHECK(f.tool().currentInput() == -1);
+    CHECK(f.tool().currentInput() == GradientTool::Items);
     f.input<SelectionButton>("gradientFocal")->click();
     CHECK(f.tool().currentInput() == GradientTool::Focal);
     f.click(22, 23);
@@ -291,7 +293,7 @@ TEST_CASE("Double-clicking a gradient edits it in the gradient tool", "[gradient
     REQUIRE(f.view.toolKind() == ToolKind::Gradient);
     CHECK(f.tool().target() == GradientTool::Target::Fill);
     CHECK(f.tool().current() == fill);
-    CHECK(f.tool().currentInput() == -1);  // (it has its geometry: clicks edit it)
+    CHECK(f.tool().currentInput() == GradientTool::Items);  // (it has its geometry: clicks edit it)
     f.input<QComboBox>("gradientSpread")->setCurrentIndex(2);
     CHECK(f.fillGradient().spread == GradientSpread::Repeat);
 
@@ -323,4 +325,60 @@ TEST_CASE("Reset fill takes a fill off", "[gradient][fill]")
     CHECK(f.recorded.join('\n').contains(QStringLiteral("s.delete(")));
     f.doc.undo();
     CHECK(f.sketch().fills().size() == 1);
+}
+TEST_CASE("The gradient goes on the areas listed in its panel", "[gradient]")
+{
+    Fixture f;
+    build::Rectangle second;
+    f.doc.modify("second", [&](Sketch& s) { second = build::rectangle(s, s.addPoint(50, 10), s.addPoint(70, 30)); });
+    f.pickLinear();
+    REQUIRE(f.tool().currentInput() == GradientTool::Items);
+    SelectionButton* areas = f.input<SelectionButton>("gradientItems");
+    REQUIRE(areas);
+    f.click(25, 15);
+    f.click(60, 15);
+    REQUIRE(f.sketch().fills().size() == 2);
+    CHECK(f.tool().items().size() == 2);
+    CHECK(areas->text().contains(QLatin1Char('2')));
+
+    // A change in the panel goes to both.
+    f.input<QComboBox>("gradientSpread")->setCurrentIndex(1);
+    for (const auto& [id, fill] : f.sketch().fills()) {
+        CHECK(fill.gradient.spread == GradientSpread::Reflect);
+    }
+    // Clicked again: left out (it keeps its gradient, but changes no longer reach it).
+    f.click(60, 15);
+    CHECK(f.tool().items().size() == 1);
+    f.input<QComboBox>("gradientSpread")->setCurrentIndex(2);
+    int repeat = 0, reflect = 0;
+    for (const auto& [id, fill] : f.sketch().fills()) {
+        repeat += fill.gradient.spread == GradientSpread::Repeat;
+        reflect += fill.gradient.spread == GradientSpread::Reflect;
+    }
+    CHECK(repeat == 1);
+    CHECK(reflect == 1);
+    // ×: none listed.
+    emit areas->cleared();
+    CHECK(f.tool().items().empty());
+    // The row says what it lists.
+    f.input<QComboBox>("gradientTarget")->setCurrentIndex(1);
+    auto* form = f.tool().panel()->findChild<QFormLayout*>();
+    REQUIRE(form);
+    QWidget* field = areas->parentWidget();
+    CHECK(qobject_cast<QLabel*>(form->labelForField(field))->text() == QStringLiteral("Curves"));
+}
+
+TEST_CASE("Enter closes the gradient tool", "[gradient]")
+{
+    Fixture f;
+    f.pickLinear();
+    f.click(25, 15);
+    QTest::keyClick(&f.view, Qt::Key_Return);
+    CHECK(f.view.toolKind() == ToolKind::Select);
+    CHECK(f.sketch().fills().size() == 1);
+
+    // And from its panel.
+    f.view.setTool(ToolKind::Gradient);
+    emit f.tool().panel()->accepted();
+    CHECK(f.view.toolKind() == ToolKind::Select);
 }

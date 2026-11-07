@@ -97,14 +97,18 @@ QString GradientTool::hint() const
         case Focal:
             return QObject::tr("Gradient: click a point to put its first colour at instead of the centre (× in the "
                                "panel: back to the centre)");
+        case Items: {
+            const QString what = m_target == Target::Fill     ? QObject::tr("areas")
+                                 : m_target == Target::Stroke ? QObject::tr("curves (double-click: a chain)")
+                                                              : QObject::tr("texts");
+            return QObject::tr("Gradient: click %1 to give them the gradient (again: leave one out); one with a "
+                               "gradient is picked up to edit. Shift+click: give it this gradient anyway; "
+                               "Ctrl+click: take its gradient off. Enter: done")
+                .arg(what);
+        }
         default: break;
     }
-    const QString what = m_target == Target::Fill     ? QObject::tr("an area")
-                         : m_target == Target::Stroke ? QObject::tr("a curve (double-click: its chain)")
-                                                      : QObject::tr("a text");
-    return QObject::tr("Gradient: click %1 to give it the gradient; one with a gradient is picked to edit. "
-                       "Shift+click: give it this gradient anyway; Ctrl+click: take its gradient off")
-        .arg(what);
+    return QObject::tr("Gradient: pick an input in the panel (Enter: done)");
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -129,6 +133,7 @@ void GradientTool::activate()
         {QObject::tr("End point"), "gradientEnd"},
         {QObject::tr("Circle / ellipse"), "gradientShape"},
         {QObject::tr("Focal point"), "gradientFocal"},
+        {QObject::tr("Areas"), "gradientItems"},
     }};
     for (int i = 0; i < kInputs; ++i) {
         SelectionButton* b = m_panel->addSelection(inputs[size_t(i)].first, inputs[size_t(i)].second);
@@ -137,7 +142,16 @@ void GradientTool::activate()
             setCurrentInput(i);
             view().setFocus();
         });
-        QObject::connect(b, &SelectionButton::cleared, m_panel, [this, i] { pickGeometry(i, kNoId); });
+        QObject::connect(b, &SelectionButton::cleared, m_panel, [this, i] {
+            if (i == Items) {
+                m_items.clear();  // (they keep their gradients: the panel's changes just stop going to them)
+                syncPanel();
+                refresh();
+            }
+            else {
+                pickGeometry(i, kNoId);
+            }
+        });
     }
     m_inputs[Focal]->setToolTip(QObject::tr("Optional: where the first colour is, if not the centre"));
 
@@ -259,7 +273,7 @@ void GradientTool::activate()
         const SketchView::Paint paint = view().paint();
         change([&](core::Gradient& g) { g.stops = {{0.0, paint.color1}, {1.0, paint.color2}}; });
     });
-    QObject::connect(m_panel, &CommandPanel::accepted, m_panel, [this] { view().setFocus(); });
+    QObject::connect(m_panel, &CommandPanel::accepted, m_panel, [this] { view().setTool(ToolKind::Select); });
     QObject::connect(m_panel, &CommandPanel::rejected, m_panel, [this] { view().setFocus(); });
     QObject::connect(&view(), &SketchView::gradientChanged, m_panel, [this] { syncPanel(); });
     QObject::connect(&doc(), &Document::changed, m_panel, [this] { onDocumentChanged(); });
@@ -285,8 +299,8 @@ void GradientTool::activate()
 
 std::vector<int> GradientTool::inputs() const
 {
-    return view().gradient().kind == core::GradientKind::Linear ? std::vector<int>{Start, End}
-                                                                : std::vector<int>{Shape, Focal};
+    return view().gradient().kind == core::GradientKind::Linear ? std::vector<int>{Start, End, Items}
+                                                                : std::vector<int>{Shape, Focal, Items};
 }
 
 void GradientTool::syncPanel()
@@ -303,12 +317,20 @@ void GradientTool::syncPanel()
     for (int i = 0; i < kInputs; ++i) {
         SelectionButton* b = m_inputs[size_t(i)];
         m_panel->setRowVisible(b, std::ranges::find(shown, i) != shown.end());
-        b->setCount(refOf(g, i) != kNoId ? 1 : 0);
-        if (i == Focal && refOf(g, i) == kNoId) {
-            b->setText(QObject::tr("▸ Centre (select a point)"));
+        if (i == Items) {
+            b->setCount(static_cast<int>(m_items.size()));
+        }
+        else {
+            b->setCount(refOf(g, i) != kNoId ? 1 : 0);
+            if (i == Focal && refOf(g, i) == kNoId) {
+                b->setText(QObject::tr("▸ Centre (select a point)"));
+            }
         }
         b->setCurrent(i == m_input);
     }
+    m_panel->setRowLabel(m_inputs[Items], m_target == Target::Fill     ? QObject::tr("Areas")
+                                          : m_target == Target::Stroke ? QObject::tr("Curves")
+                                                                       : QObject::tr("Text"));
     if (!(m_stops->gradient() == g)) {
         m_stops->setGradient(g);
     }
@@ -344,7 +366,7 @@ void GradientTool::setTarget(Target target)
         return;
     }
     m_target = target;
-    m_current = kNoId;
+    m_items.clear();
     m_hover = {};
     view().setHovered(kNoId);
     syncPanel();
@@ -355,6 +377,7 @@ void GradientTool::setCurrentInput(int input)
 {
     m_input = input >= 0 && input < kInputs ? input : -1;
     m_hoverGeometry = kNoId;
+    m_hover = {};
     view().setHovered(kNoId);
     syncPanel();
     refresh();
@@ -364,12 +387,12 @@ void GradientTool::nextInput()
 {
     const core::Gradient& g = view().gradient();
     for (int i : inputs()) {
-        if (i != Focal && refOf(g, i) == kNoId) {
+        if (i != Focal && i != Items && refOf(g, i) == kNoId) {
             setCurrentInput(i);
             return;
         }
     }
-    setCurrentInput(-1);
+    setCurrentInput(Items);
 }
 
 void GradientTool::pickGeometry(int input, Id id)
@@ -391,8 +414,17 @@ bool GradientTool::takeColor(const core::Color& color, bool /*second*/)
     if (i < 0) {
         return false;
     }
-    m_stops->setStopColor(i, color);  // (edited: applied to the picked item)
+    m_stops->setStopColor(i, color);  // (edited: applied to the items)
     return true;
+}
+
+bool GradientTool::keyPress(int key, const QString& /*text*/)
+{
+    if (key == Qt::Key_Return || key == Qt::Key_Enter) {
+        view().setTool(ToolKind::Select);  // done (this tool is gone after this)
+        return true;
+    }
+    return false;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -491,92 +523,96 @@ bool GradientTool::hasGradient(Id id) const
 
 void GradientTool::setCurrent(Id item)
 {
-    m_current = hasGradient(item) ? item : kNoId;
-    if (m_current != kNoId) {
-        view().setGradient(*gradientOf(m_current));
-        if (m_input >= 0 && view().gradient().complete()) {
-            setCurrentInput(-1);  // (it has its geometry: clicks edit, not pick)
+    m_items.clear();
+    if (hasGradient(item)) {
+        m_items.push_back(item);
+        view().setGradient(*gradientOf(item));
+        if (view().gradient().complete() && m_input != Items) {
+            setCurrentInput(Items);  // (it has its geometry: clicks go to what it paints)
         }
     }
     syncPanel();
     refresh();
 }
 
-void GradientTool::applyStroke(const std::vector<Id>& curves, const core::Gradient& g)
-{
-    const core::Sketch& s = doc().sketch();
-    const SketchView::Paint& paint = view().paint();
-    std::vector<std::pair<core::StrokeStyle, std::vector<Id>>> groups;
-    for (Id c : curves) {
-        if (!s.hasEntity(c) || s.isReference(c) || s.entity(c).construction
-            || s.entity(c).kind() == core::EntityKind::Point) {
-            continue;
-        }
-        core::StrokeStyle style = s.stroke(c) ? *s.stroke(c) : paint.stroke();
-        style.gradient = g;
-        if (style.none()) {
-            style.width = paint.width >= 0.0 ? paint.width : 0.35;  // (a gradient on no line wouldn't show)
-        }
-        if (s.stroke(c) && *s.stroke(c) == style) {
-            continue;
-        }
-        auto it = std::ranges::find_if(groups, [&](const auto& gr) { return gr.first == style; });
-        if (it == groups.end()) {
-            groups.push_back({style, {c}});
-        }
-        else {
-            it->second.push_back(c);
-        }
-    }
-    if (!groups.empty()) {
-        view().tryEdit(QObject::tr("Gradient"), [&](Editor& ed) {
-            for (const auto& [style, ids] : groups) {
-                ed.setStroke(ids, style);
-            }
-        });
-    }
-}
-
-void GradientTool::apply(const Item& item, const core::Gradient& g)
+std::vector<Id> GradientTool::apply(const std::vector<Item>& items, const core::Gradient& g)
 {
     if (!g.complete()) {
         emit view().message(g.kind == core::GradientKind::Linear
                                 ? QObject::tr("Pick the gradient's start and end points first")
                                 : QObject::tr("Pick the gradient's circle or ellipse first"));
         nextInput();
-        return;
+        return {};
     }
     const core::Sketch& s = doc().sketch();
-    Id made = item.id;
-    bool ok = true;
-    switch (m_target) {
-        case Target::Fill:
-            if (item.id != kNoId) {
-                ok = view().tryEdit(QObject::tr("Gradient"), [&](Editor& ed) { ed.setFillGradient(item.id, g); });
-            }
-            else {
-                const core::Color color = view().paint().color2;
-                ok = view().tryEdit(QObject::tr("Gradient"), [&](Editor& ed) { made = ed.fill(item.at, color, g); });
-            }
-            break;
-        case Target::Stroke: {
-            // A curve in a gradient group (a stroked outline): the whole group.
+    const SketchView::Paint& paint = view().paint();
+    // What changes, worked out before the edit.
+    std::vector<std::pair<core::StrokeStyle, std::vector<Id>>> strokes;
+    std::vector<core::Text> texts;
+    for (const Item& item : items) {
+        if (m_target == Target::Stroke) {
+            // A curve in a gradient outline: the whole outline.
             const std::vector<Id> curves = hasGradient(item.id) ? gradient::strokeGroup(s, item.id) : std::vector<Id>{item.id};
-            applyStroke(curves, g);
-            break;
+            for (Id c : curves) {
+                if (!s.hasEntity(c) || s.isReference(c) || s.entity(c).construction
+                    || s.entity(c).kind() == core::EntityKind::Point) {
+                    continue;
+                }
+                core::StrokeStyle style = s.stroke(c) ? *s.stroke(c) : paint.stroke();
+                style.gradient = g;
+                if (style.none()) {
+                    style.width = paint.width >= 0.0 ? paint.width : 0.35;  // (a gradient on no line wouldn't show)
+                }
+                auto it = std::ranges::find_if(strokes, [&](const auto& gr) { return gr.first == style; });
+                if (it == strokes.end()) {
+                    strokes.push_back({style, {c}});
+                }
+                else if (std::ranges::find(it->second, c) == it->second.end()) {
+                    it->second.push_back(c);
+                }
+            }
         }
-        case Target::Text: {
+        else if (m_target == Target::Text && s.hasText(item.id)) {
             core::Text t = s.text(item.id);
             t.hasColor = true;
             t.gradient = g;
             t.color = g.average();
-            ok = view().tryEdit(QObject::tr("Gradient"), [&](Editor& ed) { ed.setText(t); });
-            break;
+            texts.push_back(std::move(t));
         }
     }
-    if (ok) {
-        setCurrent(made);
-    }
+    std::vector<Id> out;
+    const core::Color fillColor = paint.color2;
+    const bool ok = view().tryEdit(QObject::tr("Gradient"), [&](Editor& ed) {
+        out.clear();
+        switch (m_target) {
+            case Target::Fill:
+                for (const Item& item : items) {
+                    if (item.id != kNoId) {
+                        ed.setFillGradient(item.id, g);
+                        out.push_back(item.id);
+                    }
+                    else {
+                        out.push_back(ed.fill(item.at, fillColor, g));
+                    }
+                }
+                break;
+            case Target::Stroke:
+                for (const auto& [style, ids] : strokes) {
+                    ed.setStroke(ids, style);
+                }
+                for (const Item& item : items) {
+                    out.push_back(item.id);
+                }
+                break;
+            case Target::Text:
+                for (const core::Text& t : texts) {
+                    ed.setText(t);
+                    out.push_back(t.id);
+                }
+                break;
+        }
+    });
+    return ok ? out : std::vector<Id>{};
 }
 
 void GradientTool::removeGradient(const Item& item)
@@ -604,34 +640,72 @@ void GradientTool::removeGradient(const Item& item)
             break;
         }
     }
-    if (item.id == m_current) {
-        m_current = kNoId;
-    }
+    std::erase(m_items, item.id);
+    syncPanel();
     refresh();
 }
 
 void GradientTool::commit()
 {
     const core::Gradient& g = view().gradient();
-    if (m_current == kNoId || !hasGradient(m_current) || *gradientOf(m_current) == g || !g.complete()) {
+    if (!g.complete()) {
         return;
     }
-    Item item;
-    item.id = m_current;
-    apply(item, g);
+    std::vector<Item> changed;
+    for (Id id : m_items) {
+        if (hasGradient(id) && !(*gradientOf(id) == g)) {
+            Item item;
+            item.id = id;
+            changed.push_back(item);
+        }
+    }
+    if (!changed.empty()) {
+        apply(changed, g);
+    }
 }
 
 void GradientTool::onDocumentChanged()
 {
     // Undone, or changed from a script: follow it.
-    if (m_current != kNoId) {
-        if (!hasGradient(m_current)) {
-            m_current = kNoId;
+    std::erase_if(m_items, [this](Id id) { return !hasGradient(id); });
+    if (!m_items.empty() && !(*gradientOf(m_items.front()) == view().gradient())) {
+        view().setGradient(*gradientOf(m_items.front()));
+    }
+    syncPanel();
+    refresh();
+}
+
+void GradientTool::clickItem(const Item& item, Qt::KeyboardModifiers modifiers)
+{
+    if (modifiers & Qt::ControlModifier) {
+        removeGradient(item);
+        return;
+    }
+    // Already one of them: leave it out (it keeps its gradient).
+    const core::Sketch& s = doc().sketch();
+    for (Id id : m_items) {
+        bool same = id == item.id;
+        if (!same && m_target == Target::Stroke && item.id != kNoId && hasGradient(id)) {
+            const std::vector<Id> outline = gradient::strokeGroup(s, id);
+            same = std::ranges::find(outline, item.id) != outline.end();
         }
-        else if (!(*gradientOf(m_current) == view().gradient())) {
-            view().setGradient(*gradientOf(m_current));
+        if (same) {
+            std::erase(m_items, id);
+            syncPanel();
+            refresh();
+            return;
         }
     }
+    if (m_items.empty() && hasGradient(item.id) && !(modifiers & Qt::ShiftModifier)) {
+        setCurrent(item.id);  // picked up, to edit
+        return;
+    }
+    for (Id id : apply({item}, view().gradient())) {
+        if (std::ranges::find(m_items, id) == m_items.end()) {
+            m_items.push_back(id);
+        }
+    }
+    syncPanel();
     refresh();
 }
 
@@ -641,7 +715,7 @@ void GradientTool::onDocumentChanged()
 
 void GradientTool::move(const ToolEvent& e)
 {
-    if (m_input >= 0) {
+    if (m_input >= 0 && m_input != Items) {
         m_hoverGeometry = geometryAt(e.world, m_input);
         m_hover = {};
         view().setHovered(m_hoverGeometry);
@@ -658,7 +732,7 @@ void GradientTool::press(const ToolEvent& e)
     if (e.button != Qt::LeftButton) {
         return;
     }
-    if (m_input >= 0) {
+    if (m_input >= 0 && m_input != Items) {
         const Id id = geometryAt(e.world, m_input);
         if (id == kNoId) {
             emit view().message(m_input == Shape ? QObject::tr("Click a circle, arc, ellipse or elliptical arc")
@@ -668,6 +742,9 @@ void GradientTool::press(const ToolEvent& e)
         pickGeometry(m_input, id);
         return;
     }
+    if (m_input != Items) {
+        setCurrentInput(Items);
+    }
     const Item item = itemAt(e.screen, e.world);
     if (m_target == Target::Fill ? !item.region : item.id == kNoId) {
         if (m_target == Target::Fill) {
@@ -675,31 +752,32 @@ void GradientTool::press(const ToolEvent& e)
         }
         return;
     }
-    if (e.modifiers & Qt::ControlModifier) {
-        removeGradient(item);
-    }
-    else if (hasGradient(item.id) && !(e.modifiers & Qt::ShiftModifier)) {
-        setCurrent(item.id);  // pick it, to edit
-    }
-    else {
-        apply(item, view().gradient());
-    }
-    refresh();
+    clickItem(item, e.modifiers);
 }
 
 void GradientTool::doubleClick(const ToolEvent& e)
 {
-    if (m_input >= 0 || m_target != Target::Stroke || (e.modifiers & Qt::ControlModifier)) {
+    if (m_input != Items || m_target != Target::Stroke || (e.modifiers & Qt::ControlModifier)) {
         return;
     }
     const Item item = itemAt(e.screen, e.world);
-
     if (item.id == kNoId || !view().gradient().complete()) {
         return;
     }
     try {
-        applyStroke(core::feature::chainAt(doc().sketch(), item.id), view().gradient());
-        setCurrent(item.id);
+        std::vector<Item> chain;
+        for (Id c : core::feature::chainAt(doc().sketch(), item.id)) {
+            Item i;
+            i.id = c;
+            chain.push_back(i);
+        }
+        for (Id id : apply(chain, view().gradient())) {
+            if (std::ranges::find(m_items, id) == m_items.end()) {
+                m_items.push_back(id);
+            }
+        }
+        syncPanel();
+        refresh();
     }
     catch (const core::SketchError&) {
     }
@@ -707,12 +785,13 @@ void GradientTool::doubleClick(const ToolEvent& e)
 
 bool GradientTool::cancel()
 {
-    if (m_input >= 0) {
-        setCurrentInput(-1);
+    if (m_input >= 0 && m_input != Items && view().gradient().complete()) {
+        setCurrentInput(Items);  // (back to what it paints)
         return true;
     }
-    if (m_current != kNoId) {
-        m_current = kNoId;
+    if (!m_items.empty()) {
+        m_items.clear();
+        syncPanel();
         refresh();
         return true;
     }
@@ -728,8 +807,16 @@ void GradientTool::paintOverlay(QPainter& painter)
     const core::Sketch& s = doc().sketch();
     const core::Gradient& g = view().gradient();
 
+    auto curveLine = [&](Id c) {
+        QPolygonF line;
+        for (const core::Vec2& p : core::sample(s, c, 96)) {
+            line << view().toScreen(p);
+        }
+        return line;
+    };
+
     // Hover: the item a click would paint.
-    if (m_input < 0 && (m_hover.id != kNoId || m_hover.region)) {
+    if (m_input == Items && (m_hover.id != kNoId || m_hover.region)) {
         painter.setBrush(Qt::NoBrush);
         painter.setPen(QPen(QColor(0xff, 0xff, 0xff, 200), 1.5, Qt::DashLine));
         if (m_target == Target::Fill && m_hover.region) {
@@ -740,29 +827,46 @@ void GradientTool::paintOverlay(QPainter& painter)
         }
     }
 
-    // The picked item, drawn as the panel has it while that's being changed.
-    if (m_current != kNoId && hasGradient(m_current) && !(*gradientOf(m_current) == g)) {
-        const QBrush brush = view().gradientBrush(g);
+    // The items: drawn as the panel has them while that's being changed, and outlined.
+    const QBrush brush = view().gradientBrush(g);
+    for (Id id : m_items) {
+        if (!hasGradient(id)) {
+            continue;
+        }
+        const bool changing = !(*gradientOf(id) == g);
         switch (m_target) {
             case Target::Fill:
-                if (const auto region = core::regions::resolve(arrangement(), s.fill(m_current))) {
-                    painter.fillPath(view().regionPath(*region), brush);
+                if (const auto region = core::regions::resolve(arrangement(), s.fill(id))) {
+                    const QPainterPath path = view().regionPath(*region);
+                    if (changing) {
+                        painter.fillPath(path, brush);
+                    }
+                    painter.setBrush(Qt::NoBrush);
+                    painter.setPen(QPen(kAccent, 1.5));
+                    painter.drawPath(path);
                 }
                 break;
             case Target::Stroke:
-                for (Id c : gradient::strokeGroup(s, m_current)) {
-                    QPen pen = view().strokePen(*s.stroke(c));
-                    pen.setBrush(brush);
-                    painter.setPen(pen);
+                for (Id c : gradient::strokeGroup(s, id)) {
                     painter.setBrush(Qt::NoBrush);
-                    QPolygonF line;
-                    for (const core::Vec2& p : core::sample(s, c, 96)) {
-                        line << view().toScreen(p);
+                    if (changing) {
+                        QPen pen = view().strokePen(*s.stroke(c));
+                        pen.setBrush(brush);
+                        painter.setPen(pen);
+                        painter.drawPolyline(curveLine(c));
                     }
-                    painter.drawPolyline(line);
+                    painter.setPen(QPen(kAccent, 1.2, Qt::DashLine));
+                    painter.drawPolyline(curveLine(c));
                 }
                 break;
-            case Target::Text: painter.fillPath(view().textPath(s.text(m_current)), brush); break;
+            case Target::Text:
+                if (changing) {
+                    painter.fillPath(view().textPath(s.text(id)), brush);
+                }
+                painter.setBrush(Qt::NoBrush);
+                painter.setPen(QPen(kAccent, 1.5));
+                painter.drawPolygon(view().textBox(s.text(id)));
+                break;
         }
     }
 
@@ -794,11 +898,7 @@ void GradientTool::paintOverlay(QPainter& painter)
     if (radial) {
         painter.setPen(QPen(kAccent, 2.0));
         painter.setBrush(Qt::NoBrush);
-        QPolygonF outline;
-        for (const core::Vec2& p : core::sample(s, g.shape, 128)) {
-            outline << view().toScreen(p);
-        }
-        painter.drawPolyline(outline);
+        painter.drawPolyline(curveLine(g.shape));
     }
     dot(from, g.stops.front().color, radial && g.focal != kNoId);
     dot(placed->end, g.stops.back().color, false);

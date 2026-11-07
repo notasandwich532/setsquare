@@ -199,6 +199,22 @@ void CommandPanel::setRowVisible(QWidget* input, bool visible)
     place();
 }
 
+void CommandPanel::setRowLabel(QWidget* input, const QString& label)
+{
+    QWidget* field = input;
+    while (field->parentWidget() && field->parentWidget() != this) {
+        field = field->parentWidget();
+    }
+    if (auto* l = qobject_cast<QLabel*>(m_form->labelForField(field))) {
+        if (l->text() != label) {
+            l->setText(label);
+            m_form->invalidate();
+            adjustSize();
+            place();
+        }
+    }
+}
+
 void CommandPanel::place()
 {
     move(m_canvas->width() - width() - kMargin, kMargin);

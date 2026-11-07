@@ -27,11 +27,13 @@ class SelectionButton;
 // it: linear, a start point and an end point; radial, a circle, arc, ellipse or elliptical arc
 // (its centre and size; an ellipse makes it elliptical) and optionally a focal point.
 //
-// With the geometry picked, click an area / curve / text to give it the gradient; one that
-// already has a gradient is picked instead (the panel shows its gradient, and changes there,
-// geometry included, change it). Shift+click gives an item the panel's gradient even if it has
-// one; Ctrl+click takes an item's gradient off (its plain colour again). Strokes: double-click
-// for the whole chain. Palette colours go to the selected stop.
+// With the geometry picked, the panel's last input takes what it paints: click areas / curves /
+// texts to give them the gradient (they're listed in it; click one again to leave it out), and
+// changes in the panel, geometry included, change them all. The first click on an item that
+// already has a gradient picks it up instead, to edit. Shift+click gives an item the panel's
+// gradient even if it has one; Ctrl+click takes an item's gradient off (its plain colour again).
+// Strokes: double-click for the whole chain. Palette colours go to the selected stop. Enter
+// closes the tool.
 class GradientTool : public Tool
 {
 public:
@@ -48,6 +50,7 @@ public:
         End,
         Shape,
         Focal,
+        Items,  // what it paints: areas, curves or texts
         kInputs,
     };
 
@@ -60,6 +63,7 @@ public:
     void move(const ToolEvent& e) override;
     void doubleClick(const ToolEvent& e) override;
     bool cancel() override;
+    bool keyPress(int key, const QString& text) override;
     bool takeColor(const core::Color& color, bool second) override;
     void paintOverlay(QPainter& painter) override;
 
@@ -68,12 +72,13 @@ public:
     GradientEditor* stopsEditor() const { return m_stops; }
     Target target() const { return m_target; }
     void setTarget(Target target);
-    // The geometry input that canvas clicks go to (-1: none, clicks paint).
+    // The input that canvas clicks go to (-1: none).
     int currentInput() const { return m_input; }
     void setCurrentInput(int input);
-    // The item whose gradient the panel is editing (a fill, a curve or a text), if any.
-    core::Id current() const { return m_current; }
-    void setCurrent(core::Id item);  // picks it (its gradient into the panel)
+    // What the panel's gradient is on (fills, curves or texts), its changes going to them all.
+    const std::vector<core::Id>& items() const { return m_items; }
+    core::Id current() const { return m_items.empty() ? core::kNoId : m_items.front(); }
+    void setCurrent(core::Id item);  // just that item, its gradient picked up into the panel
 
 private:
     struct Item
@@ -86,11 +91,12 @@ private:
     core::Id geometryAt(core::Vec2 world, int input) const;  // what the input can take there
     bool hasGradient(core::Id item) const;
     const core::Gradient* gradientOf(core::Id item) const;
-    // Gives an item the gradient (making a fill where there's none yet); it becomes current.
-    void apply(const Item& item, const core::Gradient& g);
-    void applyStroke(const std::vector<core::Id>& curves, const core::Gradient& g);
+    // Gives the items the gradient, as one edit (a new fill where an area has none yet; a curve
+    // in a gradient outline, the whole outline). Returns the items as they are after (new fills).
+    std::vector<core::Id> apply(const std::vector<Item>& items, const core::Gradient& g);
     void removeGradient(const Item& item);
-    void commit();  // the panel's gradient onto the current item, if it's changed
+    void commit();  // the panel's gradient onto the items, where it's changed
+    void clickItem(const Item& item, Qt::KeyboardModifiers modifiers);
     void pickGeometry(int input, core::Id id);
     void nextInput();  // the first required input still empty (or none)
     std::vector<int> inputs() const;  // those of the gradient's kind
@@ -100,7 +106,7 @@ private:
     const core::regions::Arrangement& arrangement();
 
     Target m_target = Target::Fill;
-    core::Id m_current = core::kNoId;
+    std::vector<core::Id> m_items;
     int m_input = -1;
     Item m_hover;
     core::Id m_hoverGeometry = core::kNoId;

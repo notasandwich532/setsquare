@@ -53,6 +53,7 @@ public:
     void addWidget(const QString& label, QWidget* input);  // any other input (owned by the panel)
     void addButtons();  // OK and Cancel
     void setRowVisible(QWidget* input, bool visible);
+    void setRowLabel(QWidget* input, const QString& label);
 
 signals:
     void accepted();
