@@ -79,6 +79,8 @@ public:
     const std::vector<core::Id>& items() const { return m_items; }
     core::Id current() const { return m_items.empty() ? core::kNoId : m_items.front(); }
     void setCurrent(core::Id item);  // just that item, its gradient picked up into the panel
+    // Strokes: the width of the listed curves (whole outlines) and of new gradient strokes.
+    void setStrokeWidth(double width);
 
 private:
     struct Item
@@ -120,6 +122,7 @@ private:
     QComboBox* m_targetBox = nullptr;
     QComboBox* m_kind = nullptr;
     QComboBox* m_spread = nullptr;
+    QComboBox* m_width = nullptr;  // strokes' width
     std::array<SelectionButton*, kInputs> m_inputs{};
     QToolButton* m_stopColor = nullptr;
     QDoubleSpinBox* m_stopPosition = nullptr;

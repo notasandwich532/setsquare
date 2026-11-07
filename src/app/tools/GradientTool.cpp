@@ -12,6 +12,7 @@
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QHBoxLayout>
+#include <QLineEdit>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPixmap>
@@ -65,6 +66,17 @@ Id refOf(const core::Gradient& g, int input)
 }
 
 const QColor kAccent(0x4d, 0xa3, 0xff);
+
+// Line widths (mm), as the colour bar has them: none, hairline, then ISO pen sizes.
+const double kWidths[] = {core::StrokeStyle::kNone, 0.0, 0.13, 0.18, 0.25, 0.35, 0.5, 0.7, 1.0, 1.4, 2.0};
+
+QString widthText(double w)
+{
+    if (w < 0.0) {
+        return QObject::tr("None");
+    }
+    return w == 0.0 ? QObject::tr("Hairline") : QStringLiteral("%1 mm").arg(w);
+}
 }  // namespace
 
 GradientTool::GradientTool(SketchView& view)
@@ -185,6 +197,46 @@ void GradientTool::activate()
 
     m_spread = m_panel->addChoice(QObject::tr("Past the ends"), "gradientSpread",
                                   {QObject::tr("Carry on (pad)"), QObject::tr("Reflect"), QObject::tr("Repeat")});
+
+    // Strokes: their width (as the colour bar's; type any size in mm).
+    m_width = new QComboBox;
+    m_width->setObjectName(QStringLiteral("gradientWidth"));
+    m_width->setToolTip(QObject::tr("The width of the gradient strokes: the listed curves' (they change with it), "
+                                    "and new ones'. Type any size in mm"));
+    m_width->setEditable(true);
+    m_width->setInsertPolicy(QComboBox::NoInsert);
+    for (double w : kWidths) {
+        m_width->addItem(widthText(w), w);
+    }
+    m_panel->addWidget(QObject::tr("Width"), m_width);
+    auto applyWidth = [this] {
+        if (m_syncing) {
+            return;
+        }
+        const QString text = m_width->currentText().trimmed();
+        QString bare = text;
+        if (bare.endsWith(QStringLiteral("mm"))) {
+            bare.chop(2);
+        }
+        bool ok = false;
+        double w = bare.trimmed().toDouble(&ok);
+        if (text.compare(QObject::tr("Hairline"), Qt::CaseInsensitive) == 0) {
+            w = 0.0;
+            ok = true;
+        }
+        if (text.compare(QObject::tr("None"), Qt::CaseInsensitive) == 0) {
+            w = core::StrokeStyle::kNone;
+            ok = true;
+        }
+        if (ok && (w >= 0.0 || w == core::StrokeStyle::kNone)) {
+            setStrokeWidth(w);
+        }
+        else {
+            syncPanel();  // (not a size: back to what it is)
+        }
+    };
+    QObject::connect(m_width, &QComboBox::activated, m_panel, applyWidth);
+    QObject::connect(m_width->lineEdit(), &QLineEdit::editingFinished, m_panel, applyWidth);
 
     auto* buttons = new QWidget;
     auto* buttonLayout = new QHBoxLayout(buttons);
@@ -334,8 +386,64 @@ void GradientTool::syncPanel()
     if (!(m_stops->gradient() == g)) {
         m_stops->setGradient(g);
     }
+    // The width: the first listed curve's, else what new strokes get.
+    m_panel->setRowVisible(m_width, m_target == Target::Stroke);
+    double width = view().paint().width;
+    for (Id id : m_items) {
+        if (const core::StrokeStyle* style = doc().sketch().hasEntity(id) ? doc().sketch().stroke(id) : nullptr) {
+            width = style->width;
+            break;
+        }
+    }
+    if (const int i = m_width->findData(width); i >= 0) {
+        m_width->setCurrentIndex(i);
+    }
+    else {
+        m_width->setEditText(widthText(width));
+    }
     m_syncing = false;
     syncStop();
+}
+
+void GradientTool::setStrokeWidth(double width)
+{
+    SketchView::Paint paint = view().paint();
+    paint.width = width;
+    view().setPaint(paint);  // (new strokes, and the colour bar)
+    if (m_target != Target::Stroke) {
+        syncPanel();
+        return;
+    }
+    // The listed curves (whole outlines), keeping their gradients.
+    const core::Sketch& s = doc().sketch();
+    std::vector<std::pair<core::StrokeStyle, std::vector<Id>>> groups;
+    for (Id id : m_items) {
+        if (!s.hasEntity(id) || !s.stroke(id)) {
+            continue;
+        }
+        for (Id c : gradient::strokeGroup(s, id)) {
+            core::StrokeStyle style = *s.stroke(c);
+            if (style.width == width) {
+                continue;
+            }
+            style.width = width;
+            auto it = std::ranges::find_if(groups, [&](const auto& g) { return g.first == style; });
+            if (it == groups.end()) {
+                groups.push_back({style, {c}});
+            }
+            else if (std::ranges::find(it->second, c) == it->second.end()) {
+                it->second.push_back(c);
+            }
+        }
+    }
+    if (!groups.empty()) {
+        view().tryEdit(QObject::tr("Stroke width"), [&](Editor& ed) {
+            for (const auto& [style, ids] : groups) {
+                ed.setStroke(ids, style);
+            }
+        });
+    }
+    syncPanel();
 }
 
 void GradientTool::syncStop()

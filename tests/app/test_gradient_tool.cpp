@@ -16,6 +16,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QComboBox>
+#include <QLineEdit>
 #include <QFormLayout>
 #include <QLabel>
 #include <QDoubleSpinBox>
@@ -381,4 +382,40 @@ TEST_CASE("Enter closes the gradient tool", "[gradient]")
     f.view.setTool(ToolKind::Gradient);
     emit f.tool().panel()->accepted();
     CHECK(f.view.toolKind() == ToolKind::Select);
+}
+
+TEST_CASE("Gradient strokes: their width in the panel", "[gradient]")
+{
+    Fixture f;
+    auto* width = f.input<QComboBox>("gradientWidth");
+    CHECK(!width->isVisibleTo(f.tool().panel()));  // (fills: no width)
+    f.pickLinear();
+    f.input<QComboBox>("gradientTarget")->setCurrentIndex(1);
+    CHECK(width->isVisibleTo(f.tool().panel()));
+    f.click(25, 10);  // bottom side
+    QTest::mouseDClick(&f.view, Qt::LeftButton, {}, f.at(10, 20));  // the whole outline
+    REQUIRE(f.sketch().strokes().size() == 4);
+
+    // Typed in: the outline takes it, gradients kept; new strokes get it too.
+    width->lineEdit()->setText(QStringLiteral("1.5 mm"));
+    emit width->lineEdit()->editingFinished();
+    for (Id side : f.rect.sides) {
+        REQUIRE(f.sketch().stroke(side));
+        CHECK(f.sketch().stroke(side)->width == 1.5);
+        CHECK(f.sketch().stroke(side)->gradient.active());
+    }
+    CHECK(f.view.paint().width == 1.5);
+    CHECK(f.recorded.last().contains(QStringLiteral("width=1.5")));
+
+    // Chosen from the list.
+    width->setCurrentIndex(width->findData(0.5));
+    emit width->activated(width->currentIndex());
+    CHECK(f.sketch().stroke(f.rect.sides[2])->width == 0.5);
+
+    // Not a size: nothing changes, and it shows what it is again.
+    width->lineEdit()->setText(QStringLiteral("wide"));
+    emit width->lineEdit()->editingFinished();
+    CHECK(f.sketch().stroke(f.rect.sides[2])->width == 0.5);
+    CHECK(width->currentText() == QStringLiteral("0.5 mm"));
+    f.view.setPresentation(true);
 }
