@@ -16,6 +16,60 @@ constexpr const char* kFormat = "drawing_app.sketch";
 
 // {"type": "linear", "spread": "pad", "stops": [[0, "#ff0000"], [1, "#0000ff80"]], "start": id, "end": id}
 // or {"type": "radial", ..., "shape": id, "focal": id (optional)}: the sketch geometry placing it.
+const char kBase64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+std::string toBase64(const std::string& bytes)
+{
+    std::string out;
+    out.reserve((bytes.size() + 2) / 3 * 4);
+    size_t i = 0;
+    for (; i + 2 < bytes.size(); i += 3) {
+        const unsigned n = (static_cast<unsigned char>(bytes[i]) << 16) | (static_cast<unsigned char>(bytes[i + 1]) << 8)
+                           | static_cast<unsigned char>(bytes[i + 2]);
+        out += kBase64[(n >> 18) & 63];
+        out += kBase64[(n >> 12) & 63];
+        out += kBase64[(n >> 6) & 63];
+        out += kBase64[n & 63];
+    }
+    if (i < bytes.size()) {
+        unsigned n = static_cast<unsigned char>(bytes[i]) << 16;
+        if (i + 1 < bytes.size()) {
+            n |= static_cast<unsigned char>(bytes[i + 1]) << 8;
+        }
+        out += kBase64[(n >> 18) & 63];
+        out += kBase64[(n >> 12) & 63];
+        out += i + 1 < bytes.size() ? kBase64[(n >> 6) & 63] : '=';
+        out += '=';
+    }
+    return out;
+}
+
+std::string fromBase64(const std::string& text)
+{
+    int value[256];
+    std::fill(std::begin(value), std::end(value), -1);
+    for (int i = 0; i < 64; ++i) {
+        value[static_cast<unsigned char>(kBase64[i])] = i;
+    }
+    std::string out;
+    out.reserve(text.size() / 4 * 3);
+    unsigned n = 0;
+    int bits = 0;
+    for (char c : text) {
+        const int v = value[static_cast<unsigned char>(c)];
+        if (v < 0) {
+            continue;  // padding, line breaks
+        }
+        n = (n << 6) | static_cast<unsigned>(v);
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            out += static_cast<char>((n >> bits) & 0xff);
+        }
+    }
+    return out;
+}
+
 json gradientToJson(const Gradient& g)
 {
     json stops = json::array();
@@ -337,6 +391,31 @@ std::string toJson(const Sketch& sketch, bool compact, const std::vector<std::st
     }
     doc["layers"] = std::move(layers);
     doc["active_sublayer"] = sketch.activeSublayer();
+    if (!sketch.images().empty()) {
+        json images = json::array();
+        for (const auto& [id, im] : sketch.images()) {
+            json j{{"id", id},
+                   {"layer", im.layer},
+                   {"source", im.source},
+                   {"pixels", {im.pixelWidth, im.pixelHeight}},
+                   {"center", {im.x, im.y}},
+                   {"width", im.width},
+                   {"angle", im.angle},
+                   {"opacity", im.opacity},
+                   {"data", im.data ? toBase64(*im.data) : std::string()}};
+            if (im.flipH) {
+                j["flip_h"] = true;
+            }
+            if (im.flipV) {
+                j["flip_v"] = true;
+            }
+            if (!im.visible) {
+                j["visible"] = false;
+            }
+            images.push_back(std::move(j));
+        }
+        doc["images"] = std::move(images);
+    }
     if (const auto& page = sketch.page()) {
         json p{{"size", page->size},
                {"width", page->width},
@@ -382,6 +461,27 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
                                   j.value("active_sublayer", Id{kNoId})});
             }
             sketch.setLayers(std::move(layers));
+        }
+        for (const json& j : doc.value("images", json::array())) {
+            Image im;
+            im.id = j.at("id").get<Id>();
+            im.layer = j.value("layer", Id{kNoId});
+            if (!sketch.hasLayer(im.layer)) {
+                im.layer = sketch.layers().back().id;
+            }
+            im.source = j.value("source", std::string());
+            im.pixelWidth = std::max(1, j.at("pixels").at(0).get<int>());
+            im.pixelHeight = std::max(1, j.at("pixels").at(1).get<int>());
+            im.x = j.at("center").at(0).get<double>();
+            im.y = j.at("center").at(1).get<double>();
+            im.width = j.value("width", im.width);
+            im.angle = j.value("angle", 0.0);
+            im.opacity = j.value("opacity", im.opacity);
+            im.flipH = j.value("flip_h", false);
+            im.flipV = j.value("flip_v", false);
+            im.visible = j.value("visible", true);
+            im.data = std::make_shared<const std::string>(fromBase64(j.value("data", std::string())));
+            sketch.insertImage(im);
         }
         if (doc.contains("page")) {
             const json& j = doc.at("page");

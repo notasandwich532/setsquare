@@ -1,6 +1,9 @@
 #include "MainWindow.h"
 
+#include "Images.h"
 #include "PageSetup.h"
+
+#include <QImageReader>
 #include "NumberInput.h"
 
 #include "BrowserPanel.h"
@@ -180,6 +183,7 @@ const std::pair<ToolKind, const char*> kToolNames[] = {
     {ToolKind::SplineControl, "spline_control"},
     {ToolKind::Gradient, "gradient"},
     {ToolKind::ResetFill, "reset_fill"},
+    {ToolKind::Image, "image"},
 };
 
 QString macrosFolder()
@@ -314,6 +318,41 @@ void MainWindow::newSketch()
 namespace
 {
 const QString kSketchMime = QStringLiteral("application/x-drawapp-sketch");
+}
+
+void MainWindow::insertImage(const QString& given)
+{
+    QString path = given;
+    if (path.isEmpty()) {
+        QStringList patterns;
+        for (const QByteArray& format : QImageReader::supportedImageFormats()) {
+            patterns << QStringLiteral("*.") + QString::fromLatin1(format);
+        }
+        path = QFileDialog::getOpenFileName(this, tr("Insert Image"), QString(),
+                                            tr("Images (%1)").arg(patterns.join(QLatin1Char(' '))));
+        if (path.isEmpty()) {
+            return;
+        }
+    }
+    core::Image image;
+    try {
+        image = images::load(path);
+    }
+    catch (const core::SketchError& e) {
+        QMessageBox::critical(this, tr("Insert Image"), QString::fromStdString(e.what()));
+        return;
+    }
+    // In the middle of the view, filling most of it (Calibrate sets its true size).
+    const core::Vec2 a = m_view->toWorld(QPointF(0, 0));
+    const core::Vec2 b = m_view->toWorld(QPointF(m_view->width(), m_view->height()));
+    const double viewW = std::abs(b.x - a.x), viewH = std::abs(b.y - a.y);
+    image.x = (a.x + b.x) / 2;
+    image.y = (a.y + b.y) / 2;
+    image.width = 0.7 * std::min(viewW, viewH * image.pixelWidth / image.pixelHeight);
+    core::Id id = core::kNoId;
+    if (m_view->tryEdit(tr("Insert image"), [&](Editor& ed) { id = ed.addImage(image); })) {
+        m_view->editImage(id);
+    }
 }
 
 void MainWindow::pageSetup()
@@ -571,6 +610,12 @@ void MainWindow::createActions()
     saveAs->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S));
     connect(saveAs, &QAction::triggered, this, &MainWindow::saveAs);
     fileMenu->addSeparator();
+    m_insertImage = fileMenu->addAction(tr("&Insert Image..."));
+    m_insertImage->setObjectName(QStringLiteral("insertImageAction"));
+    m_insertImage->setIcon(icons::forName(QStringLiteral("image")));
+    m_insertImage->setToolTip(tr("Insert Image: a picture to draw over, as a reference (scale it with Calibrate; "
+                                 "it isn't part of the drawing). Double-click it later to place it"));
+    connect(m_insertImage, &QAction::triggered, this, [this] { insertImage(); });
     auto* pageSetupAction = fileMenu->addAction(tr("Pa&ge Setup..."));
     pageSetupAction->setObjectName(QStringLiteral("pageSetupAction"));
     pageSetupAction->setToolTip(tr("The page the drawing is on: its size, orientation and colour (or none)"));
@@ -749,6 +794,7 @@ void MainWindow::createActions()
                           {ToolKind::Text, tr("Text"), {}},
                           {ToolKind::Project, tr("Project"), {}},
                       });
+    toolbar->addAction(m_insertImage);
     // Modify tools on a row of their own: one row is too narrow for everything.
     addToolBarBreak();
     auto* modifyBar = addToolBar(tr("Modify"));

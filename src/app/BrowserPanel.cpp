@@ -1,7 +1,10 @@
 #include "BrowserPanel.h"
 
 #include "Document.h"
+#include "Icons.h"
 #include "SketchView.h"
+
+#include <QFileInfo>
 
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -25,6 +28,7 @@ enum Column
 };
 constexpr int kIdRole = Qt::UserRole;
 constexpr int kIsLayerRole = Qt::UserRole + 1;
+constexpr int kIsImageRole = Qt::UserRole + 2;
 
 // Small icons drawn here: an eye (open, or shut with a slash) and the active marker (a filled dot,
 // or a ring for the others).
@@ -140,6 +144,22 @@ BrowserPanel::BrowserPanel(Document& doc, SketchView& view, QWidget* parent)
         }
         const Id id = item->data(kName, kIdRole).toUInt();
         const core::Sketch& s = m_doc.sketch();
+        if (item->data(kName, kIsImageRole).toBool()) {
+            if (!s.hasImage(id)) {
+                return;
+            }
+            if (column == kEye) {
+                core::Image im = s.image(id);
+                im.visible = !im.visible;
+                m_view.tryEdit(im.visible ? tr("Show image") : tr("Hide image"), [&](Editor& ed) { ed.setImage(im); });
+            }
+            else if (s.image(id).visible) {
+                // Placing it: in its layer.
+                m_doc.setActiveLayer(s.image(id).layer);
+                m_view.editImage(id);
+            }
+            return;
+        }
         if (isLayerRow(item)) {
             if (column == kEye) {
                 m_doc.setLayerVisible(id, !s.layer(id).visible);
@@ -156,7 +176,7 @@ BrowserPanel::BrowserPanel(Document& doc, SketchView& view, QWidget* parent)
         }
     });
     connect(m_tree, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem* item, int column) {
-        if (m_rebuilding || column != kName) {
+        if (m_rebuilding || column != kName || item->data(kName, kIsImageRole).toBool()) {
             return;
         }
         const Id id = item->data(kName, kIdRole).toUInt();
@@ -193,12 +213,26 @@ QTreeWidgetItem* BrowserPanel::rowForLayer(Id layer) const
     return nullptr;
 }
 
+QTreeWidgetItem* BrowserPanel::rowForImage(Id image) const
+{
+    for (int i = 0; i < m_tree->topLevelItemCount(); ++i) {
+        QTreeWidgetItem* layer = m_tree->topLevelItem(i);
+        for (int j = 0; j < layer->childCount(); ++j) {
+            QTreeWidgetItem* row = layer->child(j);
+            if (row->data(kName, kIsImageRole).toBool() && row->data(kName, kIdRole).toUInt() == image) {
+                return row;
+            }
+        }
+    }
+    return nullptr;
+}
+
 QTreeWidgetItem* BrowserPanel::rowFor(Id sublayer) const
 {
     for (int i = 0; i < m_tree->topLevelItemCount(); ++i) {
         QTreeWidgetItem* layer = m_tree->topLevelItem(i);
         for (int j = 0; j < layer->childCount(); ++j) {
-            if (layer->child(j)->data(kName, kIdRole).toUInt() == sublayer) {
+            if (!layer->child(j)->data(kName, kIsImageRole).toBool() && layer->child(j)->data(kName, kIdRole).toUInt() == sublayer) {
                 return layer->child(j);
             }
         }
@@ -217,6 +251,9 @@ void BrowserPanel::rebuild()
             const core::Sublayer& sub = s.sublayer(id);
             key += QStringLiteral("|S%1:%2:%3").arg(id).arg(QString::fromStdString(sub.name)).arg(sub.visible);
         }
+    }
+    for (const auto& [id, im] : s.images()) {
+        key += QStringLiteral("|I%1:%2:%3").arg(id).arg(im.layer).arg(im.visible);
     }
     if (key == m_shownKey) {
         for (const core::Sublayer& l : s.sublayers()) {
@@ -271,6 +308,25 @@ void BrowserPanel::rebuild()
             }
             if (active) {
                 m_tree->setCurrentItem(row, kName);
+            }
+        }
+        // Its reference images, after its sublayers.
+        for (const auto& [id, im] : s.images()) {
+            if (im.layer != l.id) {
+                continue;
+            }
+            auto* row = new QTreeWidgetItem(layerRow);
+            row->setData(kName, kIdRole, id);
+            row->setData(kName, kIsLayerRole, false);
+            row->setData(kName, kIsImageRole, true);
+            row->setText(kName, QFileInfo(QString::fromStdString(im.source)).fileName());
+            row->setIcon(kName, icons::forName(QStringLiteral("image")));
+            row->setToolTip(kName, tr("A reference image (not part of the drawing): click to place it, or calibrate it"));
+            row->setIcon(kEye, eyeIcon(im.visible));
+            row->setToolTip(kEye, im.visible ? tr("Shown: click to hide") : tr("Hidden: click to show"));
+            row->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+            if (!im.visible || !l.visible) {
+                row->setForeground(kName, QColor(0xd5, 0xd9, 0xde, 110));
             }
         }
         layerRow->setExpanded(true);
@@ -370,6 +426,25 @@ void BrowserPanel::showMenu(const QPoint& at)
             })->setEnabled(index + 1 < static_cast<int>(all.size()));
         menu.addSeparator();
         menu.addAction(tr("Delete"), this, [this, id] { deleteLayer(id); })->setEnabled(all.size() > 1);
+    }
+    else if (item && item->data(kName, kIsImageRole).toBool()) {
+        const Id id = item->data(kName, kIdRole).toUInt();
+        if (s.hasImage(id)) {
+            const bool visible = s.image(id).visible;
+            menu.addSeparator();
+            menu.addAction(tr("Place / Calibrate"), this, [this, id] {
+                    m_doc.setActiveLayer(m_doc.sketch().image(id).layer);
+                    m_view.editImage(id);
+                })->setEnabled(visible);
+            menu.addAction(visible ? tr("Hide") : tr("Show"), this, [this, id] {
+                core::Image im = m_doc.sketch().image(id);
+                im.visible = !im.visible;
+                m_view.tryEdit(im.visible ? tr("Show image") : tr("Hide image"), [&](Editor& ed) { ed.setImage(im); });
+            });
+            menu.addSeparator();
+            menu.addAction(tr("Delete"), this,
+                           [this, id] { m_view.tryEdit(tr("Delete image"), [&](Editor& ed) { ed.remove(id); }); });
+        }
     }
     else if (item) {
         const Id id = item->data(kName, kIdRole).toUInt();

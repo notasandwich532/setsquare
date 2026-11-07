@@ -14,7 +14,8 @@ class SketchView;
 // that layer / sublayer. Other layers' geometry can't be used except by projecting it (Project);
 // other sublayers of the active layer show faded, as references. Double-click a name (or F2) to
 // rename; the + button and the right-click menu add, delete, reorder, and move the selection into
-// a sublayer.
+// a sublayer. Each layer also lists its reference images (Insert Image): click one to place it,
+// the eye to hide it.
 class BrowserPanel : public QWidget
 {
     Q_OBJECT
@@ -25,6 +26,7 @@ public:
     // The rows for a layer / sublayer (for tests).
     QTreeWidgetItem* rowForLayer(core::Id layer) const;
     QTreeWidgetItem* rowFor(core::Id sublayer) const;
+    QTreeWidgetItem* rowForImage(core::Id image) const;
 
     // Actions, as the buttons and menu do them.
     void addLayer();

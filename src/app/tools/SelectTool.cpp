@@ -178,6 +178,9 @@ void SelectTool::doubleClick(const ToolEvent& e)
         if (fill != core::kNoId && sketch.fill(fill).gradient.active()) {
             view().editGradient(fill);
         }
+        else if (const core::Id image = view().imageAt(e.world); image != core::kNoId && !view().presentation()) {
+            view().editImage(image);  // a reference image: placing it
+        }
         return;
     }
     if (!sketch.hasConstraint(hit)) {

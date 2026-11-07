@@ -288,6 +288,9 @@ bool Sketch::isShown(Id item) const
         if (const auto f = m_fills.find(item); f != m_fills.end() && hasLayer(f->second.layer)) {
             return layer(f->second.layer).visible;
         }
+        if (const auto i = m_images.find(item); i != m_images.end()) {
+            return i->second.visible && (!hasLayer(i->second.layer) || layer(i->second.layer).visible);
+        }
         return true;
     }
     for (const Sublayer& s : m_sublayers) {
@@ -420,6 +423,7 @@ void Sketch::removeLayer(Id id)
         }
     }
     std::erase_if(m_fills, [&](const auto& kv) { return kv.second.layer == id; });
+    std::erase_if(m_images, [&](const auto& kv) { return kv.second.layer == id; });
     std::erase_if(m_sublayers, [&](const Sublayer& l) { return l.id == last; });
     m_layers.erase(m_layers.begin() + static_cast<std::ptrdiff_t>(at));
     if (wasActive) {
@@ -452,6 +456,9 @@ Id Sketch::layerOf(Id item) const
 {
     if (const auto f = m_fills.find(item); f != m_fills.end()) {
         return f->second.layer;
+    }
+    if (const auto i = m_images.find(item); i != m_images.end()) {
+        return i->second.layer;
     }
     const Id sub = sublayerOf(item);
     return sub == kNoId ? kNoId : layerOfSublayer(sub);
@@ -1293,7 +1300,7 @@ bool Sketch::referencesPoint(const Entity& e, Id p) const
 
 void Sketch::remove(Id id)
 {
-    if (m_constraints.erase(id) > 0 || m_fills.erase(id) > 0) {
+    if (m_constraints.erase(id) > 0 || m_fills.erase(id) > 0 || m_images.erase(id) > 0) {
         return;
     }
     if (auto t = m_texts.find(id); t != m_texts.end()) {
@@ -1495,6 +1502,72 @@ void Sketch::insertFill(const Fill& fill)
     m_fills.emplace(fill.id, fill);
     std::ranges::sort(m_fills.at(fill.id).boundary);
     m_nextId = std::max(m_nextId, fill.id + 1);
+}
+
+Point Image::at(double u, double v) const
+{
+    const double a = angle * std::numbers::pi / 180.0;
+    const double dx = (u - 0.5) * width, dy = (v - 0.5) * height();
+    return {x + dx * std::cos(a) - dy * std::sin(a), y + dx * std::sin(a) + dy * std::cos(a)};
+}
+
+Point Image::fractions(const Point& world) const
+{
+    const double a = angle * std::numbers::pi / 180.0;
+    const double dx = world.x - x, dy = world.y - y;
+    const double lx = dx * std::cos(a) + dy * std::sin(a), ly = -dx * std::sin(a) + dy * std::cos(a);
+    return {lx / width + 0.5, ly / height() + 0.5};
+}
+
+bool Image::contains(const Point& world) const
+{
+    const Point f = fractions(world);
+    return f.x >= 0.0 && f.x <= 1.0 && f.y >= 0.0 && f.y <= 1.0;
+}
+
+Id Sketch::addImage(const Image& image)
+{
+    Image i = image;
+    i.id = nextId();
+    if (!hasLayer(i.layer)) {
+        i.layer = activeLayer();
+    }
+    if (!(i.width > 0.0) || i.pixelWidth <= 0 || i.pixelHeight <= 0) {
+        throw SketchError("an image needs a size");
+    }
+    m_images.emplace(i.id, std::move(i));
+    return m_nextId - 1;
+}
+
+void Sketch::setImage(const Image& image)
+{
+    auto it = m_images.find(image.id);
+    if (it == m_images.end()) {
+        throw SketchError("unknown image " + std::to_string(image.id));
+    }
+    if (!(image.width > 0.0)) {
+        throw SketchError("an image's width must be more than 0");
+    }
+    it->second = image;
+}
+
+void Sketch::insertImage(const Image& image)
+{
+    if (image.id == kNoId || hasEntity(image.id) || hasConstraint(image.id) || hasFill(image.id) || hasImage(image.id)
+        || hasText(image.id)) {
+        throw SketchError("duplicate or invalid id " + std::to_string(image.id));
+    }
+    m_images.emplace(image.id, image);
+    m_nextId = std::max(m_nextId, image.id + 1);
+}
+
+const Image& Sketch::image(Id id) const
+{
+    auto it = m_images.find(id);
+    if (it == m_images.end()) {
+        throw SketchError("unknown image " + std::to_string(id));
+    }
+    return it->second;
 }
 
 const Fill& Sketch::fill(Id id) const
@@ -1786,6 +1859,8 @@ void Sketch::clear()
     m_strokes.clear();
     m_fills.clear();
     m_texts.clear();
+    m_images.clear();
+    m_page.reset();
     m_sublayers = {{1, "Sublayer 1", true, 1}};
     m_activeSublayer = 1;
     m_layers = {{1, "Layer 1", true, 1}};

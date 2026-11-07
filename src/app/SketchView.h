@@ -8,6 +8,8 @@
 #include <core/Gradient.h>
 #include <core/Regions.h>
 
+#include "Images.h"
+
 #include <QPainterPath>
 
 #include <QElapsedTimer>
@@ -73,6 +75,12 @@ public:
     void editText(core::Id text);  // the Text tool, on it
     // The Gradient tool, editing an item's gradient (a fill, a curve's stroke or a text).
     void editGradient(core::Id item);
+    // The Image tool, on a reference image.
+    void editImage(core::Id image);
+    // An image drawn in place of the one with its id (an edit in progress, e.g. while dragging it).
+    void setImagePreview(std::optional<core::Image> image);
+    const std::optional<core::Image>& imagePreview() const { return m_imagePreview; }
+    core::Id imageAt(core::Vec2 world) const;  // the topmost shown image of the active layer there
 
     // What Paste places (set before switching to ToolKind::Paste).
     void setPasteFragment(core::Sketch fragment);
@@ -214,6 +222,7 @@ protected:
 private:
     void drawGrid(QPainter& painter) const;
     void drawPage(QPainter& painter) const;  // the sheet (see core::Page)
+    void drawImages(QPainter& painter, core::Id layer) const;  // a layer's reference images
     void drawSketch(QPainter& painter) const;
     void drawAnnotations(QPainter& painter) const;  // constraint symbols + dimensions
     void drawArcPath(QPainter& painter, const core::ArcShape& arc) const;
@@ -252,6 +261,8 @@ private:
     bool m_presentation = false;
     Paint m_paint;
     core::Gradient m_gradient;
+    mutable images::Cache m_imageCache;
+    std::optional<core::Image> m_imagePreview;
     core::Id m_editFeature = core::kNoId;  // the pattern the next pattern command edits
     // Settings panel for the tools that have settings but no command (fillet, polygon, ...).
     class CommandPanel* m_optionsPanel = nullptr;

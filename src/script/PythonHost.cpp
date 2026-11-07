@@ -8,6 +8,7 @@
 
 #include "Document.h"
 #include "Editor.h"
+#include "Images.h"
 #include "TextShapes.h"
 
 #include <core/Curves.h>
@@ -121,6 +122,8 @@ struct FillH : Item
 {};
 struct TextH : Item
 {};
+struct ImageH : Item
+{};
 // A sublayer, by its own id (sublayers have their own id space).
 struct SublayerH
 {
@@ -159,6 +162,9 @@ py::object wrap(Id id)
     }
     if (s.hasText(id)) {
         return py::cast(TextH{{id}});
+    }
+    if (s.hasImage(id)) {
+        return py::cast(ImageH{{id}});
     }
     switch (entity(id).kind()) {
         case EntityKind::Point: return py::cast(PointH{{id}});
@@ -649,7 +655,8 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
         .def_property_readonly("name", [](const Item& i) { return itemName(i.id); },
                                "The name used in recorded scripts, e.g. 'l7'.")
         .def_property_readonly("exists", [](const Item& i) {
-            return sketch().hasEntity(i.id) || sketch().hasConstraint(i.id) || sketch().hasFill(i.id) || sketch().hasText(i.id);
+            return sketch().hasEntity(i.id) || sketch().hasConstraint(i.id) || sketch().hasFill(i.id) || sketch().hasText(i.id)
+                   || sketch().hasImage(i.id);
         })
         .def_property_readonly("sublayer", [](const Item& i) -> py::object {
             const Id l = sketch().sublayerOf(i.id);
@@ -1087,6 +1094,75 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
                    + ">";
         });
 
+    auto imageOf = [](Id id) -> const core::Image& {
+        if (!sketch().hasImage(id)) {
+            throw py::value_error("image " + std::to_string(id) + " no longer exists");
+        }
+        return sketch().image(id);
+    };
+    py::class_<ImageH, Item>(m, "Image",
+                             "A reference image to draw over (see Sketch.image): shown under its layer's geometry, "
+                             "never part of the drawing (not in presentation view or exports). Change it with "
+                             "Sketch.edit_image or calibrate().")
+        .def_property_readonly("source", [imageOf](const ImageH& i) { return imageOf(i.id).source; },
+                               "The file it was inserted from (it's kept in the drawing).")
+        .def_property_readonly("center", [imageOf](const ImageH& i) {
+            const core::Image& im = imageOf(i.id);
+            return py::make_tuple(im.x, im.y);
+        })
+        .def_property_readonly("width", [imageOf](const ImageH& i) { return imageOf(i.id).width; }, "mm")
+        .def_property_readonly("height", [imageOf](const ImageH& i) { return imageOf(i.id).height(); }, "mm")
+        .def_property_readonly("angle", [imageOf](const ImageH& i) { return imageOf(i.id).angle; }, "Degrees.")
+        .def_property_readonly("opacity", [imageOf](const ImageH& i) { return imageOf(i.id).opacity; }, "0..1")
+        .def_property_readonly("flip_h", [imageOf](const ImageH& i) { return imageOf(i.id).flipH; })
+        .def_property_readonly("flip_v", [imageOf](const ImageH& i) { return imageOf(i.id).flipV; })
+        .def_property_readonly("visible", [imageOf](const ImageH& i) { return imageOf(i.id).visible; })
+        .def_property_readonly("pixels", [imageOf](const ImageH& i) {
+            const core::Image& im = imageOf(i.id);
+            return py::make_tuple(im.pixelWidth, im.pixelHeight);
+        }, "Its size in pixels.")
+        .def_property_readonly("corners", [imageOf](const ImageH& i) {
+            const core::Image& im = imageOf(i.id);
+            py::list out;
+            for (const auto& [u, v] : {std::pair{0.0, 0.0}, std::pair{1.0, 0.0}, std::pair{1.0, 1.0}, std::pair{0.0, 1.0}}) {
+                const core::Point p = im.at(u, v);
+                out.append(py::make_tuple(p.x, p.y));
+            }
+            return out;
+        }, "Its corners in sketch coordinates, from the bottom-left (as shown) counter-clockwise.")
+        .def("at", [imageOf](const ImageH& i, double u, double v) {
+            const core::Point p = imageOf(i.id).at(u, v);
+            return py::make_tuple(p.x, p.y);
+        }, py::arg("u"), py::arg("v"), "A place on it, (0, 0) its bottom-left and (1, 1) its top-right, in sketch "
+                                       "coordinates.")
+        .def("calibrate", [imageOf](const ImageH& i, py::handle a, py::handle b, double distance) {
+            core::Image im = imageOf(i.id);
+            const auto [ax, ay] = pairOf(a, "a");
+            const auto [bx, by] = pairOf(b, "b");
+            const double now = std::hypot(bx - ax, by - ay);
+            if (!(now > 0.0) || !(distance > 0.0)) {
+                throw py::value_error("calibrate: two different points and a distance more than 0");
+            }
+            const double k = distance / now;
+            im.width *= k;
+            im.x = ax + (im.x - ax) * k;
+            im.y = ay + (im.y - ay) * k;
+            editReturningId("Image", [&](Editor& ed) {
+                ed.setImage(im);
+                return i.id;
+            });
+        }, py::arg("a"), py::arg("b"), py::arg("distance"),
+           "Calibrate, as in Fusion: scale it (about `a`, which stays put) so that the points a and b (sketch "
+           "coordinates, e.g. two marks on it a known distance apart) are `distance` mm apart.")
+        .def("__repr__", [](const ImageH& i) {
+            if (!sketch().hasImage(i.id)) {
+                return "<Image " + std::to_string(i.id) + " (deleted)>";
+            }
+            const core::Image& im = sketch().image(i.id);
+            return "<Image i" + std::to_string(i.id) + " " + QFileInfo(QString::fromStdString(im.source)).fileName().toStdString()
+                   + ">";
+        });
+
     auto textOf = [](Id id) -> const core::Text& {
         if (!sketch().hasText(id)) {
             throw py::value_error("text " + std::to_string(id) + " no longer exists");
@@ -1207,14 +1283,16 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
                                "The fixed X axis (a line), for constraints and dimensions.")
         .def_property_readonly("y_axis", [](const SketchH&) { return wrap(sketch().yAxis()); })
         .def("__getitem__", [](const SketchH&, Id id) {
-            if (!sketch().hasEntity(id) && !sketch().hasConstraint(id) && !sketch().hasFill(id)) {
+            if (!sketch().hasEntity(id) && !sketch().hasConstraint(id) && !sketch().hasFill(id) && !sketch().hasText(id)
+                && !sketch().hasImage(id)) {
                 throw py::key_error("no item " + std::to_string(id));
             }
             return wrap(id);
         })
         .def("__contains__", [](const SketchH&, py::handle h) {
             const Id id = idOf(h);
-            return sketch().hasEntity(id) || sketch().hasConstraint(id) || sketch().hasFill(id);
+            return sketch().hasEntity(id) || sketch().hasConstraint(id) || sketch().hasFill(id) || sketch().hasText(id)
+                   || sketch().hasImage(id);
         })
         .def_property_readonly("entities", listOf(std::nullopt))
         .def_property_readonly("points", listOf(EntityKind::Point))
@@ -1454,7 +1532,7 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
             call.target().edit(QStringLiteral("Delete"), [&](Editor& ed) {
                 for (Id id : ids) {
                     const core::Sketch& s = ed.sketch();
-                    if (s.hasEntity(id) || s.hasConstraint(id) || s.hasFill(id) || s.hasText(id)) {
+                    if (s.hasEntity(id) || s.hasConstraint(id) || s.hasFill(id) || s.hasText(id) || s.hasImage(id)) {
                         ed.remove(id);
                     }
                 }
@@ -1728,6 +1806,73 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
            py::arg("color") = py::none(), py::arg("spacing") = py::none(), py::arg("align") = py::none(),
            py::arg("valign") = py::none(), py::arg("flip_h") = py::none(), py::arg("flip_v") = py::none(),
            "Change a text's settings (any of them); its letters are remade.")
+        .def("image", [](const SketchH&, const std::string& path, py::handle at, py::object width, py::object height,
+                         double angle, double opacity, bool flipH, bool flipV) {
+            core::Image im;
+            try {
+                im = images::load(QString::fromStdString(path));
+            }
+            catch (const core::SketchError& e) {
+                throw py::value_error(e.what());
+            }
+            std::tie(im.x, im.y) = pairOf(at, "at");
+            if (!width.is_none()) {
+                im.width = width.cast<double>();
+            }
+            else if (!height.is_none()) {
+                im.width = height.cast<double>() * im.pixelWidth / im.pixelHeight;
+            }
+            if (!(im.width > 0.0)) {
+                throw py::value_error("width / height: more than 0");
+            }
+            im.angle = angle;
+            im.opacity = std::clamp(opacity, 0.0, 1.0);
+            im.flipH = flipH;
+            im.flipV = flipV;
+            return wrap(editReturningId("Image", [&](Editor& ed) { return ed.addImage(im); }));
+        }, py::arg("path"), py::arg("at") = py::make_tuple(0.0, 0.0), py::arg("width") = py::none(),
+           py::arg("height") = py::none(), py::arg("angle") = 0.0, py::arg("opacity") = 0.5, py::arg("flip_h") = false,
+           py::arg("flip_v") = false,
+           "Insert a reference image (PNG, JPEG, ...; kept in the drawing) centred at `at`, in the active layer. "
+           "width or height in mm (else its natural size: from its resolution, or 96 pixels per inch); angle in "
+           "degrees; opacity 0..1. Scale it to a known distance with Image.calibrate.")
+        .def("edit_image", [](const SketchH&, py::handle image, py::object at, py::object width, py::object height,
+                              py::object angle, py::object opacity, py::object flipH, py::object flipV, py::object visible) {
+            const Id id = idOf(image);
+            if (!sketch().hasImage(id)) {
+                throw py::value_error("not an image");
+            }
+            core::Image im = sketch().image(id);
+            if (!at.is_none()) {
+                std::tie(im.x, im.y) = pairOf(at, "at");
+            }
+            if (!width.is_none()) {
+                im.width = width.cast<double>();
+            }
+            else if (!height.is_none()) {
+                im.width = height.cast<double>() * im.pixelWidth / im.pixelHeight;
+            }
+            if (!angle.is_none()) im.angle = angle.cast<double>();
+            if (!opacity.is_none()) im.opacity = std::clamp(opacity.cast<double>(), 0.0, 1.0);
+            if (!flipH.is_none()) im.flipH = flipH.cast<bool>();
+            if (!flipV.is_none()) im.flipV = flipV.cast<bool>();
+            if (!visible.is_none()) im.visible = visible.cast<bool>();
+            editReturningId("Image", [&](Editor& ed) {
+                ed.setImage(im);
+                return id;
+            });
+        }, py::arg("image"), py::arg("at") = py::none(), py::arg("width") = py::none(), py::arg("height") = py::none(),
+           py::arg("angle") = py::none(), py::arg("opacity") = py::none(), py::arg("flip_h") = py::none(),
+           py::arg("flip_v") = py::none(), py::arg("visible") = py::none(),
+           "Change a reference image's placement (any of them): centre, size (width or height, mm), angle, opacity, "
+           "flips, and whether it shows.")
+        .def_property_readonly("images", [](const SketchH&) {
+            std::vector<Id> ids;
+            for (const auto& [id, im] : sketch().images()) {
+                ids.push_back(id);
+            }
+            return wrapAll(ids);
+        }, "The reference images, bottom first.")
         .def_property_readonly("page", [](const SketchH&) -> py::object {
             const auto& page = sketch().page();
             if (!page) {
@@ -2376,7 +2521,7 @@ def run_file(path, argv):
         sys.argv, sys.path[:] = old_argv, old_path
 
 
-_NAME = re.compile(r"^(sp|ea|[plcakdfte])(\d+)$")
+_NAME = re.compile(r"^(sp|ea|[plcakdftei])(\d+)$")
 
 
 class ConsoleNamespace(dict):

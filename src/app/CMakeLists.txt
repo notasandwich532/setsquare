@@ -5,6 +5,8 @@ add_library(drawdoc STATIC
     Document.h
     Editor.cpp
     Editor.h
+    Images.cpp
+    Images.h
     TextShapes.cpp
     TextShapes.h
 )
@@ -62,6 +64,8 @@ add_library(drawapp_lib STATIC
     tools/StyleTools.h
     tools/GradientTool.cpp
     tools/GradientTool.h
+    tools/ImageTool.cpp
+    tools/ImageTool.h
     tools/Tool.h
     tools/Handles.cpp
     tools/Handles.h

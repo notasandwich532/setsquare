@@ -25,6 +25,8 @@ public:
 
     bool openFile(const QString& path);  // reports errors in a dialog
     void runScript(const QString& path);  // in the Python console
+    // File > Insert Image: a reference image in the middle of the view (empty path: ask which).
+    void insertImage(const QString& path = {});
 
     // Tool names as used by Python's app.tool.
     static QString toolName(ToolKind kind);
@@ -69,4 +71,5 @@ private:
     class ToolSearch* m_search = nullptr;
     core::exporter::SvgOptions m_svgOptions;  // as last used
     core::exporter::DxfOptions m_dxfOptions;
+    QAction* m_insertImage = nullptr;
 };

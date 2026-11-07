@@ -126,6 +126,9 @@ public:
     // copies, in order.
     std::vector<core::Id> project(const std::vector<core::Id>& sources);
     void breakLink(const std::vector<core::Id>& items);
+    // Reference images. Recorded as s.image(...) / s.edit_image(...).
+    core::Id addImage(const core::Image& image);
+    void setImage(const core::Image& image);
     // The page (none: no page). Recorded as s.set_page(...) / s.clear_page().
     void setPage(const std::optional<core::Page>& page);
     static QString pageCall(const core::Page& page);

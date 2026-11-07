@@ -1097,6 +1097,24 @@ def icon_reset_fill():
     return finish("reset_fill")
 
 
+def icon_image():
+    """A picture in a frame: a mountain and the sun."""
+    start()
+    r = stroke(s.rectangle((2.5, 4.5), (21.5, 19.5)), GREY, width=2)
+    pin(r[0].p1, 2.5, 4.5)
+    s.distance(r[0], value=19)
+    s.distance(r[1], value=15)
+    polygon_through([(5.5, 7.5), (11, 14.5), (16.5, 7.5)], BLUE, width=1.5)
+    s.solve()
+    s.fill(at=(11, 10), color=BLUE)
+    sun = stroke(s.circle((16.5, 15), 1.8), AMBER, width=1)
+    pin(sun.center, 16.5, 15)
+    s.radius(sun, value=1.8)
+    s.solve()
+    s.fill(at=(16.5, 15), color=AMBER)
+    return finish("image")
+
+
 def icon_presentation():
     """An eye: the drawing as it will be seen."""
     start()
@@ -1128,7 +1146,7 @@ ICONS.update({
               icon_slot_overall, icon_slot_center_point, icon_arc_slot, icon_arc_slot_3point, icon_trim,
               icon_trim_construction, icon_extend, icon_break, icon_fillet, icon_chamfer_equal, icon_chamfer_2distances,
               icon_chamfer_angle, icon_move, icon_scale, icon_mirror, icon_rectangular_pattern, icon_circular_pattern,
-              icon_offset, icon_divide, icon_stroke_brush, icon_fill, icon_gradient, icon_reset_fill, icon_presentation]
+              icon_offset, icon_divide, icon_stroke_brush, icon_fill, icon_gradient, icon_reset_fill, icon_image, icon_presentation]
 })
 
 wanted = sys.argv[1:] or list(ICONS)

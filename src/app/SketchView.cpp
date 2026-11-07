@@ -14,6 +14,7 @@
 #include "tools/CurveTools.h"
 #include "tools/ProjectTool.h"
 #include "tools/GradientTool.h"
+#include "tools/ImageTool.h"
 #include "tools/StyleTools.h"
 #include "tools/TextTool.h"
 #include "tools/TransformTools.h"
@@ -197,6 +198,7 @@ void SketchView::setTool(ToolKind kind)
         case ToolKind::Fill: m_tool = std::make_unique<FillTool>(*this); break;
         case ToolKind::Gradient: m_tool = std::make_unique<GradientTool>(*this); break;
         case ToolKind::ResetFill: m_tool = std::make_unique<ResetFillTool>(*this); break;
+        case ToolKind::Image: m_tool = std::make_unique<ImageTool>(*this); break;
         case ToolKind::Project: m_tool = std::make_unique<ProjectTool>(*this); break;
         case ToolKind::Ellipse: m_tool = std::make_unique<EllipseTool>(*this); break;
         case ToolKind::SplineFit: m_tool = std::make_unique<SplineTool>(*this, core::SplineKind::Fit); break;
@@ -312,6 +314,25 @@ void SketchView::editGradient(core::Id item)
     setTool(ToolKind::Gradient);
     gradientTool()->setTarget(target);
     gradientTool()->setCurrent(item);
+}
+
+void SketchView::editImage(core::Id image)
+{
+    setTool(ToolKind::Image);
+    static_cast<ImageTool*>(m_tool.get())->setImage(image);
+}
+
+core::Id SketchView::imageAt(core::Vec2 world) const
+{
+    const core::Sketch& s = m_doc.sketch();
+    core::Id found = core::kNoId;
+    for (const auto& [id, stored] : s.images()) {  // later ones are on top
+        const core::Image& im = m_imagePreview && m_imagePreview->id == id ? *m_imagePreview : stored;
+        if (im.visible && im.layer == s.activeLayer() && s.layer(im.layer).visible && im.contains({world.x, world.y})) {
+            found = id;
+        }
+    }
+    return found;
 }
 
 GradientTool* SketchView::gradientTool() const
@@ -725,10 +746,21 @@ void SketchView::paintEvent(QPaintEvent*)
     }
     QPainter painter(this);
     painter.fillRect(rect(), theme::canvas().background);
+    if (!m_presentation) {
+        // Reference images, under everything, the grid too (not part of the drawing: never in
+        // presentation view). Bottom layer first.
+        const auto& layers = m_doc.sketch().layers();
+        for (auto it = layers.rbegin(); it != layers.rend(); ++it) {
+            if (it->visible) {
+                drawImages(painter, it->id);
+            }
+        }
+    }
     drawGrid(painter);
     painter.setRenderHint(QPainter::Antialiasing);
     drawPage(painter);
     drawSketch(painter);
+    m_imageCache.prune();
     if (m_tool) {
         m_tool->paintOverlay(painter);
     }
@@ -738,6 +770,37 @@ void SketchView::paintEvent(QPaintEvent*)
         drawStats(painter);
     }
     m_inPaint = false;
+}
+
+void SketchView::setImagePreview(std::optional<core::Image> image)
+{
+    m_imagePreview = std::move(image);
+    scheduleRepaint();
+}
+
+void SketchView::drawImages(QPainter& painter, core::Id layer) const
+{
+    for (const auto& [id, stored] : m_doc.sketch().images()) {
+        const core::Image& im = m_imagePreview && m_imagePreview->id == id ? *m_imagePreview : stored;
+        if (im.layer != layer || !im.visible) {
+            continue;
+        }
+        const double shownWide = im.width * m_zoom;
+        const QImage& picture = m_imageCache.get(im, shownWide);
+        if (picture.isNull()) {
+            continue;
+        }
+        painter.save();
+        painter.setRenderHint(QPainter::SmoothPixmapTransform);
+        painter.setOpacity(std::clamp(im.opacity, 0.0, 1.0));
+        const QPointF c = toScreen({im.x, im.y});
+        painter.translate(c);
+        painter.rotate(-im.angle);  // (y down on screen)
+        painter.scale((im.flipH ? -1.0 : 1.0) * shownWide / picture.width(),
+                      (im.flipV ? -1.0 : 1.0) * im.height() * m_zoom / picture.height());
+        painter.drawImage(QPointF(-picture.width() / 2.0, -picture.height() / 2.0), picture);
+        painter.restore();
+    }
 }
 
 void SketchView::drawPage(QPainter& painter) const
@@ -1065,6 +1128,7 @@ void SketchView::drawSketch(QPainter& painter) const
         continue;
     }
     auto inLayer = [&](core::Id id) { return sketch.layerOf(id) == layer; };
+
 
     // Fills, underneath the rest: each found afresh from the geometry (see core/Regions.h).
     {

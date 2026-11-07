@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -342,6 +343,35 @@ std::vector<Id> textPoints(const class Sketch& sketch, const Text& text);
 // The world position of a point in a text's own space.
 Point textToWorld(const Point& anchor, double angleDeg, const Point& local);
 
+// A picture placed in the drawing as a reference to draw over (like Fusion's canvas): shown on
+// the canvas under its layer's geometry, never part of the drawing itself (not in presentation
+// view or the exports). The file is kept in the drawing (so it travels with it), shared between
+// copies of the sketch (undo steps) rather than copied.
+struct Image
+{
+    Id id = kNoId;
+    Id layer = kNoId;
+    std::string source;  // the file it came from (where it was inserted from)
+    std::shared_ptr<const std::string> data;  // the file's bytes (PNG, JPEG, ...)
+    int pixelWidth = 1;
+    int pixelHeight = 1;
+    double x = 0.0, y = 0.0;  // its centre
+    double width = 100.0;     // mm (its height follows, keeping its proportions)
+    double angle = 0.0;       // degrees, counter-clockwise
+    double opacity = 0.5;     // 0..1
+    bool flipH = false;
+    bool flipV = false;
+    bool visible = true;
+
+    double height() const { return width * pixelHeight / pixelWidth; }
+    // A place on it, (0, 0) its bottom-left corner and (1, 1) its top-right (as shown, before
+    // flipping), in sketch coordinates; and back.
+    Point at(double u, double v) const;
+    Point fractions(const Point& world) const;
+    bool contains(const Point& world) const;
+    bool operator==(const Image&) const = default;
+};
+
 // ---------------------------------------------------------------------------------------------
 // Sketch: owns geometry and constraints. Solving lives in Solver.
 // ---------------------------------------------------------------------------------------------
@@ -416,6 +446,14 @@ public:
     bool hasText(Id id) const { return m_texts.contains(id); }
     const Text& text(Id id) const;
     const std::map<Id, Text>& texts() const { return m_texts; }
+
+    // Images (references to draw over) share the id space too; remove() deletes one.
+    Id addImage(const Image& image);  // image.id is ignored (layer: the active one if unset)
+    void setImage(const Image& image);  // replaces an existing image (by id)
+    void insertImage(const Image& image);  // with its id (loading)
+    bool hasImage(Id id) const { return m_images.contains(id); }
+    const Image& image(Id id) const;
+    const std::map<Id, Image>& images() const { return m_images; }
 
     // --- sublayers ---
     // Always at least one. New items go into the active one.
@@ -561,6 +599,7 @@ private:
     std::map<Id, StrokeStyle> m_strokes;
     std::map<Id, Fill> m_fills;
     std::map<Id, Text> m_texts;
+    std::map<Id, Image> m_images;
     // Throws unless every one of these items is in `layer` (or is the origin/axes).
     void requireLayer(const std::vector<Id>& items, Id layer) const;
 

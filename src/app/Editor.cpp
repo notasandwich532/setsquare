@@ -41,6 +41,9 @@ QString Editor::name(const core::Sketch& s, Id id)
     if (s.hasText(id)) {
         return QStringLiteral("t%1").arg(id);
     }
+    if (s.hasImage(id)) {
+        return QStringLiteral("i%1").arg(id);
+    }
     if (s.hasEntity(id)) {
         switch (s.entity(id).kind()) {
             case core::EntityKind::Point: return QStringLiteral("p%1").arg(id);
@@ -903,6 +906,59 @@ std::vector<Id> Editor::project(const std::vector<Id>& sources)
     }
     log(QStringLiteral("s.project(%1)").arg(list(m_sketch, sources)));
     return copies;
+}
+
+namespace
+{
+// An image's placement as Python keyword arguments.
+QString imageArgs(const core::Image& im)
+{
+    QStringList args;
+    args << QStringLiteral("at=") + Editor::pair({im.x, im.y}) << QStringLiteral("width=") + Editor::number(im.width);
+    if (im.angle != 0.0) {
+        args << QStringLiteral("angle=") + Editor::number(im.angle);
+    }
+    args << QStringLiteral("opacity=") + Editor::number(im.opacity);
+    if (im.flipH) {
+        args << QStringLiteral("flip_h=True");
+    }
+    if (im.flipV) {
+        args << QStringLiteral("flip_v=True");
+    }
+    return args.join(QStringLiteral(", "));
+}
+
+QString pyPath(const std::string& path)
+{
+    QString out = QStringLiteral("r\"");
+    out += QString::fromStdString(path);
+    return out + QLatin1Char('"');
+}
+}  // namespace
+
+core::Id Editor::addImage(const core::Image& image)
+{
+    const Id id = m_sketch.addImage(image);
+    const core::Image& im = m_sketch.image(id);
+    log(QStringLiteral("%1 = s.image(%2, %3)").arg(name(m_sketch, id), pyPath(im.source), imageArgs(im)));
+    return id;
+}
+
+void Editor::setImage(const core::Image& image)
+{
+    const core::Image before = m_sketch.image(image.id);
+    m_sketch.setImage(image);
+    QString call = QStringLiteral("s.edit_image(%1, %2").arg(name(m_sketch, image.id), imageArgs(image));
+    if (!image.flipH && before.flipH) {
+        call += QStringLiteral(", flip_h=False");
+    }
+    if (!image.flipV && before.flipV) {
+        call += QStringLiteral(", flip_v=False");
+    }
+    if (image.visible != before.visible) {
+        call += image.visible ? QStringLiteral(", visible=True") : QStringLiteral(", visible=False");
+    }
+    log(call + QLatin1Char(')'));
 }
 
 QString Editor::pageCall(const core::Page& p)
