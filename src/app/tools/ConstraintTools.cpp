@@ -532,7 +532,8 @@ QString GroupTool::hint() const
         return QObject::tr("Group: click the curves and points to hold together (drag a box for many), then Enter. "
                            "They'll keep their places relative to each other, moving and turning as one");
     }
-    return QObject::tr("Group: %n gathered: click more (again: leave one out), then Enter to group them; Esc: none",
+    return QObject::tr("Group: %n gathered: click more (again: leave one out; a group's symbol: add to that group), "
+                       "then Enter to group them; Esc: none",
                        nullptr, static_cast<int>(m_items.size()));
 }
 
@@ -542,8 +543,9 @@ void GroupTool::activate()
     const Sketch& s = doc().sketch();
     std::vector<Id> selected;
     for (Id id : view().selection()) {
-        if (s.hasEntity(id) && !s.isReference(id)) {
-            selected.push_back(id);
+        const bool group = s.hasConstraint(id) && s.constraint(id).type == ConstraintType::Group;
+        if ((s.hasEntity(id) && !s.isReference(id)) || group) {
+            selected.push_back(id);  // (a group's symbol: added to that group)
         }
     }
     if (selected.empty()) {
@@ -576,9 +578,13 @@ bool GroupTool::finish()
 
 Id GroupTool::itemAt(QPointF screen) const
 {
-    core::PickOptions options = view().editableOptions(7.0);
-    const Id hit = core::pick(doc().sketch(), view().toWorld(screen), options);
-    return hit != kNoId && !doc().sketch().isReference(hit) ? hit : kNoId;
+    const Sketch& s = doc().sketch();
+    const Id hit = view().pickAt(screen, true, true);
+    if (s.hasConstraint(hit)) {
+        // A group's symbol: what's gathered joins that group.
+        return s.constraint(hit).type == ConstraintType::Group ? hit : kNoId;
+    }
+    return hit != kNoId && s.hasEntity(hit) && !s.isReference(hit) ? hit : kNoId;
 }
 
 void GroupTool::move(const ToolEvent& e)

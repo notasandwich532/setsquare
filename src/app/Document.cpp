@@ -142,6 +142,14 @@ core::Id Document::midpointOnLine(const std::vector<core::Id>& refs, QString* er
 
 core::Id Document::addGroup(const std::vector<core::Id>& items, QString* error)
 {
+    // (named as they are now: a group among them is taken into the new one)
+    QStringList names;
+    for (core::Id item : items) {
+        const bool group = m_sketch.hasConstraint(item) && m_sketch.constraint(item).type == core::ConstraintType::Group;
+        if ((m_sketch.hasEntity(item) && !m_sketch.isReference(item)) || group) {
+            names << Editor::name(m_sketch, item);
+        }
+    }
     core::Sketch working = m_sketch;
     core::Id id = core::kNoId;
     try {
@@ -155,12 +163,6 @@ core::Id Document::addGroup(const std::vector<core::Id>& items, QString* error)
     }
     if (!commitChecked(std::move(working), error, {}, {id})) {
         return core::kNoId;
-    }
-    QStringList names;
-    for (core::Id item : items) {
-        if (m_sketch.hasEntity(item) && !m_sketch.isReference(item)) {
-            names << Editor::name(m_sketch, item);
-        }
     }
     record(QStringLiteral("%1 = s.group([%2])").arg(Editor::name(m_sketch, id), names.join(QStringLiteral(", "))));
     return id;

@@ -18,12 +18,51 @@ Members members(const Sketch& sketch, const Constraint& g)
     return m;
 }
 
-Id create(Sketch& sketch, const std::vector<Id>& items)
+Id create(Sketch& sketch, const std::vector<Id>& given)
 {
+    // A group in the items (its symbol) brings its members.
+    std::vector<Id> items;
+    std::vector<Id> absorbed;  // groups this one takes in
+    for (Id id : given) {
+        if (sketch.hasConstraint(id) && sketch.constraint(id).type == ConstraintType::Group) {
+            absorbed.push_back(id);
+            const auto& refs = sketch.constraint(id).refs;
+            items.insert(items.end(), refs.begin(), refs.end());
+        }
+        else {
+            items.push_back(id);
+        }
+    }
     std::vector<Id> points, circles;
     auto addPoint = [&](Id p) {
         if (std::ranges::find(points, p) == points.end()) {
             points.push_back(p);
+        }
+    };
+    // Groups don't chain: any group sharing a point or circle with this one joins it (and so on).
+    auto expand = [&] {
+        for (bool grew = true; grew;) {
+            grew = false;
+            for (const auto& [id, c] : sketch.constraints()) {
+                if (c.type != ConstraintType::Group || std::ranges::find(absorbed, id) != absorbed.end()) {
+                    continue;
+                }
+                const bool shares = std::ranges::any_of(c.refs, [&](Id r) {
+                    return std::ranges::find(points, r) != points.end() || std::ranges::find(circles, r) != circles.end();
+                });
+                if (shares) {
+                    absorbed.push_back(id);
+                    for (Id r : c.refs) {
+                        if (sketch.entity(r).kind() == EntityKind::Point) {
+                            addPoint(r);
+                        }
+                        else if (std::ranges::find(circles, r) == circles.end()) {
+                            circles.push_back(r);
+                        }
+                    }
+                    grew = true;
+                }
+            }
         }
     };
     for (Id id : items) {
@@ -39,6 +78,7 @@ Id create(Sketch& sketch, const std::vector<Id>& items)
             circles.push_back(id);
         }
     }
+    expand();
     if (points.size() < 2) {
         throw SketchError("a group needs at least two things (or a curve) to hold together");
     }
@@ -71,6 +111,9 @@ Id create(Sketch& sketch, const std::vector<Id>& items)
     }
     std::vector<Id> refs = points;
     refs.insert(refs.end(), circles.begin(), circles.end());
+    for (Id g : absorbed) {
+        sketch.remove(g);  // (now part of this one)
+    }
     return sketch.addConstraint(ConstraintType::Group, std::move(refs), 0.0, std::move(params));
 }
 

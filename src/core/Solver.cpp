@@ -587,6 +587,28 @@ void Solver::Impl::build(const Sketch& sketch)
         }
     }
 
+    // Which group each point is held in (the rules a curve wholly inside one keeps on its own
+    // points are said by the group already: see below).
+    std::map<Id, Id> groupOfPoint;
+    for (const auto& [id, c] : sketch.constraints()) {
+        if (c.type == ConstraintType::Group) {
+            for (Id p : group::members(sketch, c).points) {
+                groupOfPoint.emplace(p, id);
+            }
+        }
+    }
+    auto inOneGroup = [&](std::initializer_list<Id> pts) {
+        Id g = kNoId;
+        for (Id p : pts) {
+            const auto it = groupOfPoint.find(p);
+            if (it == groupOfPoint.end() || (g != kNoId && it->second != g)) {
+                return false;
+            }
+            g = it->second;
+        }
+        return g != kNoId;
+    };
+
     std::set<double*> unknownSet;
     auto declare = [&](double* p) {
         unknowns.push_back(p);
@@ -662,6 +684,14 @@ void Solver::Impl::build(const Sketch& sketch)
             if (capArcs.contains(id)) {
                 // (caps get theirs from their offset: see addOffset)
             }
+            else if (inOneGroup({a->center, a->start, a->end})) {
+                // Held in a group: its points are rigid already (its ends as far from its centre
+                // as they were), so its radius and angles just follow them.
+                GCS::Arc& held = it->second;
+                sys.addConstraintP2PDistance(held.center, held.start, held.rad, kInternalTag);
+                sys.addConstraintP2PAngle(held.center, held.start, held.startAngle, 0.0, kInternalTag);
+                sys.addConstraintP2PAngle(held.center, held.end, held.endAngle, 0.0, kInternalTag);
+            }
             else if (rootStart == rootEnd) {
                 GCS::Arc& twin = it->second;
                 sys.addConstraintP2PDistance(twin.center, twin.start, twin.rad, kInternalTag);
@@ -708,14 +738,17 @@ void Solver::Impl::build(const Sketch& sketch)
             const std::array<Id, 3> image{mirrorOf.at(ax[0]).first, mirrorOf.at(ax[1]).first, mirrorOf.at(ax[2]).first};
             mirrored = mirrorOf.at(ax[1]).second == line && mirrorOf.at(ax[2]).second == line && rightAngled.contains(image);
         }
-        if (placedCopies.contains(id) || mirrored || !rightAngled.insert(ax).second) {
-            continue;
+        if (placedCopies.contains(id) || mirrored || !rightAngled.insert(ax).second || inOneGroup({ax[0], ax[1], ax[2]})) {
+            continue;  // (in a group, its axes stay at right angles anyway)
         }
         sys.addConstraintPerpendicular(points.at(ax[0]), points.at(ax[1]), points.at(ax[0]), points.at(ax[2]),
                                        kInternalTag);
     }
     for (const auto& [id, e] : sketch.entities()) {
         if (const auto* ea = std::get_if<EllipseArc>(&e.geom)) {
+            if (inOneGroup({ea->center, ea->major, ea->minor, ea->start, ea->end})) {
+                continue;  // (held in a group: its ends stay on it)
+            }
             for (Id end : {ea->start, ea->end}) {
                 if (end != ea->major && end != ea->minor) {  // (those are on it already)
                     addPointOnCurve(sketch, end, id, kInternalTag);
@@ -723,9 +756,13 @@ void Solver::Impl::build(const Sketch& sketch)
             }
         }
         if (const auto* sp = std::get_if<Spline>(&e.geom); sp && sp->isPiece()) {
-            // (not an end that's on the curve already: a point it passes through, or its own end)
+            // (not an end that's on the curve already: a point it passes through, or its own end;
+            // nor one held in a group with the spline, which keeps it there)
+            const bool held = std::ranges::all_of(sketch.definingPoints(id), [&](Id p) {
+                return inOneGroup({p, sp->start});
+            });
             for (Id end : {sp->start, sp->end}) {
-                if (!splineEndOnCurve(*sp, end)) {
+                if (!held && !splineEndOnCurve(*sp, end)) {
                     addPointOnCurve(sketch, end, id, kInternalTag);
                 }
             }

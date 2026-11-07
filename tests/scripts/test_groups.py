@@ -118,4 +118,73 @@ before = distances(cp)
 cp[0].move_to(70, 30)
 assert same(distances(cp), before)
 assert same([v for q in p for v in q.pos], [0, 0, 30, 0, 10, 20])  # the original group stays
+
+# --- curves with rules of their own: arcs on a circle (a planet), a lone arc, ellipses, splines ------
+doc.new()
+planet = s.circle((0, 0), 50)
+p1, p2 = s.point(30, 40), s.point(48, 14)
+ring = s.arc((60, 30), p2, p1)
+s.coincident(p1, planet)
+s.coincident(p2, planet)
+moon = s.circle((-60, 10), 8)
+s.vertical(s.line(planet.center, (0, -70)))
+g = s.group([planet, ring, moon] + [l for l in s.lines])
+healthy()
+pts = [planet.center, ring.center, p1, p2, moon.center]
+before, radius = distances(pts), planet.radius
+planet.center.move_to(12, 7)  # the whole planet slides (the vertical line stops it turning)
+assert same(distances(pts), before), (distances(pts), before)
+assert isclose(moon.radius, 8) and isclose(planet.radius, radius, rel_tol=1e-9)
+assert same(planet.center.pos, (12, 7))
+
+doc.new()
+q1, q2 = s.point(30, 40), s.point(48, 14)
+lone = s.arc((60, 30), q2, q1)
+s.group([lone])  # (its own rules and the group's don't say the same thing twice)
+healthy()
+before = distances([lone.center, q1, q2])
+q1.move_to(20, 50)
+assert same(distances([lone.center, q1, q2]), before)
+
+doc.new()
+e = s.ellipse((0, 0), (20, 5), 8)
+spl = s.spline([(30, 0), (40, 8), (50, -3), (60, 5)], "control")
+s.group([e, spl])
+healthy()
+pts = list(spl.points) + [e.center, e.major, e.minor]
+before = distances(pts)
+spl.points[1].move_to(45, 20)
+assert same(distances(pts), before)
+
+# Held by something fixed: a grouped spline doesn't move at all.
+doc.new()
+spl = s.spline([(0, 0), (10, 8), (20, -3), (30, 5)])
+base = s.line((0, -20), (30, -20))
+base.p1.fixed = base.p2.fixed = True
+s.group([spl, base])
+r = healthy()
+assert r.dof == 0, r.dof
+before = [p.pos for p in spl.points]
+spl.points[2].move_to(25, 10)
+assert [p.pos for p in spl.points] == before
+
+# --- groups don't chain: grouping with something in a group adds to that group ----------------------
+doc.new()
+a1 = s.line((0, 0), (10, 0))
+a2 = s.line((20, 0), (30, 5))
+a3 = s.line((40, 0), (50, 5))
+g1 = s.group([a1, a2])
+g2 = s.group([a2, a3])  # a2 is in g1 already: one group of all three
+groups = [k for k in s.constraints if k.type == "group"]
+assert len(groups) == 1 and not g1.exists, groups
+a4 = s.line((60, 0), (70, 5))
+g3 = s.group([g2, a4])  # a group's symbol among the items: add to it
+groups = [k for k in s.constraints if k.type == "group"]
+assert len(groups) == 1 and not g2.exists and g3.exists
+assert doc.history[-1] == f"k{g3.id} = s.group([k{g2.id}, l{a4.id}])", doc.history[-1]
+healthy()
+pts = [a1.p1, a2.p2, a3.p1, a4.p2]
+before = distances(pts)
+a4.p2.move_to(80, 20)
+assert same(distances(pts), before)
 print("ok")

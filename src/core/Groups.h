@@ -27,8 +27,9 @@ struct Members
 Members members(const Sketch& sketch, const Constraint& group);
 
 // Makes a group of the items (curves and points, with the points they're built on; not the
-// origin or axes), as they are now. Returns its id. Throws SketchError unless there are at least
-// two different places in it.
+// origin or axes), as they are now. Returns its id. Groups don't chain: a group among the items,
+// or sharing a point or circle with them, is taken into the new one (and deleted). Throws
+// SketchError unless there are at least two different places in it.
 Id create(Sketch& sketch, const std::vector<Id>& items);
 
 // Whether an entity is wholly inside a group (a curve: all the points it's built on; a circle:
