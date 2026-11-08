@@ -214,6 +214,15 @@ Id pick(const Sketch& sketch, Vec2 p, const PickOptions& options)
         if ((isPoint && !options.points) || (!isPoint && !options.curves)) {
             continue;
         }
+        // A spline or ellipse whose box is out of reach can't be near (finding how near it is
+        // takes long; there can be thousands of them in an imported drawing).
+        if (e.kind() == EntityKind::Ellipse || e.kind() == EntityKind::EllipseArc || e.kind() == EntityKind::Spline) {
+            const auto [x0, y0, x1, y1] = curve::box(sketch, id);
+            const double reach = curveDist + same;
+            if (p.x < x0 - reach || p.x > x1 + reach || p.y < y0 - reach || p.y > y1 + reach) {
+                continue;
+            }
+        }
         const double d = distanceTo(sketch, id, p);
         if (isPoint && d <= pointDist) {
             pointDist = d;

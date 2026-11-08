@@ -99,7 +99,14 @@ private:
 // The path of a curve (line, circle, arc, ellipse, elliptical arc or spline).
 Path pathOf(const Sketch& sketch, Id curve);
 
+// A box the curve lies in (not always the tightest: an ellipse's is its circumscribed circle's,
+// a spline piece's its whole curve's), quick to find. x0, y0, x1, y1.
+std::array<double, 4> box(const Sketch& sketch, Id curve);
+
 // Where two curves cross (within their extents), found numerically to about 1e-9 of their size.
 std::vector<Vec2> intersections(const Path& p1, const Path& p2);
+// The same from points along each made beforehand (crossingSamples), to reuse them for many pairs.
+std::vector<Vec2> crossingSamples(const Path& p);
+std::vector<Vec2> intersections(const Path& p1, const std::vector<Vec2>& s1, const Path& p2, const std::vector<Vec2>& s2);
 
 }  // namespace core::curve

@@ -319,8 +319,39 @@ Arrangement::Arrangement(const Sketch& s, Id layer, double arcStep)
             }
         }
     }
+    // Crossings: lines, circles and arcs by formula; with an ellipse or spline, by their paths
+    // (made once per curve, not once per pair), keeping only points on both curves.
+    auto pathOf = [&](const Curve& c) {
+        switch (c.kind) {
+            case Curve::Kind::Line: return curve::Path::line(c.a, c.b);
+            case Curve::Kind::Arc:
+            case Curve::Kind::Circle: return curve::Path::circle(c.c, c.r);
+            case Curve::Kind::Other: break;
+        }
+        return c.path;
+    };
+    std::vector<curve::Path> paths;
+    paths.reserve(curves.size());
+    for (const Curve& c : curves) {
+        paths.push_back(c.kind == Curve::Kind::Other ? curve::Path{} : pathOf(c));
+    }
+    auto pathFor = [&](size_t i) -> const curve::Path& { return curves[i].kind == Curve::Kind::Other ? curves[i].path : paths[i]; };
+    std::vector<std::vector<Vec2>> samples(curves.size());  // (made when first needed)
+    auto samplesFor = [&](size_t i) -> const std::vector<Vec2>& {
+        if (samples[i].empty()) {
+            samples[i] = curve::crossingSamples(pathFor(i));
+        }
+        return samples[i];
+    };
+    auto on = [&](const Curve& c, Vec2 p) { return norm(sub(c.at(c.param(p)), p)) <= 100 * tol; };
     for (const auto& [i, j] : near) {
-        for (const Vec2& p : modify::intersections(s, curves[i].id, curves[j].id)) {
+        const bool fancy = curves[i].kind == Curve::Kind::Other || curves[j].kind == Curve::Kind::Other;
+        const std::vector<Vec2> xs = fancy ? curve::intersections(pathFor(i), samplesFor(i), pathFor(j), samplesFor(j))
+                                           : modify::intersections(s, curves[i].id, curves[j].id);
+        for (const Vec2& p : xs) {
+            if (fancy && (!on(curves[i], p) || !on(curves[j], p))) {
+                continue;  // (on an arc's circle, past its end)
+            }
             cuts[i].push_back(curves[i].param(p));
             cuts[j].push_back(curves[j].param(p));
         }
@@ -333,7 +364,13 @@ Arrangement::Arrangement(const Sketch& s, Id layer, double arcStep)
         if (c.closed()) {
             return;
         }
+        const Curve& other = curves[j];
+        const Vec2 otherEnds[2] = {other.at(0.0), other.at(other.end())};
         for (const Vec2 end : {c.at(0.0), c.at(c.end())}) {
+            if (end.x < other.x0 - tol || end.x > other.x1 + tol || end.y < other.y0 - tol || end.y > other.y1 + tol
+                || (!other.closed() && (norm(sub(end, otherEnds[0])) <= tol || norm(sub(end, otherEnds[1])) <= tol))) {
+                continue;  // (nowhere near it, or at its end: a cut already)
+            }
             const double t = curves[j].param(end);
             if (norm(sub(curves[j].at(t), end)) <= tol) {
                 cuts[j].push_back(t);

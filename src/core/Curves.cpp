@@ -457,6 +457,38 @@ std::vector<Bezier> Path::beziers() const
     return out;
 }
 
+std::array<double, 4> box(const Sketch& s, Id id)
+{
+    const Entity& e = s.entity(id);
+    if (e.kind() == EntityKind::Spline) {
+        const Spline& sp = s.spline(id);
+        std::array<double, 4> b{std::numeric_limits<double>::infinity(), std::numeric_limits<double>::infinity(),
+                                -std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity()};
+        for (const Bezier& piece : splineBeziers(splinePoints(s, sp), sp.kind, sp.closed)) {
+            for (const Vec2& q : piece.p) {  // (a bezier lies in its control points' hull)
+                b = {std::min(b[0], q.x), std::min(b[1], q.y), std::max(b[2], q.x), std::max(b[3], q.y)};
+            }
+        }
+        return b;
+    }
+    if (e.kind() == EntityKind::Ellipse || e.kind() == EntityKind::EllipseArc) {
+        const EllipseFrame f = ellipseFrame(s, id);
+        const double r = std::max(f.a, f.b);
+        return {f.c.x - r, f.c.y - r, f.c.x + r, f.c.y + r};
+    }
+    if (e.kind() == EntityKind::Line) {
+        const Vec2 a = pos(s, s.line(id).p1), b = pos(s, s.line(id).p2);
+        return {std::min(a.x, b.x), std::min(a.y, b.y), std::max(a.x, b.x), std::max(a.y, b.y)};
+    }
+    if (e.kind() == EntityKind::Circle || e.kind() == EntityKind::Arc) {  // (an arc's whole circle's)
+        const ArcShape a = e.kind() == EntityKind::Arc ? arcShape(s, id)
+                                                       : ArcShape{pos(s, s.circle(id).center), s.circle(id).radius, 0, 0};
+        return {a.center.x - a.radius, a.center.y - a.radius, a.center.x + a.radius, a.center.y + a.radius};
+    }
+    const Vec2 p = pos(s, id);  // a point
+    return {p.x, p.y, p.x, p.y};
+}
+
 Path pathOf(const Sketch& s, Id id)
 {
     const Entity& e = s.entity(id);
@@ -504,17 +536,28 @@ Path pathOf(const Sketch& s, Id id)
     throw SketchError("not a curve");
 }
 
+std::vector<Vec2> crossingSamples(const Path& p)
+{
+    int n = 1;
+    switch (p.kind()) {
+        case Path::Kind::Line: n = 1; break;
+        case Path::Kind::Spline: n = std::max(8, static_cast<int>(std::ceil(p.end() * 48))); break;
+        default: n = std::max(16, static_cast<int>(std::ceil(p.end() / kTwoPi * 192))); break;
+    }
+    return p.sample(0, p.end(), n);
+}
+
 std::vector<Vec2> intersections(const Path& p1, const Path& p2)
 {
-    auto segments = [](const Path& p) {
-        switch (p.kind()) {
-            case Path::Kind::Line: return 1;
-            case Path::Kind::Spline: return std::max(8, static_cast<int>(std::ceil(p.end() * 48)));
-            default: return std::max(16, static_cast<int>(std::ceil(p.end() / kTwoPi * 192)));
-        }
-    };
-    const int n1 = segments(p1), n2 = segments(p2);
-    const std::vector<Vec2> s1 = p1.sample(0, p1.end(), n1), s2 = p2.sample(0, p2.end(), n2);
+    return intersections(p1, crossingSamples(p1), p2, crossingSamples(p2));
+}
+
+std::vector<Vec2> intersections(const Path& p1, const std::vector<Vec2>& s1, const Path& p2, const std::vector<Vec2>& s2)
+{
+    const int n1 = static_cast<int>(s1.size()) - 1, n2 = static_cast<int>(s2.size()) - 1;
+    if (n1 < 1 || n2 < 1) {
+        return {};
+    }
     double scale = 1e-9;
     for (const auto* pts : {&s1, &s2}) {
         for (const Vec2& q : *pts) {
@@ -522,9 +565,38 @@ std::vector<Vec2> intersections(const Path& p1, const Path& p2)
         }
     }
     const double h1 = p1.end() / n1, h2 = p2.end() / n2;
+    // Runs of segments with their boxes: only runs whose boxes meet are tried segment by segment
+    // (long splines are thousands of segments each: every pair would be millions).
+    constexpr int kRun = 16;
+    struct Box
+    {
+        double x0, y0, x1, y1;
+    };
+    const double margin = 1e-7 * scale;
+    auto runs = [&](const std::vector<Vec2>& pts, int n) {
+        std::vector<Box> out;
+        for (int r = 0; r * kRun < n; ++r) {
+            Box b{1e300, 1e300, -1e300, -1e300};
+            for (int k = r * kRun; k <= std::min(n, (r + 1) * kRun); ++k) {
+                const Vec2& q = pts[static_cast<size_t>(k)];
+                b = {std::min(b.x0, q.x), std::min(b.y0, q.y), std::max(b.x1, q.x), std::max(b.y1, q.y)};
+            }
+            out.push_back({b.x0 - margin, b.y0 - margin, b.x1 + margin, b.y1 + margin});
+        }
+        return out;
+    };
+    const std::vector<Box> r1 = runs(s1, n1), r2 = runs(s2, n2);
     std::vector<Vec2> found;
-    for (int i = 0; i < n1; ++i) {
-        for (int j = 0; j < n2; ++j) {
+    for (size_t ri = 0; ri < r1.size(); ++ri) {
+    for (size_t rj = 0; rj < r2.size(); ++rj) {
+        const Box& b1 = r1[ri];
+        const Box& b2 = r2[rj];
+        if (b1.x1 < b2.x0 || b2.x1 < b1.x0 || b1.y1 < b2.y0 || b2.y1 < b1.y0) {
+            continue;
+        }
+        const int i0 = static_cast<int>(ri) * kRun, j0 = static_cast<int>(rj) * kRun;
+    for (int i = i0; i < std::min(n1, i0 + kRun); ++i) {
+        for (int j = j0; j < std::min(n2, j0 + kRun); ++j) {
             double a = 0, b = 0;
             if (!segmentsCross(s1[static_cast<size_t>(i)], s1[static_cast<size_t>(i + 1)], s2[static_cast<size_t>(j)],
                                s2[static_cast<size_t>(j + 1)], a, b)) {
@@ -564,6 +636,8 @@ std::vector<Vec2> intersections(const Path& p1, const Path& p2)
                 found.push_back(q);
             }
         }
+    }
+    }
     }
     return found;
 }

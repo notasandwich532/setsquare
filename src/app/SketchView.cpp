@@ -30,6 +30,7 @@
 #include <QWheelEvent>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <numbers>
 
@@ -410,14 +411,217 @@ core::Id SketchView::textAt(QPointF screen, bool editable) const
     return found;
 }
 
+const std::map<core::Id, std::optional<core::regions::Region>>& SketchView::fillRegions(core::Id layer) const
+{
+    const core::Sketch& s = m_doc.sketch();
+    // A fingerprint of everything the areas depend on, positions measured in a frame of the
+    // layer's own (from its first point, towards the point farthest from that), to a hair, so a
+    // move or turn of the whole layer leaves it as it was: a group dragged round, say.
+    std::uint64_t h = 1469598103934665603ull;
+    auto mix = [&](std::uint64_t v) {
+        h ^= v + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
+        h *= 1099511628211ull;
+    };
+    auto mixLength = [&](double v) { mix(static_cast<std::uint64_t>(std::llround(v * 1e6))); };
+    std::optional<core::Vec2> anchor;
+    core::Vec2 far{0, 0};
+    double farthest = 0.0;
+    for (const auto& [id, e] : s.entities()) {
+        if (const auto* p = std::get_if<core::Point>(&e.geom); p && s.layerOf(id) == layer) {
+            if (!anchor) {
+                anchor = core::Vec2{p->x, p->y};
+            }
+            const double d = std::hypot(p->x - anchor->x, p->y - anchor->y);
+            if (d > farthest) {
+                farthest = d;
+                far = {p->x, p->y};
+            }
+        }
+    }
+    const core::Vec2 at = anchor.value_or(core::Vec2{0, 0});
+    const core::Vec2 axis = farthest > 1e-9 ? core::Vec2{(far.x - at.x) / farthest, (far.y - at.y) / farthest}
+                                            : core::Vec2{1, 0};
+    auto mixPosition = [&](double x, double y) {
+        const double dx = x - at.x, dy = y - at.y;
+        mixLength(dx * axis.x + dy * axis.y);
+        mixLength(dy * axis.x - dx * axis.y);
+    };
+    for (const auto& [id, e] : s.entities()) {
+        if (s.layerOf(id) != layer) {
+            continue;
+        }
+        mix(id);
+        mix(static_cast<std::uint64_t>(e.geom.index()) * 4 + (e.construction ? 2 : 0) + (s.isReference(id) ? 1 : 0));
+        std::visit(
+            [&](const auto& g) {
+                using G = std::decay_t<decltype(g)>;
+                if constexpr (std::is_same_v<G, core::Point>) {
+                    mixPosition(g.x, g.y);
+                }
+                else if constexpr (std::is_same_v<G, core::Line>) {
+                    mix(g.p1);
+                    mix(g.p2);
+                }
+                else if constexpr (std::is_same_v<G, core::Circle>) {
+                    mix(g.center);
+                    mixLength(g.radius);
+                }
+                else if constexpr (std::is_same_v<G, core::Arc>) {
+                    mix(g.center);
+                    mix(g.start);
+                    mix(g.end);
+                }
+                else if constexpr (std::is_same_v<G, core::Ellipse>) {
+                    mix(g.center);
+                    mix(g.major);
+                    mix(g.minor);
+                }
+                else if constexpr (std::is_same_v<G, core::EllipseArc>) {
+                    mix(g.center);
+                    mix(g.major);
+                    mix(g.minor);
+                    mix(g.start);
+                    mix(g.end);
+                }
+                else {
+                    for (core::Id p : g.points) {
+                        mix(p);
+                    }
+                    mix(static_cast<std::uint64_t>(g.kind) * 2 + (g.closed ? 1 : 0));
+                    mix(g.start);
+                    mix(g.end);
+                }
+            },
+            e.geom);
+    }
+    for (const auto& [id, f] : s.fills()) {
+        if (f.layer != layer) {
+            continue;
+        }
+        mix(id);
+        for (core::Id b : f.boundary) {
+            mix(b);
+        }
+        // The seed only picks the area when there's no outline to go by: then where it is
+        // matters. (It stays put while the geometry is dragged, so isn't counted otherwise.)
+        if (f.boundary.empty()) {
+            mixPosition(f.seed.x, f.seed.y);
+        }
+    }
+
+    FillCache& cache = m_fillCache[layer];
+    if (cache.key == h && !cache.regions.empty()) {
+        if (at.x != cache.anchor.x || at.y != cache.anchor.y || axis.x != cache.axis.x || axis.y != cache.axis.y) {
+            // Moved (and turned) as a whole: from the old frame to the new.
+            const core::Vec2 a0 = cache.anchor, u0 = cache.axis;
+            auto move = [&](core::Vec2& p) {
+                const double dx = p.x - a0.x, dy = p.y - a0.y;
+                const double along = dx * u0.x + dy * u0.y, across = dy * u0.x - dx * u0.y;
+                p = {at.x + along * axis.x - across * axis.y, at.y + along * axis.y + across * axis.x};
+            };
+            for (auto& [id, region] : cache.regions) {
+                if (!region) {
+                    continue;
+                }
+                for (core::Vec2& p : region->outer) {
+                    move(p);
+                }
+                for (auto& hole : region->holes) {
+                    for (core::Vec2& p : hole) {
+                        move(p);
+                    }
+                }
+            }
+            cache.anchor = at;
+            cache.axis = axis;
+        }
+        return cache.regions;
+    }
+    cache.key = h;
+    cache.anchor = at;
+    cache.axis = axis;
+    cache.regions.clear();
+    const core::regions::Arrangement arrangement(s, layer);
+    for (const auto& [id, f] : s.fills()) {
+        if (f.layer == layer) {
+            cache.regions[id] = core::regions::resolve(arrangement, f);
+        }
+    }
+    return cache.regions;
+}
+
 QPainterPath SketchView::regionPath(const core::regions::Region& region) const
 {
     QPainterPath path;
     path.setFillRule(Qt::OddEvenFill);  // holes cut out
+    // On screen, to within a third of a pixel: outlines found finely (or imported ones of many tiny
+    // pieces) can have far more corners than show, and every one costs when filling.
+    std::vector<QPointF> screen;
+    std::vector<char> keep;
+    std::vector<std::pair<size_t, size_t>> runs;
     auto loop = [&](const std::vector<core::Vec2>& points) {
-        QPolygonF poly;
+        screen.clear();
+        screen.reserve(points.size());
         for (const core::Vec2& p : points) {
-            poly << toScreen(p);
+            const QPointF q = toScreen(p);
+            if (screen.empty() || std::abs(q.x() - screen.back().x()) >= 0.25 || std::abs(q.y() - screen.back().y()) >= 0.25) {
+                screen.push_back(q);
+            }
+        }
+        // Douglas-Peucker: corners that stray further than that from the straight line past them.
+        const size_t n = screen.size();
+        keep.assign(n, 0);
+        if (n > 0) {
+            keep[0] = keep[n - 1] = 1;
+        }
+        // (A loop: split where it's farthest from its start, so both halves have ends apart.)
+        runs.clear();
+        if (n > 2) {
+            size_t m = 0;
+            double far = -1.0;
+            for (size_t k = 1; k < n; ++k) {
+                const double d = std::hypot(screen[k].x() - screen[0].x(), screen[k].y() - screen[0].y());
+                if (d > far) {
+                    far = d;
+                    m = k;
+                }
+            }
+            keep[m] = 1;
+            runs.push_back({0, m});
+            runs.push_back({m, n - 1});
+        }
+        constexpr double kTolerance = 1.0 / 3.0;
+        while (!runs.empty()) {
+            const auto [a, b] = runs.back();
+            runs.pop_back();
+            const QPointF pa = screen[a], d = screen[b] - pa;
+            const double length2 = d.x() * d.x() + d.y() * d.y();
+            double worst = -1.0;
+            size_t at = a;
+            for (size_t k = a + 1; k < b; ++k) {
+                const QPointF v = screen[k] - pa;
+                const double s = length2 > 1e-18 ? std::clamp((v.x() * d.x() + v.y() * d.y()) / length2, 0.0, 1.0) : 0.0;
+                const double off = std::hypot(v.x() - s * d.x(), v.y() - s * d.y());
+                if (off > worst) {
+                    worst = off;
+                    at = k;
+                }
+            }
+            if (worst > kTolerance && at != a) {
+                keep[at] = 1;
+                if (at - a > 1) {
+                    runs.emplace_back(a, at);
+                }
+                if (b - at > 1) {
+                    runs.emplace_back(at, b);
+                }
+            }
+        }
+        QPolygonF poly;
+        for (size_t k = 0; k < n; ++k) {
+            if (keep[k]) {
+                poly << screen[k];
+            }
         }
         path.addPolygon(poly);
         path.closeSubpath();
@@ -1122,9 +1326,7 @@ void SketchView::drawSketch(QPainter& painter) const
             case core::EntityKind::Spline: painter.drawPath(curvePath(sketch, id)); break;
         }
     };
-
     // Layer by layer, from the bottom: fills, strokes, texts, then the geometry.
-    const core::regions::Arrangements arrangements(sketch);
     // Presentation view on coloured paper: plain geometry and text in black, as exported.
     const bool onPaper = m_presentation && sketch.page() && sketch.page()->hasColor;
     for (auto layerIt = sketch.layers().rbegin(); layerIt != sketch.layers().rend(); ++layerIt) {
@@ -1137,14 +1339,16 @@ void SketchView::drawSketch(QPainter& painter) const
 
     // Fills, underneath the rest: each found afresh from the geometry (see core/Regions.h).
     {
+        const auto& regions = fillRegions(layer);
         for (const auto& [id, f] : sketch.fills()) {
             if (f.layer != layer) {
                 continue;
             }
-            const auto region = core::regions::resolve(arrangements, f);
-            if (!region) {
+            const auto found = regions.find(id);
+            if (found == regions.end() || !found->second) {
                 continue;  // its outline is open: nothing to fill until it's closed again
             }
+            const auto& region = found->second;
             const double alpha = m_presentation ? 1.0 : 0.35;
             if (f.gradient.active()) {
                 painter.fillPath(regionPath(*region), gradientBrush(f.gradient, alpha));
@@ -1262,6 +1466,18 @@ void SketchView::drawSketch(QPainter& painter) const
     drawAnnotations(painter);
 
     const std::set<core::Id> placedPoints = core::feature::placedOffsetPoints(sketch);  // (follow their source)
+    // Plain dots a colour at a time, stamped (below): an imported drawing can have thousands.
+    std::map<QRgb, QPolygonF> dots;
+    struct Special
+    {
+        core::Id id;
+        const core::Entity* entity;
+        QPointF at;
+        QColor color;
+        bool highlighted;
+    };
+    std::vector<Special> special;
+    const QRectF onScreen = QRectF(rect()).adjusted(-10, -10, 10, 10);
     for (const auto& [id, e] : sketch.entities()) {
         if (e.kind() != core::EntityKind::Point || sketch.isHiddenReference(id) || hidden(id) || placedPoints.contains(id)) {
             continue;
@@ -1270,24 +1486,63 @@ void SketchView::drawSketch(QPainter& painter) const
             continue;  // other layers' points can't be used here
         }
         const core::Point& p = std::get<core::Point>(e.geom);
-        QPen pen = styleFor(e);
+        const QPointF at = toScreen({p.x, p.y});
+        if (!onScreen.contains(at)) {  // (off screen)
+            continue;
+        }
+        const QColor color = styleFor(e).color();
         const bool highlighted = m_selection.contains(id) || id == m_hovered || constrained.contains(id);
-        const double r = highlighted ? kPointRadius + 1.2 : kPointRadius;
+        const bool marked = sketch.isOrigin(id) || (e.fixed && e.projectedFrom == core::kNoId);
+        if (!highlighted && !marked) {
+            dots[color.rgba()] << at;
+        }
+        else {
+            special.push_back({id, &e, at, color, highlighted});
+        }
+    }
+    // Each colour's dot drawn once, then stamped (far quicker than thousands of round shapes),
+    // with one for each quarter-pixel offset so each sits where its own round one would.
+    const double ratio = devicePixelRatioF();
+    const int side = static_cast<int>(std::ceil((2.0 * kPointRadius + 2.0) * ratio));
+    for (const auto& [rgba, points] : dots) {
+        std::array<QImage, 16> stamps;
+        for (const QPointF& at : points) {
+            const QPointF corner = at - QPointF(side / (2.0 * ratio), side / (2.0 * ratio));
+            const double fx = std::floor(corner.x() * ratio), fy = std::floor(corner.y() * ratio);
+            const int qx = std::clamp(static_cast<int>((corner.x() * ratio - fx) * 4.0), 0, 3);
+            const int qy = std::clamp(static_cast<int>((corner.y() * ratio - fy) * 4.0), 0, 3);
+            QImage& stamp = stamps[static_cast<size_t>(qy * 4 + qx)];
+            if (stamp.isNull()) {
+                stamp = QImage(side, side, QImage::Format_ARGB32_Premultiplied);
+                stamp.fill(Qt::transparent);
+                QPainter dot(&stamp);
+                dot.setRenderHint(QPainter::Antialiasing);
+                dot.setPen(Qt::NoPen);
+                dot.setBrush(QColor::fromRgba(rgba));
+                dot.drawEllipse(QPointF(side / 2.0 + (qx + 0.5) / 4.0, side / 2.0 + (qy + 0.5) / 4.0), kPointRadius * ratio,
+                                kPointRadius * ratio);
+                stamp.setDevicePixelRatio(ratio);
+            }
+            painter.drawImage(QPointF(fx / ratio, fy / ratio), stamp);
+        }
+    }
+    // Then the ones that stand out, on top.
+    for (const Special& sp : special) {
+        const double r = sp.highlighted ? kPointRadius + 1.2 : kPointRadius;
         painter.setPen(Qt::NoPen);
-        painter.setBrush(pen.color());
-        painter.drawEllipse(toScreen({p.x, p.y}), r, r);
-        if (sketch.isOrigin(id)) {
+        painter.setBrush(sp.color);
+        painter.drawEllipse(sp.at, r, r);
+        if (sketch.isOrigin(sp.id)) {
             // The origin: a ring around the dot.
             painter.setBrush(Qt::NoBrush);
-            painter.setPen(QPen(pen.color(), 1.5));
-            painter.drawEllipse(toScreen({p.x, p.y}), 6.0, 6.0);
+            painter.setPen(QPen(sp.color, 1.5));
+            painter.drawEllipse(sp.at, 6.0, 6.0);
         }
-        else if (e.fixed && e.projectedFrom == core::kNoId) {
+        else if (sp.entity->fixed && sp.entity->projectedFrom == core::kNoId) {
             // Fixed points get a small square outline, a stand-in for Fusion's lock glyph.
             painter.setBrush(Qt::NoBrush);
-            painter.setPen(QPen(pen.color(), 1.0));
-            const QPointF s = toScreen({p.x, p.y});
-            painter.drawRect(QRectF(s.x() - 5, s.y() - 5, 10, 10));
+            painter.setPen(QPen(sp.color, 1.0));
+            painter.drawRect(QRectF(sp.at.x() - 5, sp.at.y() - 5, 10, 10));
         }
     }
     painter.setBrush(Qt::NoBrush);

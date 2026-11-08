@@ -18,7 +18,10 @@
 #include <QPolygonF>
 #include <QWidget>
 
+#include <cstdint>
 #include <deque>
+#include <map>
+#include <optional>
 #include <functional>
 #include <memory>
 #include <set>
@@ -265,6 +268,17 @@ private:
     Paint m_paint;
     core::Gradient m_gradient;
     mutable images::Cache m_imageCache;
+    // Each layer's fill areas as last found, so a paint needn't find them again while its
+    // geometry stays as it was (or only moves as a whole: then they're moved with it).
+    struct FillCache
+    {
+        std::uint64_t key = 0;  // the layer's geometry and fills, measured in that frame
+        core::Vec2 anchor;      // its first point, when the areas were found
+        core::Vec2 axis{1, 0};  // from there towards its farthest point
+        std::map<core::Id, std::optional<core::regions::Region>> regions;
+    };
+    mutable std::map<core::Id, FillCache> m_fillCache;
+    const std::map<core::Id, std::optional<core::regions::Region>>& fillRegions(core::Id layer) const;
     std::optional<core::Image> m_imagePreview;
     core::Id m_editFeature = core::kNoId;  // the pattern the next pattern command edits
     // Settings panel for the tools that have settings but no command (fillet, polygon, ...).
