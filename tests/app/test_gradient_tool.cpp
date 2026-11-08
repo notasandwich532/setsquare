@@ -419,3 +419,26 @@ TEST_CASE("Gradient strokes: their width in the panel", "[gradient]")
     CHECK(width->currentText() == QStringLiteral("0.5 mm"));
     f.view.setPresentation(true);
 }
+
+TEST_CASE("Gradient strokes: a width typed in and Enter", "[gradient]")
+{
+    Fixture f;
+    f.pickLinear();
+    f.input<QComboBox>("gradientTarget")->setCurrentIndex(1);
+    f.click(25, 10);  // bottom side
+    const Id bottom = f.rect.sides[0];
+    REQUIRE(f.sketch().stroke(bottom));
+    auto* width = f.input<QComboBox>("gradientWidth");
+    width->setFocus();
+    width->lineEdit()->selectAll();
+    QTest::keyClicks(width, QStringLiteral("1.7"));
+    QTest::keyClick(width, Qt::Key_Return);
+    CHECK(f.sketch().stroke(bottom)->width == 1.7);
+    CHECK(f.view.toolKind() == ToolKind::Gradient);  // (Enter in the box applied it; it didn't close the panel)
+    // Typed, then clicked away: applied too.
+    width->setFocus();
+    width->lineEdit()->selectAll();
+    QTest::keyClicks(width, QStringLiteral("0.9"));
+    f.view.setFocus();
+    CHECK(f.sketch().stroke(bottom)->width == 0.9);
+}

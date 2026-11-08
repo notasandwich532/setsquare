@@ -243,6 +243,13 @@ bool CommandPanel::eventFilter(QObject* watched, QEvent* event)
             && !(keyEvent->modifiers() & Qt::ControlModifier)) {
             return false;  // a new line in a multi-line box (Ctrl+Enter accepts)
         }
+        if (auto* combo = qobject_cast<QComboBox*>(watched);
+            combo && combo->isEditable() && (key == Qt::Key_Return || key == Qt::Key_Enter)) {
+            // Takes what's typed in it (e.g. a width): its own Enter, not the panel's, and no further
+            // (the canvas would take it as "done").
+            emit combo->lineEdit()->editingFinished();
+            return true;
+        }
         if (key == Qt::Key_Return || key == Qt::Key_Enter) {
             // A sum typed in a number box is worked out first; one that doesn't read is put back,
             // and that Enter doesn't go ahead (so nothing is made from a half-typed sum).
