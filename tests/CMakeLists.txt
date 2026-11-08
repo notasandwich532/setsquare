@@ -38,6 +38,7 @@ add_executable(app_tests
     app/test_groups.cpp
     app/test_icons.cpp
     app/test_images.cpp
+    app/test_import.cpp
     app/test_mainwindow.cpp
     app/test_modify_tools.cpp
     app/test_page.cpp

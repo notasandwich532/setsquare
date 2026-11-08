@@ -1820,6 +1820,66 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
            py::arg("color") = py::none(), py::arg("spacing") = py::none(), py::arg("align") = py::none(),
            py::arg("valign") = py::none(), py::arg("flip_h") = py::none(), py::arg("flip_v") = py::none(),
            "Change a text's settings (any of them); its letters are remade.")
+        .def("import_file", [](const SketchH&, const std::string& path, const std::string& into, bool keepLayers,
+                               const std::string& placement, py::object at, const std::string& curves, double pxPerInch,
+                               py::object units) {
+            importer::Options o;
+            if (into == "sublayer") o.into = importer::Into::Sublayer;
+            else if (into == "new_sublayer") o.into = importer::Into::NewSublayer;
+            else if (into == "new_layer") o.into = importer::Into::NewLayer;
+            else throw py::value_error("into: 'sublayer', 'new_sublayer' or 'new_layer'");
+            o.keepLayers = keepLayers;
+            if (placement == "file") o.placement = importer::Placement::AsInFile;
+            else if (placement == "center") o.placement = importer::Placement::Center;
+            else if (placement == "page") o.placement = importer::Placement::Page;
+            else throw py::value_error("placement: 'file', 'center' or 'page'");
+            if (o.placement == importer::Placement::Center) {
+                if (at.is_none()) {
+                    throw py::value_error("placement='center' needs at=(x, y)");
+                }
+                o.at = vecArg(at);
+            }
+            if (curves == "exact") o.curves = importer::Curves::Exact;
+            else if (curves == "smooth") o.curves = importer::Curves::Smooth;
+            else throw py::value_error("curves: 'exact' or 'smooth'");
+            std::optional<double> mmPerUnit;
+            if (!units.is_none()) {
+                if (py::isinstance<py::str>(units)) {
+                    static const std::map<std::string, double> names = {
+                        {"mm", 1.0}, {"cm", 10.0}, {"m", 1000.0}, {"in", 25.4}, {"ft", 304.8}};
+                    const auto it = names.find(units.cast<std::string>());
+                    if (it == names.end()) {
+                        throw py::value_error("units: 'mm', 'cm', 'm', 'in', 'ft', or millimetres per unit");
+                    }
+                    mmPerUnit = it->second;
+                }
+                else {
+                    mmPerUnit = units.cast<double>();
+                }
+            }
+            importer::Report report;
+            editReturningId("Import", [&](Editor& ed) {
+                report = ed.importFile(QString::fromStdString(path), o, pxPerInch, mmPerUnit);
+                return kNoId;
+            });
+            py::dict d;
+            d["curves"] = report.curves;
+            d["fills"] = report.fills;
+            d["groups"] = report.groups;
+            d["sublayers"] = report.sublayers;
+            d["skipped"] = report.skipped;
+            d["notes"] = report.notes;
+            return d;
+        }, py::arg("path"), py::arg("into") = "new_sublayer", py::arg("keep_layers") = true, py::arg("placement") = "file",
+           py::arg("at") = py::none(), py::arg("curves") = "exact", py::arg("px_per_inch") = 96.0,
+           py::arg("units") = py::none(),
+           "Import an SVG or DXF drawing: its curves (with their strokes) and fills, each of the file's layers held "
+           "together as a group. into: 'sublayer' (the one being edited), 'new_sublayer' or 'new_layer'; keep_layers: "
+           "the file's layers each in a sublayer of their own. placement: 'file' (its own coordinates; an SVG's page "
+           "with its bottom-left corner on the origin), 'center' (its middle at at=(x, y)) or 'page' (an SVG's page on "
+           "ours). curves: 'exact' (a spline per Bezier piece) or 'smooth' (fewer fit splines). px_per_inch: SVG "
+           "lengths without units. units: a DXF's ('mm', 'in', ... or mm per unit; else as the file says, or mm). "
+           "Returns what came in: {'curves', 'fills', 'groups', 'sublayers', 'skipped', 'notes'}.")
         .def("image", [](const SketchH&, const std::string& path, py::handle at, py::object width, py::object height,
                          double angle, double opacity, bool flipH, bool flipV) {
             core::Image im;

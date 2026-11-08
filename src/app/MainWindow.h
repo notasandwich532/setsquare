@@ -27,6 +27,8 @@ public:
     void runScript(const QString& path);  // in the Python console
     // File > Insert Image: a reference image in the middle of the view (empty path: ask which).
     void insertImage(const QString& path = {});
+    // File > Import: an SVG or DXF drawing (empty path: ask which), with its options.
+    void importDrawing(const QString& path = {});
 
     // Tool names as used by Python's app.tool.
     static QString toolName(ToolKind kind);

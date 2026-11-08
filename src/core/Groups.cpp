@@ -15,6 +15,8 @@ Members members(const Sketch& sketch, const Constraint& g)
         }
         (sketch.entity(r).kind() == EntityKind::Point ? m.points : m.circles).push_back(r);
     }
+    m.pointSet.insert(m.points.begin(), m.points.end());
+    m.circleSet.insert(m.circles.begin(), m.circles.end());
     return m;
 }
 
@@ -34,8 +36,9 @@ Id create(Sketch& sketch, const std::vector<Id>& given)
         }
     }
     std::vector<Id> points, circles;
+    std::set<Id> seen;
     auto addPoint = [&](Id p) {
-        if (std::ranges::find(points, p) == points.end()) {
+        if (seen.insert(p).second) {
             points.push_back(p);
         }
     };
@@ -48,7 +51,7 @@ Id create(Sketch& sketch, const std::vector<Id>& given)
                     continue;
                 }
                 const bool shares = std::ranges::any_of(c.refs, [&](Id r) {
-                    return std::ranges::find(points, r) != points.end() || std::ranges::find(circles, r) != circles.end();
+                    return seen.contains(r) || std::ranges::find(circles, r) != circles.end();
                 });
                 if (shares) {
                     absorbed.push_back(id);
@@ -122,12 +125,11 @@ bool covers(const Sketch& sketch, const Members& m, Id entity)
     if (!sketch.hasEntity(entity) || sketch.isReference(entity)) {
         return false;
     }
-    if (sketch.entity(entity).kind() == EntityKind::Circle
-        && std::ranges::find(m.circles, entity) == m.circles.end()) {
+    if (sketch.entity(entity).kind() == EntityKind::Circle && !m.circleSet.contains(entity)) {
         return false;
     }
     for (Id p : sketch.definingPoints(entity)) {
-        if (std::ranges::find(m.points, p) == m.points.end()) {
+        if (!m.pointSet.contains(p)) {
             return false;
         }
     }

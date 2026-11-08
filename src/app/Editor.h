@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Import.h"
+
 #include <core/Builders.h>
 #include <core/Features.h>
 #include <core/Modify.h>
@@ -11,6 +13,7 @@
 
 #include <array>
 #include <map>
+#include <optional>
 #include <vector>
 
 // The sketch-editing commands shared by the UI tools and the Python API. Each one edits the
@@ -126,6 +129,10 @@ public:
     // copies, in order.
     std::vector<core::Id> project(const std::vector<core::Id>& sources);
     void breakLink(const std::vector<core::Id>& items);
+    // Imports an SVG or DXF drawing (see Import.h); recorded as s.import_file(...). Throws
+    // core::SketchError if it can't be read.
+    importer::Report importFile(const QString& path, importer::Options options, double pxPerInch = 96.0,
+                                std::optional<double> mmPerUnit = std::nullopt);
     // Reference images. Recorded as s.image(...) / s.edit_image(...).
     core::Id addImage(const core::Image& image);
     void setImage(const core::Image& image);

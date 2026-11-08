@@ -387,6 +387,19 @@ struct Solver::Impl
     }
     std::map<std::pair<Id, Id>, Id> chainArc;  // (centre, end chain) -> an arc in it
     std::set<Id> frozenGroups;   // groups holding two fixed points: all fixed
+    std::vector<Id> added;       // the constraints that go in (not those a group carries)
+    // Group points nothing outside the group touches: placed from its anchors, not solved for.
+    struct Passive
+    {
+        Id a0, a1;
+        double along, across;
+        Id group;
+    };
+    std::map<Id, Passive> passive;
+    void placeHeld();             // those points, where their anchors now put them
+    // A group point kept at its place in the frame of the anchors a0, a1.
+    void addHeldPoint(Id p, Id a0, Id a1, double along, double across, int tag);
+    void activate(Id point);      // one of them solved for after all (it's being dragged)
     std::set<Id> frozenCircles;  // their circles
     // Whether a point is on a spline by its making: one it passes through, or its own end.
     static bool splineEndOnCurve(const Spline& sp, Id p)
@@ -609,6 +622,78 @@ void Solver::Impl::build(const Sketch& sketch)
         return g != kNoId;
     };
 
+    // The constraints that go in: those wholly inside a group are carried by it (see
+    // core/Groups.h), except the first in each that sets an orientation (it stops the group
+    // turning).
+    {
+        struct Held
+        {
+            group::Members members;
+            bool oriented = false;
+        };
+        std::vector<Held> held;
+        for (const auto& [id, c] : sketch.constraints()) {
+            if (c.type == ConstraintType::Group) {
+                held.push_back({group::members(sketch, c)});
+            }
+        }
+        for (const auto& [id, c] : sketch.constraints()) {
+            if (c.type != ConstraintType::Group && !c.refs.empty()) {
+                const auto inside = std::ranges::find_if(held, [&](const Held& g) {
+                    return std::ranges::all_of(c.refs, [&](Id r) { return group::covers(sketch, g.members, r); });
+                });
+                if (inside != held.end()) {
+                    if (!group::setsOrientation(c.type) || inside->oriented) {
+                        continue;
+                    }
+                    inside->oriented = true;
+                }
+            }
+            added.push_back(id);
+        }
+    }
+
+    // A group's points that nothing outside it touches (no constraint that goes in, no curve
+    // outside the group, nothing fixed) aren't solved for: they're placed from the group's
+    // anchors afterwards (see placeHeld). A big group (an imported drawing) is then just its two
+    // anchors to the solver, rather than thousands of equations.
+    {
+        std::set<Id> touched;
+        auto touch = [&](Id ref) {
+            if (!sketch.hasEntity(ref)) {
+                return;
+            }
+            for (Id p : sketch.definingPoints(ref)) {
+                touched.insert(p);
+            }
+        };
+        for (Id k : added) {
+            const Constraint& c = sketch.constraint(k);
+            if (c.type != ConstraintType::Group) {
+                for (Id r : c.refs) {
+                    touch(r);
+                }
+            }
+        }
+        for (const auto& [gid, g] : sketch.constraints()) {
+            if (g.type != ConstraintType::Group || frozenGroups.contains(gid)) {
+                continue;
+            }
+            const group::Members m = group::members(sketch, g);
+            for (const auto& [eid, e] : sketch.entities()) {
+                if (e.kind() != EntityKind::Point && !group::covers(sketch, m, eid)) {
+                    touch(eid);  // (a curve outside the group, built on its points)
+                }
+            }
+            for (size_t i = 2; i < m.points.size(); ++i) {
+                const Id p = m.points[i];
+                if (!touched.contains(p) && !fixedPoints.contains(p)) {
+                    passive[p] = {m.points[0], m.points[1], g.params[1 + 2 * (i - 2)], g.params[2 + 2 * (i - 2)], gid};
+                }
+            }
+        }
+    }
+
     std::set<double*> unknownSet;
     auto declare = [&](double* p) {
         unknowns.push_back(p);
@@ -619,7 +704,7 @@ void Solver::Impl::build(const Sketch& sketch)
         if (const auto* pt = std::get_if<Point>(&e.geom)) {
             GCS::Point gp(alloc(pt->x), alloc(pt->y));
             points.emplace(id, gp);
-            if (!fixedPoints.contains(id)) {
+            if (!fixedPoints.contains(id) && !passive.contains(id)) {
                 declare(gp.x);
                 declare(gp.y);
             }
@@ -773,19 +858,23 @@ void Solver::Impl::build(const Sketch& sketch)
     for (const auto& [id, e] : sketch.entities()) {
         if (const auto* a = std::get_if<Arc>(&e.geom)) {
             const auto key = std::make_pair(a->center, arcRoot(a->center, a->start));
-            if (const auto [it, added] = chainArc.emplace(key, id); !added) {
+            if (const auto [it, isNew] = chainArc.emplace(key, id); !isNew) {
                 circleOf[circleRoot(id)] = circleRoot(it->second);
             }
         }
     }
 
-    // Record, per entity, which unknowns define it (for fully-constrained colouring).
+    // Record, per entity, which unknowns define it (for fully-constrained colouring; a point
+    // placed from its group's anchors: theirs).
     for (const auto& [id, e] : sketch.entities()) {
         std::vector<double*> params;
         for (Id p : sketch.definingPoints(id)) {
-            const GCS::Point& gp = points.at(p);
-            params.push_back(gp.x);
-            params.push_back(gp.y);
+            const auto held = passive.find(p);
+            for (Id q : held != passive.end() ? std::vector<Id>{held->second.a0, held->second.a1} : std::vector<Id>{p}) {
+                const GCS::Point& gp = points.at(q);
+                params.push_back(gp.x);
+                params.push_back(gp.y);
+            }
         }
         if (auto it = circles.find(id); it != circles.end()) {
             params.push_back(it->second.rad);
@@ -799,32 +888,8 @@ void Solver::Impl::build(const Sketch& sketch)
         entityUnknowns.emplace(id, std::move(params));
     }
 
-    // Constraints wholly inside a group are carried by it (see core/Groups.h), except the first
-    // in each that sets an orientation: that one stops the group turning.
-    struct Held
-    {
-        group::Members members;
-        bool oriented = false;
-    };
-    std::vector<Held> groups;
-    for (const auto& [id, c] : sketch.constraints()) {
-        if (c.type == ConstraintType::Group) {
-            groups.push_back({group::members(sketch, c)});
-        }
-    }
-    for (const auto& [id, c] : sketch.constraints()) {
-        if (c.type != ConstraintType::Group && !c.refs.empty()) {
-            const auto inside = std::ranges::find_if(groups, [&](const Held& g) {
-                return std::ranges::all_of(c.refs, [&](Id r) { return group::covers(sketch, g.members, r); });
-            });
-            if (inside != groups.end()) {
-                if (!group::setsOrientation(c.type) || inside->oriented) {
-                    continue;
-                }
-                inside->oriented = true;
-            }
-        }
-        addConstraint(sketch, c);
+    for (Id k : added) {
+        addConstraint(sketch, sketch.constraint(k));
     }
 
     sys.declareUnknowns(unknowns);
@@ -1356,16 +1421,11 @@ void Solver::Impl::addConstraint(const Sketch& sketch, const Constraint& c)
             equation({a0.x, a0.y, a1.x, a1.y},
                      [length](const std::vector<double>& v) { return std::hypot(v[2] - v[0], v[3] - v[1]) - length; });
             for (size_t i = 2; i < m.points.size(); ++i) {
-                const double along = c.params[1 + 2 * (i - 2)], across = c.params[2 + 2 * (i - 2)];
-                const GCS::Point& p = pt(m.points[i]);
-                for (int component = 0; component < 2; ++component) {
-                    equation({a0.x, a0.y, a1.x, a1.y, p.x, p.y},
-                             [along, across, component](const std::vector<double>& v) {
-                                 const double ux = v[2] - v[0], uy = v[3] - v[1];
-                                 return component == 0 ? v[4] - v[0] - (along * ux - across * uy)
-                                                       : v[5] - v[1] - (along * uy + across * ux);
-                             });
+                if (passive.contains(m.points[i])) {
+                    continue;  // (placed afterwards: see placeHeld)
                 }
+                addHeldPoint(m.points[i], m.points[0], m.points[1], c.params[1 + 2 * (i - 2)],
+                             c.params[2 + 2 * (i - 2)], tag);
             }
             const size_t first = 1 + 2 * (m.points.size() - 2);
             for (size_t i = 0; i < m.circles.size(); ++i) {
@@ -1921,8 +1981,59 @@ SolveResult Solver::solve()
     return result;
 }
 
+void Solver::Impl::addHeldPoint(Id point, Id anchor0, Id anchor1, double along, double across, int tag)
+{
+    const GCS::Point& a0 = points.at(anchor0);
+    const GCS::Point& a1 = points.at(anchor1);
+    const GCS::Point& p = points.at(point);
+    for (int component = 0; component < 2; ++component) {
+        auto* eq = new ConstraintNumeric({a0.x, a0.y, a1.x, a1.y, p.x, p.y},
+                                         [along, across, component](const std::vector<double>& v) {
+                                             const double ux = v[2] - v[0], uy = v[3] - v[1];
+                                             return component == 0 ? v[4] - v[0] - (along * ux - across * uy)
+                                                                   : v[5] - v[1] - (along * uy + across * ux);
+                                         });
+        eq->setTag(tag);
+        sys.addConstraint(eq);  // the system owns it
+    }
+}
+
+void Solver::Impl::placeHeld()
+{
+    for (const auto& [id, h] : passive) {
+        const GCS::Point& a0 = points.at(h.a0);
+        const GCS::Point& a1 = points.at(h.a1);
+        const double ux = *a1.x - *a0.x, uy = *a1.y - *a0.y;
+        const GCS::Point& p = points.at(id);
+        *p.x = *a0.x + h.along * ux - h.across * uy;
+        *p.y = *a0.y + h.along * uy + h.across * ux;
+    }
+}
+
+void Solver::Impl::activate(Id point)
+{
+    const auto it = passive.find(point);
+    if (it == passive.end()) {
+        return;
+    }
+    const Passive h = it->second;
+    passive.erase(it);
+    placeHeld();  // (where it is now, to start from)
+    const GCS::Point& p = points.at(point);
+    const GCS::Point& a0 = points.at(h.a0);
+    const GCS::Point& a1 = points.at(h.a1);
+    const double ux = *a1.x - *a0.x, uy = *a1.y - *a0.y;
+    *p.x = *a0.x + h.along * ux - h.across * uy;
+    *p.y = *a0.y + h.along * uy + h.across * ux;
+    addHeldPoint(point, h.a0, h.a1, h.along, h.across, static_cast<int>(h.group));
+    unknowns.push_back(p.x);
+    unknowns.push_back(p.y);
+    sys.declareUnknowns(unknowns);
+}
+
 void Solver::writeBack(Sketch& sketch) const
 {
+    d->placeHeld();
     for (const auto& [id, gp] : d->points) {
         if (sketch.hasEntity(id)) {
             sketch.point(id) = Point{*gp.x, *gp.y};
@@ -1938,6 +2049,9 @@ void Solver::writeBack(Sketch& sketch) const
 void Solver::beginDrag(const std::vector<Id>& pointIds)
 {
     endDrag();
+    for (Id id : pointIds) {
+        d->activate(id);  // (a group point placed from its anchors: dragged, it's solved for)
+    }
     for (Id id : pointIds) {
         auto it = d->points.find(id);
         if (it == d->points.end()) {

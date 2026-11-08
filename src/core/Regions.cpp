@@ -9,6 +9,7 @@
 #include <map>
 #include <numbers>
 #include <numeric>
+#include <unordered_map>
 
 namespace core::regions
 {
@@ -36,6 +37,7 @@ struct Curve
     Vec2 c;     // arc / circle
     double r = 0.0, start = 0.0, sweep = kTwoPi;
     curve::Path path;  // other
+    double x0 = 0, y0 = 0, x1 = 0, y1 = 0;  // its bounding box
 
     bool closed() const { return kind == Kind::Circle || (kind == Kind::Other && path.closed()); }
     double end() const { return kind == Kind::Line ? 1.0 : kind == Kind::Other ? path.end() : sweep; }
@@ -161,20 +163,43 @@ Vec2 Region::interiorPoint() const
         }
         return best;
     };
-    // The point of a grid over the area that's furthest from any edge.
+    // Often the middle of the outline (its centroid) is well inside: then that.
+    {
+        double a = 0, cx = 0, cy = 0;
+        for (size_t i = 0, j = outer.size() - 1; i < outer.size(); j = i++) {
+            const double k = outer[j].x * outer[i].y - outer[i].x * outer[j].y;
+            a += k;
+            cx += (outer[j].x + outer[i].x) * k;
+            cy += (outer[j].y + outer[i].y) * k;
+        }
+        if (std::abs(a) > 1e-300) {
+            const Vec2 centroid{cx / (3 * a), cy / (3 * a)};
+            if (contains(centroid) && clearance(centroid) >= 0.2 * std::min(x1 - x0, y1 - y0)) {
+                return centroid;
+            }
+        }
+    }
+    // Else the point of a grid over the area that's furthest from any edge, refined around it.
     Vec2 found = outer.front();
     double most = -1.0;
-    constexpr int kSteps = 24;
-    for (int i = 1; i < kSteps; ++i) {
-        for (int j = 1; j < kSteps; ++j) {
-            const Vec2 p{x0 + (x1 - x0) * i / kSteps, y0 + (y1 - y0) * j / kSteps};
-            if (contains(p)) {
-                if (const double c = clearance(p); c > most) {
-                    most = c;
-                    found = p;
+    auto search = [&](double gx0, double gy0, double gx1, double gy1, int steps) {
+        for (int i = 1; i < steps; ++i) {
+            for (int j = 1; j < steps; ++j) {
+                const Vec2 p{gx0 + (gx1 - gx0) * i / steps, gy0 + (gy1 - gy0) * j / steps};
+                if (contains(p)) {
+                    if (const double c = clearance(p); c > most) {
+                        most = c;
+                        found = p;
+                    }
                 }
             }
         }
+    };
+    constexpr int kSteps = 12;
+    search(x0, y0, x1, y1, kSteps);
+    if (most > 0) {
+        const double w = (x1 - x0) / kSteps, h = (y1 - y0) / kSteps;
+        search(found.x - w, found.y - h, found.x + w, found.y + h, 6);
     }
     return found;
 }
@@ -211,6 +236,43 @@ Arrangement::Arrangement(const Sketch& s, Id layer, double arcStep)
             c.kind = Curve::Kind::Other;
             c.path = curve::pathOf(s, id);
         }
+        // Its box (an arc's: its whole circle's; a path's: through its control points, a little
+        // generous), to skip pairs of curves nowhere near each other.
+        if (c.kind == Curve::Kind::Line) {
+            c.x0 = std::min(c.a.x, c.b.x);
+            c.x1 = std::max(c.a.x, c.b.x);
+            c.y0 = std::min(c.a.y, c.b.y);
+            c.y1 = std::max(c.a.y, c.b.y);
+        }
+        else if (c.kind == Curve::Kind::Other) {
+            c.x0 = c.y0 = 1e300;
+            c.x1 = c.y1 = -1e300;
+            auto take = [&](Vec2 q) {
+                c.x0 = std::min(c.x0, q.x);
+                c.y0 = std::min(c.y0, q.y);
+                c.x1 = std::max(c.x1, q.x);
+                c.y1 = std::max(c.y1, q.y);
+            };
+            for (const curve::Bezier& b : c.path.beziers()) {  // (a spline: within its control points)
+                for (const Vec2& q : b.p) {
+                    take(q);
+                }
+            }
+            for (const Vec2& q : c.path.polyline(16)) {  // (an ellipse: along it, then a little more)
+                take(q);
+            }
+            const double pad = 0.02 * std::max(c.x1 - c.x0, c.y1 - c.y0);
+            c.x0 -= pad;
+            c.y0 -= pad;
+            c.x1 += pad;
+            c.y1 += pad;
+        }
+        else {
+            c.x0 = c.c.x - c.r;
+            c.x1 = c.c.x + c.r;
+            c.y0 = c.c.y - c.r;
+            c.y1 = c.c.y + c.r;
+        }
         curves.push_back(c);
     }
     if (curves.empty()) {
@@ -241,45 +303,71 @@ Arrangement::Arrangement(const Sketch& s, Id layer, double arcStep)
             extent = std::max({extent, std::abs(c.c.x) + c.r, std::abs(c.c.y) + c.r});
         }
     }
-    for (size_t i = 0; i < curves.size(); ++i) {
-        for (size_t j = i + 1; j < curves.size(); ++j) {
-            for (const Vec2& p : modify::intersections(s, curves[i].id, curves[j].id)) {
-                cuts[i].push_back(curves[i].param(p));
-                cuts[j].push_back(curves[j].param(p));
+    const double tol = 1e-6 * extent;  // positions closer than this are one vertex
+
+    // The pairs of curves whose boxes meet (a sweep along x): only they can cross or touch.
+    std::vector<size_t> byLeft(curves.size());
+    std::iota(byLeft.begin(), byLeft.end(), size_t{0});
+    std::ranges::sort(byLeft, {}, [&](size_t i) { return curves[i].x0; });
+    std::vector<std::pair<size_t, size_t>> near;
+    for (size_t a = 0; a < byLeft.size(); ++a) {
+        const Curve& ca = curves[byLeft[a]];
+        for (size_t b = a + 1; b < byLeft.size() && curves[byLeft[b]].x0 <= ca.x1 + tol; ++b) {
+            const Curve& cb = curves[byLeft[b]];
+            if (cb.y0 <= ca.y1 + tol && ca.y0 <= cb.y1 + tol) {
+                near.push_back({std::min(byLeft[a], byLeft[b]), std::max(byLeft[a], byLeft[b])});
             }
         }
     }
-    const double tol = 1e-6 * extent;  // positions closer than this are one vertex
+    for (const auto& [i, j] : near) {
+        for (const Vec2& p : modify::intersections(s, curves[i].id, curves[j].id)) {
+            cuts[i].push_back(curves[i].param(p));
+            cuts[j].push_back(curves[j].param(p));
+        }
+    }
 
     // An end lying on another curve cuts it too. Intersections usually find these, but not a
     // line ending where it just touches a circle: a double root, which rounding can lose.
-    for (size_t i = 0; i < curves.size(); ++i) {
+    auto endsOn = [&](size_t i, size_t j) {
         const Curve& c = curves[i];
         if (c.closed()) {
-            continue;
+            return;
         }
         for (const Vec2 end : {c.at(0.0), c.at(c.end())}) {
-            for (size_t j = 0; j < curves.size(); ++j) {
-                if (j != i) {
-                    const double t = curves[j].param(end);
-                    if (norm(sub(curves[j].at(t), end)) <= tol) {
-                        cuts[j].push_back(t);
-                    }
-                }
+            const double t = curves[j].param(end);
+            if (norm(sub(curves[j].at(t), end)) <= tol) {
+                cuts[j].push_back(t);
             }
         }
+    };
+    for (const auto& [i, j] : near) {
+        endsOn(i, j);
+        endsOn(j, i);
     }
 
     // Vertices (merged by position) and the pieces between cuts, as half-edges.
     std::vector<Vec2> vertices;
+    std::unordered_map<long long, std::vector<int>> grid;  // (vertices by place, to find them quickly)
+    auto cell = [&](double v) { return static_cast<long long>(std::floor(v / std::max(tol, 1e-300))); };
     auto vertexAt = [&](Vec2 p) {
-        for (size_t v = 0; v < vertices.size(); ++v) {
-            if (norm(sub(vertices[v], p)) <= tol) {
-                return static_cast<int>(v);
+        const long long cx = cell(p.x), cy = cell(p.y);
+        for (long long dx = -1; dx <= 1; ++dx) {
+            for (long long dy = -1; dy <= 1; ++dy) {
+                const auto it = grid.find((cx + dx) * 1000003LL ^ (cy + dy));
+                if (it == grid.end()) {
+                    continue;
+                }
+                for (int v : it->second) {
+                    if (norm(sub(vertices[static_cast<size_t>(v)], p)) <= tol) {
+                        return v;
+                    }
+                }
             }
         }
         vertices.push_back(p);
-        return static_cast<int>(vertices.size() - 1);
+        const int v = static_cast<int>(vertices.size() - 1);
+        grid[cx * 1000003LL ^ cy].push_back(v);
+        return v;
     };
     struct HalfEdge
     {
@@ -412,6 +500,12 @@ Arrangement::Arrangement(const Sketch& s, Id layer, double arcStep)
         }
         std::ranges::sort(cycle.curves);
         cycle.area = cycle.polygon.size() >= 3 ? signedArea(cycle.polygon) : 0.0;
+        for (const Vec2& q : cycle.polygon) {
+            cycle.x0 = std::min(cycle.x0, q.x);
+            cycle.y0 = std::min(cycle.y0, q.y);
+            cycle.x1 = std::max(cycle.x1, q.x);
+            cycle.y1 = std::max(cycle.y1, q.y);
+        }
         cycle.component = components.find(edges[start].from);
         m_cycles.push_back(std::move(cycle));
     }
@@ -422,7 +516,8 @@ std::optional<size_t> Arrangement::smallestAround(Vec2 p, int exceptComponent) c
     std::optional<size_t> best;
     for (size_t i = 0; i < m_cycles.size(); ++i) {
         const Cycle& c = m_cycles[i];
-        if (c.area <= 1e-12 || c.component == exceptComponent || !pointInPolygon(c.polygon, p)) {
+        if (c.area <= 1e-12 || c.component == exceptComponent || p.x < c.x0 || p.x > c.x1 || p.y < c.y0 || p.y > c.y1
+            || !pointInPolygon(c.polygon, p)) {
             continue;
         }
         if (!best || c.area < m_cycles[*best].area) {
@@ -441,7 +536,9 @@ Region Arrangement::regionFor(size_t i) const
     r.area = face.area;
     // Islands: separate pieces of drawing whose nearest enclosing area is this one.
     for (const Cycle& c : m_cycles) {
-        if (c.area >= -1e-12 || c.component == face.component || !pointInPolygon(face.polygon, c.polygon.front())) {
+        const Vec2 q = c.polygon.empty() ? Vec2{} : c.polygon.front();
+        if (c.area >= -1e-12 || c.component == face.component || q.x < face.x0 || q.x > face.x1 || q.y < face.y0
+            || q.y > face.y1 || !pointInPolygon(face.polygon, q)) {
             continue;
         }
         if (smallestAround(c.polygon.front(), c.component) == i) {
@@ -449,6 +546,17 @@ Region Arrangement::regionFor(size_t i) const
         }
     }
     return r;
+}
+
+std::vector<Region> Arrangement::regions() const
+{
+    std::vector<Region> out;
+    for (size_t i = 0; i < m_cycles.size(); ++i) {
+        if (m_cycles[i].area > 1e-12) {  // (an area's outline: counter-clockwise)
+            out.push_back(regionFor(i));
+        }
+    }
+    return out;
 }
 
 std::optional<Region> Arrangement::regionAt(Vec2 p) const

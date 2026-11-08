@@ -36,6 +36,8 @@ public:
 
     // The smallest closed area around p, or nothing if p isn't enclosed.
     std::optional<Region> regionAt(Vec2 p) const;
+    // Every closed area (each smallest one: the faces).
+    std::vector<Region> regions() const;
     // The area outlined by exactly these curves (sorted ids), if there is one. Several areas can
     // share the same curves (two overlapping circles make three), so the one around `near`, or
     // else the closest to it.
@@ -50,6 +52,7 @@ private:
         std::vector<Id> curves;  // sorted, without dead ends
         double area = 0.0;       // signed: > 0 counter-clockwise (an area's outline)
         int component = 0;
+        double x0 = 1e300, y0 = 1e300, x1 = -1e300, y1 = -1e300;  // its polygon's box
     };
     Region regionFor(size_t cycle) const;
     std::optional<size_t> smallestAround(Vec2 p, int exceptComponent) const;

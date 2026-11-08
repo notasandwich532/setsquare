@@ -562,6 +562,12 @@ private:
 };
 }  // namespace
 
+Color aciColor(int index)
+{
+    static const std::array<Color, 256> palette = aciPalette();
+    return index >= 1 && index <= 255 ? palette[static_cast<size_t>(index)] : Color{0, 0, 0, 255};
+}
+
 int nearestAci(const Color& c)
 {
     // Black and white both come out as 7, which CAD shows contrasting with its background.

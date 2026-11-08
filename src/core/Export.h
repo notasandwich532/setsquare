@@ -49,5 +49,7 @@ std::string toDxf(const Sketch& sketch, const DxfOptions& options = {});
 
 // The AutoCAD colour index (1-255) nearest a colour. For tests and the DXF writer.
 int nearestAci(const Color& color);
+// The colour of an AutoCAD colour index (1-255); black for anything else.
+Color aciColor(int index);
 
 }  // namespace core::exporter

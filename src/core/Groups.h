@@ -23,6 +23,7 @@ struct Members
 {
     std::vector<Id> points;   // the first two: the anchors
     std::vector<Id> circles;  // radii kept
+    std::set<Id> pointSet, circleSet;  // (the same, to look up)
 };
 Members members(const Sketch& sketch, const Constraint& group);
 

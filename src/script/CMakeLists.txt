@@ -31,6 +31,9 @@ add_library(drawscript STATIC
 target_include_directories(drawscript PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(drawscript PUBLIC drawdoc PRIVATE pybind11::embed)
 drawapp_warnings(drawscript)
+if(MSVC)
+    target_compile_options(drawscript PRIVATE /bigobj)  # (the Python bindings are one big file)
+endif()
 
 # Headless script runner (console program; an offscreen GUI app, for fonts): drawapp-cli script.py [args...]
 add_executable(drawapp-cli cli.cpp)

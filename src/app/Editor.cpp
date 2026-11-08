@@ -6,6 +6,9 @@
 #include <core/Regions.h>
 #include <core/Serialize.h>
 
+#include <QDir>
+#include <QFileInfo>
+
 #include <format>
 #include <set>
 
@@ -938,6 +941,40 @@ QString pyPath(const std::string& path)
     return out + QLatin1Char('"');
 }
 }  // namespace
+
+importer::Report Editor::importFile(const QString& path, importer::Options o, double pxPerInch, std::optional<double> mmPerUnit)
+{
+    if (o.name.empty()) {
+        o.name = QFileInfo(path).completeBaseName().toStdString();
+    }
+    const importer::Drawing drawing = importer::read(path, pxPerInch, mmPerUnit);
+    importer::Report report = importer::build(m_sketch, drawing, o);
+    QStringList args;
+    args << pyPath(QDir::toNativeSeparators(QFileInfo(path).absoluteFilePath()).toStdString());
+    args << QStringLiteral("into=\"%1\"").arg(o.into == importer::Into::Sublayer      ? QStringLiteral("sublayer")
+                                              : o.into == importer::Into::NewLayer ? QStringLiteral("new_layer")
+                                                                                    : QStringLiteral("new_sublayer"));
+    if (!o.keepLayers) {
+        args << QStringLiteral("keep_layers=False");
+    }
+    if (o.placement == importer::Placement::Center) {
+        args << QStringLiteral("placement=\"center\", at=") + pair(o.at);
+    }
+    else if (o.placement == importer::Placement::Page) {
+        args << QStringLiteral("placement=\"page\"");
+    }
+    if (o.curves == importer::Curves::Smooth) {
+        args << QStringLiteral("curves=\"smooth\"");
+    }
+    if (pxPerInch != 96.0) {
+        args << QStringLiteral("px_per_inch=") + number(pxPerInch);
+    }
+    if (mmPerUnit) {
+        args << QStringLiteral("units=") + number(*mmPerUnit);
+    }
+    log(QStringLiteral("s.import_file(%1)").arg(args.join(QStringLiteral(", "))));
+    return report;
+}
 
 core::Id Editor::addImage(const core::Image& image)
 {

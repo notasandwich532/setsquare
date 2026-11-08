@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 
+#include "ImportDialog.h"
 #include "Images.h"
 #include "PageSetup.h"
 
@@ -322,6 +323,40 @@ namespace
 const QString kSketchMime = QStringLiteral("application/x-drawapp-sketch");
 }
 
+void MainWindow::importDrawing(const QString& given)
+{
+    QString path = given;
+    if (path.isEmpty()) {
+        path = QFileDialog::getOpenFileName(this, tr("Import"), QString(), tr("Drawings (*.svg *.dxf)"));
+        if (path.isEmpty()) {
+            return;
+        }
+    }
+    const core::Sketch& s = m_doc->sketch();
+    ImportDialog dialog(path, QString::fromStdString(s.sublayer(s.activeSublayer()).name), s.page().has_value(), this);
+    if (!dialog.readable()) {
+        QMessageBox::warning(this, tr("Import"), tr("Can't import %1: %2").arg(QFileInfo(path).fileName(), dialog.error()));
+        return;
+    }
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    importer::Options options = dialog.options();
+    if (options.placement == importer::Placement::Center) {
+        options.at = m_view->toWorld(QPointF(m_view->width() / 2.0, m_view->height() / 2.0));
+    }
+    importer::Report report;
+    if (!m_view->tryEdit(tr("Import"), [&](Editor& ed) {
+            report = ed.importFile(path, options, dialog.pxPerInch(), dialog.mmPerUnit());
+        })) {
+        return;
+    }
+    if (options.placement != importer::Placement::Center) {
+        m_view->fitAll();
+    }
+    statusBar()->showMessage(tr("Imported %1: %2").arg(QFileInfo(path).fileName(), report.summary()), 10000);
+}
+
 void MainWindow::insertImage(const QString& given)
 {
     QString path = given;
@@ -612,6 +647,12 @@ void MainWindow::createActions()
     saveAs->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S));
     connect(saveAs, &QAction::triggered, this, &MainWindow::saveAs);
     fileMenu->addSeparator();
+    auto* importAction = fileMenu->addAction(tr("I&mport..."));
+    importAction->setObjectName(QStringLiteral("importAction"));
+    importAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_I));
+    importAction->setToolTip(tr("Bring in an SVG or DXF drawing: its curves, strokes and fills (each of its layers held "
+                                "together as a group)"));
+    connect(importAction, &QAction::triggered, this, [this] { importDrawing(); });
     m_insertImage = fileMenu->addAction(tr("&Insert Image..."));
     m_insertImage->setObjectName(QStringLiteral("insertImageAction"));
     m_insertImage->setIcon(icons::forName(QStringLiteral("image")));

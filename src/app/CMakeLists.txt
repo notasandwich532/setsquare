@@ -7,6 +7,8 @@ add_library(drawdoc STATIC
     Editor.h
     Images.cpp
     Images.h
+    Import.cpp
+    Import.h
     TextShapes.cpp
     TextShapes.h
 )
@@ -20,6 +22,8 @@ add_library(drawapp_lib STATIC
     ColorBar.h
     GradientEditor.cpp
     GradientEditor.h
+    ImportDialog.cpp
+    ImportDialog.h
     PageSetup.cpp
     PageSetup.h
     CommandPanel.cpp
