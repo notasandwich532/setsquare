@@ -2,6 +2,7 @@
 
 #include <core/Sketch.h>
 
+#include <QByteArray>
 #include <QImage>
 #include <QString>
 
@@ -17,6 +18,9 @@ namespace images
 // resolution the file gives, else 96 pixels per inch). Throws core::SketchError if it can't be
 // read.
 core::Image load(const QString& path);
+// The same from a file's bytes (e.g. embedded in another file): `source` is where it came from,
+// `name` what the error calls it.
+core::Image fromBytes(const QByteArray& bytes, const QString& source, const QString& name);
 
 // Decoded pictures, kept between paints. Each is kept at a few sizes (halving), so drawing one
 // zoomed out doesn't scale the whole full-size picture down every frame.

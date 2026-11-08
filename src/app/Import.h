@@ -13,8 +13,9 @@
 #include <vector>
 
 // Importing SVG and DXF drawings: read into shapes (in millimetres, y up), then built into the
-// sketch as geometry with strokes and fills, one group per layer of the file (see core/Groups.h).
-// What can't be brought in (text, images, clip paths, hatches, ...) is skipped and reported.
+// sketch as geometry with strokes, fills and gradients, one group per layer of the file (see
+// core/Groups.h); pictures come in as reference images. What can't be brought in (clip paths,
+// masks, ...) is skipped and reported.
 
 namespace importer
 {
@@ -80,10 +81,19 @@ struct Shape
     std::string layer;  // the file's layer it's on
 };
 
+// A picture in the file: it comes in as a reference image (see core::Image).
+struct ImageDef
+{
+    core::Image image;                  // its picture, placed (centre, width, angle, flip) in drawing coordinates
+    std::string layer;                  // the file's layer it's on
+    std::array<core::Vec2, 4> corners;  // where it is (for the drawing's extent)
+};
+
 // A file, read.
 struct Drawing
 {
     std::vector<Shape> shapes;
+    std::vector<ImageDef> images;
     std::vector<std::string> layers;  // the file's layers, in order (bottom first)
     // The file's own canvas (an SVG's page), in drawing coordinates: x0, y0, x1, y1. None for DXF.
     std::optional<std::array<double, 4>> canvas;
@@ -104,9 +114,10 @@ enum class Curves
 // Reading. Throw core::SketchError if the file can't be read at all.
 // SVG lengths without units are pixels, `pxPerInch` of them to the inch (CSS's 96; some programs
 // use 72 or 90). DXF: `mmPerUnit` if given, else from the file ($INSUNITS), else millimetres.
-// (Curves come in as Beziers, made exact or smooth when built.)
-Drawing readSvg(const QByteArray& data, double pxPerInch = 96.0);
-Drawing readDxf(const QByteArray& data, std::optional<double> mmPerUnit = std::nullopt);
+// (Curves come in as Beziers, made exact or smooth when built.) Pictures the file links to (rather
+// than holding) are looked for by their path as given, then by name in `folder` (the file's own).
+Drawing readSvg(const QByteArray& data, double pxPerInch = 96.0, const QString& folder = {});
+Drawing readDxf(const QByteArray& data, std::optional<double> mmPerUnit = std::nullopt, const QString& folder = {});
 Drawing read(const QString& path, double pxPerInch = 96.0, std::optional<double> mmPerUnit = std::nullopt);
 
 enum class Into
@@ -138,6 +149,7 @@ struct Report
     int curves = 0;
     int fills = 0;
     int gradients = 0;
+    int images = 0;
     int groups = 0;
     std::vector<std::string> sublayers;  // where it went
     std::map<std::string, int> skipped;

@@ -1,13 +1,16 @@
 #include "Import.h"
 
 #include "Editor.h"
+#include "Images.h"
 
 #include <core/Export.h>
 #include <core/Groups.h>
 #include <core/Regions.h>
 
 #include <QFile>
+#include <QDir>
 #include <QFileInfo>
+#include <QUrl>
 #include <QHash>
 #include <QRegularExpression>
 #include <QXmlStreamReader>
@@ -128,6 +131,49 @@ Segment transformed(const Segment& s, const Affine& m)
     return out;
 }
 
+// A picture shown over the parallelogram from `corner` (its bottom-left, as shown) along `right`
+// (its bottom edge) and `up` (its left edge), in drawing coordinates. A reference image keeps its
+// own proportions (as wide as `right`): false if it's shown stretched or skewed.
+bool placeImage(ImageDef& def, Vec2 corner, Vec2 right, Vec2 up)
+{
+    core::Image& im = def.image;
+    const Vec2 centre = add(corner, mul(add(right, up), 0.5));
+    im.x = centre.x;
+    im.y = centre.y;
+    im.width = len(right);
+    if (cross(right, up) >= 0) {
+        im.angle = std::atan2(right.y, right.x) * 180 / kPi;
+    }
+    else {
+        // Mirrored: turned by its left edge, flipped left to right.
+        im.angle = std::atan2(up.y, up.x) * 180 / kPi - 90;
+        im.flipH = true;
+    }
+    def.corners = {corner, add(corner, right), add(corner, add(right, up)), add(corner, up)};
+    const double lr = len(right), lu = len(up);
+    return lr > 0 && lu > 0 && std::abs(dot(right, up)) <= 1e-6 * lr * lu && std::abs(lu - im.height()) <= 1e-3 * lu;
+}
+
+// A linked picture: by its path as given (absolute, or from the file's folder), else by its name
+// in that folder. Empty if it isn't found.
+QString findLinked(const QString& given, const QString& folder)
+{
+    QString path = given;
+    if (path.startsWith(QStringLiteral("file://"))) {
+        path = QUrl(path).toLocalFile();
+    }
+    if (path.isEmpty()) {
+        return {};
+    }
+    const QFileInfo as(QDir(folder).filePath(path));
+    if (as.isFile()) {
+        return as.absoluteFilePath();
+    }
+    const QString name = QString(path).replace(QLatin1Char('\\'), QLatin1Char('/')).section(QLatin1Char('/'), -1);
+    const QFileInfo byName(QDir(folder).filePath(name));
+    return !folder.isEmpty() && byName.isFile() ? byName.absoluteFilePath() : QString();
+}
+
 bool pointInShape(const std::vector<std::vector<Vec2>>& rings, Vec2 p, bool evenOdd)
 {
     int winding = 0, crossings = 0;
@@ -227,6 +273,14 @@ bool Drawing::bounds(double& x0, double& y0, double& x1, double& y1) const
 {
     x0 = y0 = 1e300;
     x1 = y1 = -1e300;
+    for (const ImageDef& im : images) {
+        for (const Vec2& p : im.corners) {
+            x0 = std::min(x0, p.x);
+            y0 = std::min(y0, p.y);
+            x1 = std::max(x1, p.x);
+            y1 = std::max(y1, p.y);
+        }
+    }
     for (const Shape& s : shapes) {
         for (const Contour& c : s.contours) {
             for (const Segment& seg : c.segments) {
@@ -257,6 +311,9 @@ QString Report::summary() const
     parts << counted(curves, QObject::tr("1 curve"), QObject::tr("%1 curves"));
     if (fills > 0) {
         parts << counted(fills, QObject::tr("1 fill"), QObject::tr("%1 fills"));
+    }
+    if (images > 0) {
+        parts << counted(images, QObject::tr("1 image"), QObject::tr("%1 images"));
     }
     if (gradients > 0) {
         parts << counted(gradients, QObject::tr("1 gradient"), QObject::tr("%1 gradients"));
@@ -386,9 +443,10 @@ std::vector<double> numbers(const QString& text)
 class SvgReader
 {
 public:
-    SvgReader(const Node& root, double pxPerInch)
+    SvgReader(const Node& root, double pxPerInch, const QString& folder)
         : m_root(root)
         , m_pxPerInch(pxPerInch)
+        , m_folder(folder)
     {
         index(root);
         for (const Node* style : m_styles) {
@@ -848,6 +906,91 @@ private:
         return d;
     }
 
+    // A picture: held in the file (a data: URI) or linked to. Fitted into its box as SVG does
+    // (preserveAspectRatio), then placed by the transform.
+    void image(const Node& n, const Affine& m, const std::string& layer, double opacity)
+    {
+        const QString href = n.attrs.value(QStringLiteral("href")).trimmed();
+        QByteArray bytes;
+        QString source, name;
+        if (href.startsWith(QStringLiteral("data:"))) {
+            const qsizetype comma = href.indexOf(QLatin1Char(','));
+            if (comma < 0) {
+                skip("images that can't be read");
+                return;
+            }
+            const QByteArray payload = href.mid(comma + 1).toLatin1();
+            bytes = href.left(comma).contains(QStringLiteral(";base64")) ? QByteArray::fromBase64(payload)
+                                                                          : QByteArray::fromPercentEncoding(payload);
+            source = QStringLiteral("embedded");
+            name = QStringLiteral("an embedded picture");
+        }
+        else {
+            const QString path = findLinked(href, m_folder);
+            QFile file(path);
+            if (path.isEmpty() || !file.open(QIODevice::ReadOnly)) {
+                skip("linked images not found");
+                return;
+            }
+            bytes = file.readAll();
+            source = QDir::toNativeSeparators(path);
+            name = QFileInfo(path).fileName();
+        }
+        ImageDef def;
+        try {
+            def.image = images::fromBytes(bytes, source, name);
+        }
+        catch (const core::SketchError&) {
+            skip("images that can't be read");
+            return;
+        }
+        const double pw = def.image.pixelWidth, ph = def.image.pixelHeight;
+        // Its box (without a size: the picture's own, in pixels: user units).
+        const double x = number(n, "x"), y = number(n, "y");
+        double w = number(n, "width"), h = number(n, "height");
+        if (!(w > 0) && !(h > 0)) {
+            w = pw;
+            h = ph;
+        }
+        else if (!(w > 0)) {
+            w = h * pw / ph;
+        }
+        else if (!(h > 0)) {
+            h = w * ph / pw;
+        }
+        // Fitted in (meet) or filling it (slice), aligned; or stretched to it (none).
+        const QStringList fit = n.attrs.value(QStringLiteral("preserveAspectRatio"), QStringLiteral("xMidYMid meet"))
+                                    .split(QLatin1Char(' '), Qt::SkipEmptyParts);
+        const QString align = fit.value(0, QStringLiteral("xMidYMid"));
+        bool stretched = false;
+        double dw = w, dh = h, ix = x, iy = y;
+        if (align == QStringLiteral("none")) {
+            stretched = std::abs(w / h - pw / ph) > 1e-6 * (pw / ph);
+        }
+        else {
+            const bool slice = fit.value(1) == QStringLiteral("slice");
+            if (slice) {
+                note("images cropped to their box (slice) came in whole");
+            }
+            const double s = slice ? std::max(w / pw, h / ph) : std::min(w / pw, h / ph);
+            dw = pw * s;
+            dh = ph * s;
+            const double ax = align.contains(QStringLiteral("xMin")) ? 0.0 : align.contains(QStringLiteral("xMax")) ? 1.0 : 0.5;
+            const double ay = align.contains(QStringLiteral("YMin")) ? 0.0 : align.contains(QStringLiteral("YMax")) ? 1.0 : 0.5;
+            ix = x + (w - dw) * ax;
+            iy = y + (h - dh) * ay;
+        }
+        def.layer = layer;
+        def.image.opacity = std::clamp(0.5 * opacity, 0.05, 1.0);  // (a reference: faded, as when inserted)
+        if (!placeImage(def, m({ix, iy + dh}), m.linear({dw, 0}), m.linear({0, -dh})) || stretched) {
+            note("stretched or skewed images came in keeping their own proportions");
+        }
+        if (!layer.empty() && std::ranges::find(m_layerOrder, layer) == m_layerOrder.end()) {
+            m_layerOrder.push_back(layer);
+        }
+        m_out.images.push_back(std::move(def));
+    }
+
     void walk(const Node& n, const Affine& parent, const Paint& inherited, double opacity, std::string layer, int depth,
               bool isRoot = false)
     {
@@ -933,7 +1076,9 @@ private:
             return;
         }
         if (tag == QStringLiteral("image")) {
-            skip("images");
+            if (paint.visible) {
+                image(n, m, layer, opacity);
+            }
             return;
         }
         if (tag == QStringLiteral("foreignObject")) {
@@ -1252,6 +1397,7 @@ private:
 
     const Node& m_root;
     double m_pxPerInch;
+    QString m_folder;  // the file's own (for pictures it links to)
     QHash<QString, const Node*> m_byId;
     std::vector<const Node*> m_styles;
     std::vector<std::pair<QString, QHash<QString, QString>>> m_css;
@@ -1261,10 +1407,10 @@ private:
 };
 }  // namespace
 
-Drawing readSvg(const QByteArray& data, double pxPerInch)
+Drawing readSvg(const QByteArray& data, double pxPerInch, const QString& folder)
 {
     const Node root = parseXml(data);
-    SvgReader reader(root, pxPerInch);
+    SvgReader reader(root, pxPerInch, folder);
     return reader.read();
 }
 
@@ -1382,8 +1528,9 @@ Vec2 nurbsAt(const std::vector<double>& U, const std::vector<H>& P, int p, doubl
 class DxfReader
 {
 public:
-    DxfReader(const QByteArray& data, std::optional<double> mmPerUnit)
+    DxfReader(const QByteArray& data, std::optional<double> mmPerUnit, const QString& folder)
         : m_mmPerUnit(mmPerUnit)
+        , m_folder(folder)
     {
         // Pairs of lines: a group code, then its value.
         const QList<QByteArray> lines = data.split('\n');
@@ -1428,6 +1575,13 @@ public:
                 }
                 else if (name == "ENTITIES") {
                     m_entities = std::move(records);
+                }
+                else if (name == "OBJECTS") {
+                    for (const Record& r : records) {
+                        if (r.type == "IMAGEDEF" && r.get(5) && r.get(1)) {
+                            m_imageFiles[upper(*r.get(5))] = *r.get(1);  // (by handle: what IMAGEs point to)
+                        }
+                    }
                 }
             }
             else {
@@ -1684,6 +1838,36 @@ private:
         return c;
     }
 
+    // A picture (always linked to: its IMAGEDEF has the path), its bottom-left corner at 10/20, a
+    // pixel's width and height along 11/21 and 12/22, 13/23 pixels across and up.
+    void image(const Record& r, const Affine& m, const std::string& layer)
+    {
+        const std::string* handle = r.get(340);
+        const auto file = handle ? m_imageFiles.find(upper(*handle)) : m_imageFiles.end();
+        const QString path = file != m_imageFiles.end() ? findLinked(QString::fromStdString(file->second), m_folder) : QString();
+        QFile picture(path);
+        if (path.isEmpty() || !picture.open(QIODevice::ReadOnly)) {
+            ++m_out.skipped["linked images not found"];
+            return;
+        }
+        ImageDef def;
+        try {
+            def.image = images::fromBytes(picture.readAll(), QDir::toNativeSeparators(path), QFileInfo(path).fileName());
+        }
+        catch (const core::SketchError&) {
+            ++m_out.skipped["images that can't be read"];
+            return;
+        }
+        const double across = r.num(13, def.image.pixelWidth), up = r.num(23, def.image.pixelHeight);
+        const Vec2 u = mul(Vec2{r.num(11), r.num(21)}, across), v = mul(Vec2{r.num(12), r.num(22)}, up);
+        def.layer = layer;
+        def.image.opacity = 0.5;  // (a reference: faded, as when inserted)
+        if (!placeImage(def, m({r.num(10), r.num(20)}), m.linear(u), m.linear(v))) {
+            note("stretched or skewed images came in keeping their own proportions");
+        }
+        m_out.images.push_back(std::move(def));
+    }
+
     void entity(const Record& r, const Affine& m, const std::string& parentLayer, std::optional<Color> parentColor,
                 int depth)
     {
@@ -1804,6 +1988,10 @@ private:
         else if (type == "SPLINE") {
             contours.push_back(spline(r));
         }
+        else if (type == "IMAGE") {
+            image(r, local, layer);
+            return;
+        }
         else {
             static const std::map<std::string, std::string> names = {
                 {"TEXT", "texts"},          {"MTEXT", "texts"},       {"ATTRIB", "texts"},       {"ATTDEF", "texts"},
@@ -1858,6 +2046,8 @@ private:
 
     std::vector<std::pair<int, std::string>> m_pairs;
     std::optional<double> m_mmPerUnit;
+    QString m_folder;  // the file's own (for pictures it links to)
+    std::map<std::string, std::string> m_imageFiles;  // IMAGEDEF handle -> the picture's path
     int m_insunits = 0;
     std::map<std::string, LayerInfo> m_layers;
     std::map<std::string, Block> m_blocks;
@@ -1866,9 +2056,9 @@ private:
 };
 }  // namespace
 
-Drawing readDxf(const QByteArray& data, std::optional<double> mmPerUnit)
+Drawing readDxf(const QByteArray& data, std::optional<double> mmPerUnit, const QString& folder)
 {
-    DxfReader reader(data, mmPerUnit);
+    DxfReader reader(data, mmPerUnit, folder);
     return reader.read();
 }
 
@@ -1881,10 +2071,10 @@ Drawing read(const QString& path, double pxPerInch, std::optional<double> mmPerU
     const QByteArray data = file.readAll();
     const QString suffix = QFileInfo(path).suffix().toLower();
     if (suffix == QStringLiteral("dxf")) {
-        return readDxf(data, mmPerUnit);
+        return readDxf(data, mmPerUnit, QFileInfo(path).absolutePath());
     }
     if (suffix == QStringLiteral("svg")) {
-        return readSvg(data, pxPerInch);
+        return readSvg(data, pxPerInch, QFileInfo(path).absolutePath());
     }
     throw core::SketchError("only SVG and DXF files can be imported");
 }
@@ -2184,6 +2374,13 @@ Report build(core::Sketch& sketch, const Drawing& drawing, const Options& o)
         }
         byLayer[key].push_back(&s);
     }
+    for (const ImageDef& im : drawing.images) {  // (a layer of only pictures is a layer too)
+        const std::string key = o.keepLayers ? im.layer : std::string();
+        if (!byLayer.contains(key)) {
+            fileLayers.push_back(key);
+            byLayer[key];
+        }
+    }
     if (o.keepLayers) {
         std::vector<std::string> ordered;  // (the file's own order where it gives one)
         for (const std::string& l : drawing.layers) {
@@ -2331,6 +2528,16 @@ Report build(core::Sketch& sketch, const Drawing& drawing, const Options& o)
             sublayersUsed.push_back(target[l]);
             report.sublayers.push_back(sketch.sublayer(target[l]).name);
         }
+    }
+
+    // Pictures: reference images on the layers their file layers went to.
+    for (const ImageDef& def : drawing.images) {
+        core::Image im = def.image;
+        im.x += shift.x;
+        im.y += shift.y;
+        im.layer = sketch.layerOfSublayer(target[o.keepLayers ? def.layer : std::string()]);
+        sketch.addImage(im);
+        ++report.images;
     }
 
     // Fills: each closed area made only of imported curves takes the colour of the last filled

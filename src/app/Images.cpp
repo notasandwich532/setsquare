@@ -15,7 +15,12 @@ core::Image load(const QString& path)
     if (!file.open(QIODevice::ReadOnly)) {
         throw core::SketchError("can't open " + path.toStdString());
     }
-    const QByteArray bytes = file.readAll();
+    return fromBytes(file.readAll(), QDir::toNativeSeparators(QFileInfo(path).absoluteFilePath()),
+                     QFileInfo(path).fileName());
+}
+
+core::Image fromBytes(const QByteArray& bytes, const QString& source, const QString& name)
+{
     QBuffer buffer;
     buffer.setData(bytes);
     buffer.open(QIODevice::ReadOnly);
@@ -23,11 +28,11 @@ core::Image load(const QString& path)
     reader.setAutoTransform(true);  // (photos turned by their EXIF tag)
     const QImage picture = reader.read();
     if (picture.isNull()) {
-        throw core::SketchError("can't read " + QFileInfo(path).fileName().toStdString() + " as an image ("
-                                + reader.errorString().toStdString() + ")");
+        throw core::SketchError("can't read " + name.toStdString() + " as an image (" + reader.errorString().toStdString()
+                                + ")");
     }
     core::Image image;
-    image.source = QDir::toNativeSeparators(QFileInfo(path).absoluteFilePath()).toStdString();
+    image.source = source.toStdString();
     image.data = std::make_shared<const std::string>(bytes.constData(), static_cast<size_t>(bytes.size()));
     image.pixelWidth = picture.width();
     image.pixelHeight = picture.height();

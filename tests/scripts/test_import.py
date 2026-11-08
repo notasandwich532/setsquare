@@ -212,6 +212,65 @@ doc.new()
 s.import_file(dxf, units="mm")
 assert isclose(max(l.length for l in s.lines), 4)
 
+# --- pictures: reference images (embedded, linked, turned, mirrored), from SVG and DXF ------------------
+import base64
+import struct
+import zlib
+
+
+def png_bytes(width, height, rgb=(220, 40, 40)):
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
+    rows = b"".join(b"\x00" + bytes(rgb) * width for _ in range(height))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+
+
+os.makedirs(os.path.join(folder, "pics"), exist_ok=True)
+with open(os.path.join(folder, "pics", "plan.png"), "wb") as fh:
+    fh.write(png_bytes(40, 20))
+with open(os.path.join(folder, "plan.png"), "wb") as fh:
+    fh.write(png_bytes(40, 20))
+embedded = base64.b64encode(png_bytes(40, 20)).decode()
+pics = write("pics.svg", f"""<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="100mm" height="100mm" viewBox="0 0 100 100">
+  <image x="10" y="10" width="40" height="40" href="data:image/png;base64,{embedded}"/>
+  <image x="60" y="60" width="20" height="10" xlink:href="pics/plan.png" transform="rotate(90 70 70)"/>
+  <image x="-100" y="0" width="10" height="5" href="pics/plan.png" transform="scale(-1 1)"/>
+  <image x="0" y="90" width="40" height="5" href="pics/plan.png" preserveAspectRatio="none"/>
+  <image x="0" y="0" width="10" height="10" href="nowhere/gone.png"/>
+  <line x1="0" y1="0" x2="1" y2="1" stroke="black"/>
+</svg>""")
+doc.new()
+rep = s.import_file(pics)
+assert rep["images"] == 4 and rep["skipped"] == {"linked images not found": 1}, rep
+assert "stretched or skewed images came in keeping their own proportions" in rep["notes"], rep
+ims = s.images
+# Fitted into its box (40 x 40 for a 2:1 picture: 40 x 20, in the middle), y up.
+assert near(ims[0].center, (30, 70)) and isclose(ims[0].width, 40) and ims[0].angle == 0 and not ims[0].flip_h
+# Turned a quarter clockwise round (70, 70).
+assert near(ims[1].center, (75, 30)) and isclose(ims[1].width, 20) and isclose(ims[1].angle % 360, 270), (ims[1].center, ims[1].angle)
+# Mirrored.
+assert near(ims[2].center, (95, 97.5)) and ims[2].flip_h and isclose(ims[2].width, 10), (ims[2].center, ims[2].flip_h)
+assert ims[0].opacity == 0.5  # (references: faded, as when inserted)
+
+# DXF: the IMAGEDEF's path is from another computer; the picture's found by name beside the file.
+dxfpic = write("pic.dxf", "\n".join(str(x) for x in [
+    0, "SECTION", 2, "HEADER", 9, "$INSUNITS", 70, 4, 0, "ENDSEC",
+    0, "SECTION", 2, "ENTITIES",
+    0, "IMAGE", 5, "30", 8, "Refs", 10, 5, 20, 5, 30, 0, 11, 0.1, 21, 0, 31, 0, 12, 0, 22, 0.1, 32, 0,
+    13, 40, 23, 20, 340, "2A",
+    0, "LINE", 8, "Refs", 10, 0, 20, 0, 11, 1, 21, 0,
+    0, "ENDSEC",
+    0, "SECTION", 2, "OBJECTS",
+    0, "IMAGEDEF", 5, "2A", 1, r"D:\elsewhere\drawings\plan.png", 10, 40, 20, 20,
+    0, "ENDSEC", 0, "EOF"]) + "\n")
+doc.new()
+rep = s.import_file(dxfpic)
+assert rep["images"] == 1, rep
+im = s.images[0]
+assert near(im.center, (7, 6)) and isclose(im.width, 4) and im.angle == 0, (im.center, im.width)
+
 # --- what it records makes it again ------------------------------------------------------------------
 doc.new()
 s.import_file(svg, into="new_layer", placement="center", at=(10, 20), curves="smooth")
