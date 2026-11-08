@@ -22,6 +22,7 @@
 #include <numbers>
 #include <optional>
 #include <set>
+#include <unordered_map>
 
 using core::ConstraintType;
 using core::Id;
@@ -400,7 +401,55 @@ std::vector<SketchView::Annotation> SketchView::layoutAnnotations() const
             }
         }
     }
-    return out;
+
+    // Where symbols crowd together (zoomed out on a busy drawing), one that would mostly cover
+    // another isn't shown (nor picked): a heap of them can't be told apart anyway. Selected and
+    // conflicting ones always are, and dimensions.
+    const auto& conflicting = m_doc.solveResult().conflicting;
+    auto keep = [&](const Annotation& a) {
+        return a.isDimension || m_selection.contains(a.id) || std::ranges::find(conflicting, a.id) != conflicting.end();
+    };
+    std::unordered_map<quint64, std::vector<QRectF>> cells;  // shown symbols, by kGlyphSize squares
+    auto cellOf = [](double x, double y) {
+        return (static_cast<quint64>(static_cast<quint32>(static_cast<int>(std::floor(x / kGlyphSize)))) << 32)
+             | static_cast<quint32>(static_cast<int>(std::floor(y / kGlyphSize)));
+    };
+    auto crowded = [&](const QRectF& r) {
+        const double half = r.width() * r.height() / 2;
+        for (int dx = -1; dx <= 1; ++dx) {
+            for (int dy = -1; dy <= 1; ++dy) {
+                const auto it = cells.find(cellOf(r.center().x() + dx * kGlyphSize, r.center().y() + dy * kGlyphSize));
+                if (it == cells.end()) {
+                    continue;
+                }
+                for (const QRectF& other : it->second) {
+                    const QRectF overlap = r.intersected(other);
+                    if (overlap.width() * overlap.height() > half) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    };
+    auto place = [&](const QRectF& r) { cells[cellOf(r.center().x(), r.center().y())].push_back(r); };
+    std::vector<Annotation> shown;
+    shown.reserve(out.size());
+    for (Annotation& a : out) {
+        if (!a.isDimension && keep(a)) {
+            place(a.rect);
+        }
+    }
+    for (Annotation& a : out) {
+        if (a.isDimension || keep(a)) {
+            shown.push_back(std::move(a));
+        }
+        else if (!crowded(a.rect)) {
+            place(a.rect);
+            shown.push_back(std::move(a));
+        }
+    }
+    return shown;
 }
 
 QColor SketchView::annotationColor(Id constraint, const QColor& normal) const

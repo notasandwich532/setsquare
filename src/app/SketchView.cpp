@@ -31,6 +31,7 @@
 
 #include <algorithm>
 #include <array>
+#include <unordered_set>
 #include <cmath>
 #include <numbers>
 
@@ -43,6 +44,11 @@ constexpr double kMinGridPixelSpacing = 12.0;  // minor grid lines closer than t
 constexpr double kPickPixels = 7.0;
 constexpr double kSnapPixels = 10.0;
 constexpr double kCurveWidth = 1.6;
+// Too dense to show, below these sizes on screen: a spline's control polygon (unless it's selected or
+// hovered), a point's dot where there's one already (pixels apart), a curve's own shape.
+constexpr double kMinControlPolygon = 24.0;
+constexpr double kDotSpacing = 3.0;
+constexpr double kMinCurveShape = 1.5;
 constexpr double kHighlightWidth = 2.6;
 constexpr double kOtherSublayerAlpha = 0.3;  // geometry in sublayers other than the active one
 constexpr double kOtherLayerAlpha = 0.2;     // sketch geometry of other layers (not referable)
@@ -1198,7 +1204,7 @@ QPainterPath SketchView::curvePath(const core::Sketch& sketch, core::Id curve) c
     return out;
 }
 
-void SketchView::drawControlPolygon(QPainter& painter, const core::Sketch& sketch, core::Id spline) const
+void SketchView::drawControlPolygon(QPainter& painter, const core::Sketch& sketch, core::Id spline, bool always) const
 {
     const core::Spline& sp = sketch.spline(spline);
     if (sp.kind != core::SplineKind::Control) {
@@ -1210,6 +1216,10 @@ void SketchView::drawControlPolygon(QPainter& painter, const core::Sketch& sketc
     }
     if (sp.closed && !poly.isEmpty()) {
         poly << poly.front();
+    }
+    // On a spline too small to see it (zoomed out on a busy drawing), it'd only be a smudge.
+    if (!always && std::max(poly.boundingRect().width(), poly.boundingRect().height()) < kMinControlPolygon) {
+        return;
     }
     QColor faint = theme::canvas().construction;
     faint.setAlphaF(faint.alphaF() * 0.6);
@@ -1355,6 +1365,58 @@ void SketchView::drawSketch(QPainter& painter, core::Id only) const
             case core::EntityKind::Spline: painter.drawPath(curvePath(sketch, id)); break;
         }
     };
+    // Roughly where a curve is on screen (at least all of it; quick to find), if it's one.
+    auto shownBox = [&](core::Id id, const core::Entity& e) -> std::optional<QRectF> {
+        auto around = [&](core::Vec2 c, double r) {
+            const QPointF s = toScreen(c);
+            return QRectF(s.x() - r * m_zoom, s.y() - r * m_zoom, 2 * r * m_zoom, 2 * r * m_zoom);
+        };
+        auto at = [&](core::Id p) { return toScreen({sketch.point(p).x, sketch.point(p).y}); };
+        auto distance = [&](core::Id a, core::Id b) {
+            return std::hypot(sketch.point(a).x - sketch.point(b).x, sketch.point(a).y - sketch.point(b).y);
+        };
+        switch (e.kind()) {
+            case core::EntityKind::Line: {
+                const auto& l = std::get<core::Line>(e.geom);
+                return QRectF(at(l.p1), at(l.p2)).normalized();
+            }
+            case core::EntityKind::Circle: {
+                const auto& c = std::get<core::Circle>(e.geom);
+                return around({sketch.point(c.center).x, sketch.point(c.center).y}, c.radius);
+            }
+            case core::EntityKind::Arc: {
+                const core::ArcShape a = core::arcShape(sketch, id);
+                return around(a.center, a.radius);
+            }
+            case core::EntityKind::Ellipse: {
+                const auto& el = std::get<core::Ellipse>(e.geom);
+                const core::Point& c = sketch.point(el.center);
+                return around({c.x, c.y}, std::max(distance(el.center, el.major), distance(el.center, el.minor)));
+            }
+            case core::EntityKind::EllipseArc: {
+                const auto& el = std::get<core::EllipseArc>(e.geom);
+                const core::Point& c = sketch.point(el.center);
+                return around({c.x, c.y}, std::max(distance(el.center, el.major), distance(el.center, el.minor)));
+            }
+            case core::EntityKind::Spline: {
+                // (its points' box; it can stray a little outside, but a tiny one only by a hair)
+                double x0 = 1e300, y0 = 1e300, x1 = -1e300, y1 = -1e300;
+                for (core::Id p : std::get<core::Spline>(e.geom).points) {
+                    const QPointF s = at(p);
+                    x0 = std::min(x0, s.x());
+                    y0 = std::min(y0, s.y());
+                    x1 = std::max(x1, s.x());
+                    y1 = std::max(y1, s.y());
+                }
+                if (x0 > x1) {
+                    return std::nullopt;
+                }
+                return QRectF(QPointF(x0, y0), QPointF(x1, y1));
+            }
+            case core::EntityKind::Point: break;
+        }
+        return std::nullopt;
+    };
     // Layer by layer, from the bottom: fills, strokes, texts, then the geometry.
     // Presentation view on coloured paper: plain geometry and text in black, as exported.
     const bool onPaper = m_presentation && sketch.page() && sketch.page()->hasColor;
@@ -1483,9 +1545,18 @@ void SketchView::drawSketch(QPainter& painter, core::Id only) const
         else {
             painter.setPen(styleFor(e));
         }
+        // Smaller than its own line is wide (zoomed out): a dot of the pen's size is all it'd show.
+        if (!m_selection.contains(id) && id != m_hovered && !constrained.contains(id)) {
+            if (const std::optional<QRectF> box = shownBox(id, e);
+                box && std::max(box->width(), box->height()) < kMinCurveShape) {
+                const double w = std::max(painter.pen().widthF(), 1.0);
+                painter.fillRect(QRectF(box->center() - QPointF(w / 2, w / 2), QSizeF(w, w)), painter.pen().color());
+                continue;
+            }
+        }
         drawCurve(id, e);
         if (e.kind() == core::EntityKind::Spline && !m_presentation && layer == activeLayer) {
-            drawControlPolygon(painter, sketch, id);
+            drawControlPolygon(painter, sketch, id, m_selection.contains(id) || id == m_hovered);
         }
     }
     }  // (layers)
@@ -1507,6 +1578,7 @@ void SketchView::drawSketch(QPainter& painter, core::Id only) const
         bool highlighted;
     };
     std::vector<Special> special;
+    std::unordered_set<quint64> dotCells;
     const QRectF onScreen = QRectF(rect()).adjusted(-10, -10, 10, 10);
     for (const auto& [id, e] : sketch.entities()) {
         if ((only != core::kNoId && id != only) || e.kind() != core::EntityKind::Point || sketch.isHiddenReference(id)
@@ -1525,7 +1597,12 @@ void SketchView::drawSketch(QPainter& painter, core::Id only) const
         const bool highlighted = m_selection.contains(id) || id == m_hovered || constrained.contains(id);
         const bool marked = sketch.isOrigin(id) || (e.fixed && e.projectedFrom == core::kNoId);
         if (!highlighted && !marked) {
-            dots[color.rgba()] << at;
+            // Dense (zoomed out): one dot to a few pixels' square is all that can be told apart.
+            const quint64 cell = (static_cast<quint64>(static_cast<quint32>(static_cast<int>(std::floor(at.x() / kDotSpacing)))) << 32)
+                               | static_cast<quint32>(static_cast<int>(std::floor(at.y() / kDotSpacing)));
+            if (dotCells.insert(cell).second) {
+                dots[color.rgba()] << at;
+            }
         }
         else {
             special.push_back({id, &e, at, color, highlighted});
@@ -1660,7 +1737,7 @@ void SketchView::drawPreviewSketch(QPainter& painter, const core::Sketch& sketch
                 try {
                     painter.drawPath(curvePath(sketch, e.id));
                     if (e.kind() == core::EntityKind::Spline) {
-                        drawControlPolygon(painter, sketch, e.id);
+                        drawControlPolygon(painter, sketch, e.id, true);
                     }
                 }
                 catch (const core::SketchError&) {

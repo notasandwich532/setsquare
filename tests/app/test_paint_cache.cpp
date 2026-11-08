@@ -199,3 +199,38 @@ TEST_CASE("Paint cache: hovering, selecting and editing show as painting afresh 
     QCoreApplication::sendEvent(&view, &wheel);
     CHECK(differing(view.grab().toImage(), before) > 100);
 }
+
+TEST_CASE("Density: a spline's control polygon shows only where it can be made out (or it's selected)", "[paint]")
+{
+    Document doc;
+    SketchView view(doc);
+    view.resize(800, 600);
+    view.show();
+    view.resetView();
+    Id spline = kNoId;
+    doc.modify("spline", [&](Sketch& s) {
+        Spline sp;
+        sp.points = {s.addPoint(0, 0), s.addPoint(0, 40), s.addPoint(40, 40), s.addPoint(40, 0)};
+        sp.kind = SplineKind::Control;
+        spline = s.addSpline(sp);
+    });
+    // Round the middle of its polygon's top (the curve itself peaks well below it).
+    auto changed = [&]() {
+        const QPoint at = view.toScreen({20, 40}).toPoint();
+        const QRect box(at - QPoint(2, 2), QSize(5, 5));
+        view.setSelection({});
+        const QImage plain = view.grab().toImage().copy(box);
+        view.setSelection({spline});
+        const QImage selected = view.grab().toImage().copy(box);
+        view.setSelection({});
+        return differing(plain, selected);
+    };
+    CHECK(changed() == 0);  // big enough: shown either way
+    for (int n = 0; n < 40 && view.zoom() * 40 >= 20; ++n) {
+        const QPointF c(view.toScreen({20, 20}));
+        QWheelEvent wheel(c, view.mapToGlobal(c), QPoint(), QPoint(0, -120), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+        QCoreApplication::sendEvent(&view, &wheel);
+    }
+    REQUIRE(view.zoom() * 40 < 20);
+    CHECK(changed() > 0);  // too small to show, but selected it does
+}

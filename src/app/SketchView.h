@@ -236,7 +236,8 @@ private:
     // Ellipses, elliptical arcs and splines (any curve, really), as their path.
     QPainterPath curvePath(const core::Sketch& sketch, core::Id curve) const;
     // A control-point spline's control polygon (faint), while sketching.
-    void drawControlPolygon(QPainter& painter, const core::Sketch& sketch, core::Id spline) const;
+    // (`always`: however small it is on screen; else not when it would only be a smudge)
+    void drawControlPolygon(QPainter& painter, const core::Sketch& sketch, core::Id spline, bool always = false) const;
     ToolEvent makeEvent(const QMouseEvent* event) const;
     void onDocumentChanged();
 
