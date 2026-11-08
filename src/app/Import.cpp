@@ -242,6 +242,14 @@ bool Drawing::bounds(double& x0, double& y0, double& x1, double& y1) const
     return x0 <= x1;
 }
 
+bool GradientDef::operator==(const GradientDef& o) const
+{
+    auto same = [](Vec2 a, Vec2 b) { return a.x == b.x && a.y == b.y; };
+    return kind == o.kind && spread == o.spread && stops == o.stops && same(start, o.start) && same(end, o.end)
+        && same(center, o.center) && rx == o.rx && ry == o.ry && phi == o.phi && focal.has_value() == o.focal.has_value()
+        && (!focal || same(*focal, *o.focal));
+}
+
 QString Report::summary() const
 {
     auto counted = [](int n, const QString& one, const QString& many) { return n == 1 ? one : many.arg(n); };
@@ -249,6 +257,9 @@ QString Report::summary() const
     parts << counted(curves, QObject::tr("1 curve"), QObject::tr("%1 curves"));
     if (fills > 0) {
         parts << counted(fills, QObject::tr("1 fill"), QObject::tr("%1 fills"));
+    }
+    if (gradients > 0) {
+        parts << counted(gradients, QObject::tr("1 gradient"), QObject::tr("%1 gradients"));
     }
     QString text = parts.join(QStringLiteral(", "));
     if (!sublayers.empty()) {
@@ -428,6 +439,9 @@ public:
         if (W && H) {
             m_out.canvas = std::array<double, 4>{0.0, 0.0, *W, *H};
         }
+        // The viewport in user units (what userSpaceOnUse percentages are of).
+        m_viewport = vb.size() == 4 && vb[2] > 0 && vb[3] > 0 ? Vec2{vb[2], vb[3]}
+                                                              : Vec2{W.value_or(0.0) / pxMm, H.value_or(0.0) / pxMm};
         Paint paint;
         walk(m_root, base, paint, 1.0, std::string(), 0, true);
         for (const std::string& layer : m_layerOrder) {
@@ -624,7 +638,6 @@ private:
             if (stops.empty()) {
                 return std::nullopt;
             }
-            note("gradients came in as plain colours (their average)");
             double r = 0, gg = 0, b = 0, a = 0;
             for (const Color& s : stops) {
                 r += s.r;
@@ -683,6 +696,157 @@ private:
     }
 
     void skip(const std::string& what) { ++m_out.skipped[what]; }
+
+    // The gradient a paint ("url(#id)") refers to, placed for a shape: `outline` in the shape's own
+    // user space (its bounding box is what objectBoundingBox units are of), `m` from there to the
+    // drawing. None if it isn't a gradient, has fewer than two stops, or can't be placed (a
+    // degenerate box): the shape then keeps the gradient's average colour.
+    std::optional<GradientDef> gradientFor(const QString& paintText, const Affine& m, const std::vector<Contour>& outline,
+                                           double opacity)
+    {
+        static const QRegularExpression ref(QStringLiteral("^\\s*url\\(\\s*['\"]?#([^)'\"]+)"));
+        const auto match = ref.match(paintText);
+        const Node* g = match.hasMatch() ? m_byId.value(match.captured(1)) : nullptr;
+        if (!g || (g->tag != QStringLiteral("linearGradient") && g->tag != QStringLiteral("radialGradient"))) {
+            return std::nullopt;
+        }
+        const bool radial = g->tag == QStringLiteral("radialGradient");
+        // Its chain of templates (href): attributes and stops come from the nearest that has them.
+        std::vector<const Node*> chain{g};
+        for (int hops = 0; hops < 8; ++hops) {
+            const QString href = chain.back()->attrs.value(QStringLiteral("href"));
+            const Node* next = href.startsWith(QLatin1Char('#')) ? m_byId.value(href.mid(1)) : nullptr;
+            if (!next || std::ranges::find(chain, next) != chain.end()) {
+                break;
+            }
+            chain.push_back(next);
+        }
+        auto attr = [&](const char* name) -> std::optional<QString> {
+            for (const Node* n : chain) {
+                if (n->attrs.contains(QLatin1String(name))) {
+                    return n->attrs.value(QLatin1String(name));
+                }
+            }
+            return std::nullopt;
+        };
+
+        // Stops.
+        std::vector<core::GradientStop> stops;
+        for (const Node* n : chain) {
+            for (const Node& s : n->kids) {
+                if (s.tag != QStringLiteral("stop")) {
+                    continue;
+                }
+                const QHash<QString, QString> st = ownStyle(s);
+                auto prop = [&](const char* name, const char* fallback) {
+                    return st.value(QLatin1String(name), s.attrs.value(QLatin1String(name), QLatin1String(fallback)));
+                };
+                const QString offsetText = s.attrs.value(QStringLiteral("offset"), QStringLiteral("0")).trimmed();
+                double offset = firstOr(numbers(offsetText), 0.0) / (offsetText.endsWith(QLatin1Char('%')) ? 100.0 : 1.0);
+                offset = std::clamp(offset, 0.0, 1.0);
+                if (!stops.empty()) {
+                    offset = std::max(offset, stops.back().offset);  // (never back past the one before)
+                }
+                Paint plain;
+                plain.color = prop("color", "black");
+                const double stopOpacity = std::clamp(firstOr(numbers(prop("stop-opacity", "1")), 1.0), 0.0, 1.0);
+                if (const auto c = color(prop("stop-color", "black"), plain, stopOpacity * opacity)) {
+                    stops.push_back({offset, *c});
+                }
+                else {
+                    stops.push_back({offset, Color{0, 0, 0, 0}});  // ("none": transparent)
+                }
+            }
+            if (!stops.empty()) {
+                break;
+            }
+        }
+        if (stops.size() < 2) {
+            return std::nullopt;
+        }
+
+        // From the gradient's own space to the drawing.
+        const bool boxUnits = attr("gradientUnits").value_or(QStringLiteral("objectBoundingBox")) != QStringLiteral("userSpaceOnUse");
+        Affine box;
+        if (boxUnits) {
+            double x0 = 1e300, y0 = 1e300, x1 = -1e300, y1 = -1e300;
+            for (const Contour& c : outline) {
+                for (const Segment& seg : c.segments) {
+                    for (const Vec2& p : seg.sample(8)) {
+                        x0 = std::min(x0, p.x);
+                        y0 = std::min(y0, p.y);
+                        x1 = std::max(x1, p.x);
+                        y1 = std::max(y1, p.y);
+                    }
+                }
+            }
+            if (!(x1 - x0 > 1e-12 && y1 - y0 > 1e-12)) {
+                return std::nullopt;  // (SVG doesn't paint it either)
+            }
+            box = Affine::translate(x0, y0) * Affine::scale(x1 - x0, y1 - y0);
+        }
+        const Affine t = m * box * transformOf(attr("gradientTransform").value_or(QString()));
+        if (std::abs(t.det()) < 1e-18) {
+            return std::nullopt;
+        }
+        // A coordinate: a fraction of the box (box units), or user units (percentages: of the viewport).
+        auto coord = [&](const char* name, const char* fallback, bool horizontal) {
+            const QString text = attr(name).value_or(QLatin1String(fallback)).trimmed();
+            const double v = firstOr(numbers(text), 0.0);
+            if (text.endsWith(QLatin1Char('%'))) {
+                return v / 100.0 * (boxUnits ? 1.0 : horizontal ? m_viewport.x : m_viewport.y);
+            }
+            return v;
+        };
+
+        GradientDef d;
+        d.stops = std::move(stops);
+        const QString spread = attr("spreadMethod").value_or(QStringLiteral("pad"));
+        d.spread = spread == QStringLiteral("reflect") ? core::GradientSpread::Reflect
+                 : spread == QStringLiteral("repeat")  ? core::GradientSpread::Repeat
+                                                       : core::GradientSpread::Pad;
+        if (!radial) {
+            d.kind = core::GradientKind::Linear;
+            const Vec2 s{coord("x1", "0%", true), coord("y1", "0%", false)};
+            const Vec2 e{coord("x2", "100%", true), coord("y2", "0%", false)};
+            const Vec2 dir = sub(e, s);
+            const double l2 = dot(dir, dir);
+            if (l2 < 1e-24) {
+                return std::nullopt;
+            }
+            // The colour changes along `dir` in the gradient's space; mapped to the drawing, it
+            // changes fastest along w = (inverse transpose of t) dir / |dir|^2: the end is where
+            // the offset reaches 1 going that way (exact, even under a skew or uneven scale).
+            const double det = t.det();
+            const Vec2 w{(t.d * dir.x - t.b * dir.y) / det / l2, (-t.c * dir.x + t.a * dir.y) / det / l2};
+            const double w2 = dot(w, w);
+            if (w2 < 1e-24) {
+                return std::nullopt;
+            }
+            d.start = t(s);
+            d.end = add(d.start, mul(w, 1.0 / w2));
+            return d;
+        }
+        d.kind = core::GradientKind::Radial;
+        const double cx = coord("cx", "50%", true), cy = coord("cy", "50%", false);
+        const double r = coord("r", "50%", true);
+        if (!(r > 0)) {
+            return std::nullopt;
+        }
+        const Segment ring = transformed(ellipse({cx, cy}, r, r, 0, 0, kTwoPi), t);
+        d.center = ring.c;
+        d.rx = ring.rx;
+        d.ry = ring.ry;
+        d.phi = ring.phi;
+        const Vec2 focal{attr("fx") ? coord("fx", "0", true) : cx, attr("fy") ? coord("fy", "0", false) : cy};
+        if (len(sub(focal, {cx, cy})) > 1e-9 * r) {
+            d.focal = t(focal);
+        }
+        if (attr("fr") && firstOr(numbers(*attr("fr")), 0.0) > 0) {
+            note("radial gradients' focal radius (fr) was left out");
+        }
+        return d;
+    }
 
     void walk(const Node& n, const Affine& parent, const Paint& inherited, double opacity, std::string layer, int depth,
               bool isRoot = false)
@@ -782,6 +946,10 @@ private:
         }
         Shape shape;
         shape.layer = layer;
+        // Gradients are placed by the shape's own outline (its box), before it's transformed.
+        const std::optional<GradientDef> fillGradient = gradientFor(paint.fill, m, contours, paint.fillOpacity * opacity);
+        const std::optional<GradientDef> strokeGradient =
+            gradientFor(paint.stroke, m, contours, paint.strokeOpacity * opacity);
         for (Contour& c : contours) {
             for (Segment& s : c.segments) {
                 s = transformed(s, m);
@@ -791,6 +959,12 @@ private:
         Style& st = shape.style;
         st.fill = color(paint.fill, paint, paint.fillOpacity * opacity);
         st.stroke = color(paint.stroke, paint, paint.strokeOpacity * opacity);
+        st.fillGradient = st.fill ? fillGradient : std::nullopt;
+        st.strokeGradient = st.stroke ? strokeGradient : std::nullopt;
+        auto byUrl = [](const QString& p) { return p.trimmed().startsWith(QStringLiteral("url(")); };
+        if ((st.fill && !st.fillGradient && byUrl(paint.fill)) || (st.stroke && !st.strokeGradient && byUrl(paint.stroke))) {
+            note("some gradients came in as plain colours (their average)");
+        }
         st.evenOdd = paint.fillRule == QStringLiteral("evenodd");
         st.strokeWidth = paint.strokeWidth * std::sqrt(std::abs(m.det()));
         const std::vector<double> dashes = numbers(paint.dash);
@@ -1082,6 +1256,7 @@ private:
     std::vector<const Node*> m_styles;
     std::vector<std::pair<QString, QHash<QString, QString>>> m_css;
     std::vector<std::string> m_layerOrder;
+    Vec2 m_viewport;  // user units
     Drawing m_out;
 };
 }  // namespace
@@ -1820,6 +1995,41 @@ public:
         return out;
     }
 
+    // A gradient, with the geometry that places it (its two points; or a construction circle or
+    // ellipse, and a focal point), which is added to `made` (to be held in the layer's group).
+    core::Gradient gradient(const GradientDef& d, std::vector<Id>& made)
+    {
+        core::Gradient g;
+        g.kind = d.kind;
+        g.spread = d.spread;
+        g.stops = d.stops;
+        if (d.kind == core::GradientKind::Linear) {
+            g.start = m_pool.fresh(at(d.start));
+            g.end = m_pool.fresh(at(d.end));
+            made.insert(made.end(), {g.start, g.end});
+            return g;
+        }
+        const Id c = m_pool.fresh(at(d.center));
+        made.push_back(c);
+        if (std::abs(d.rx - d.ry) <= 1e-9 * std::max(d.rx, d.ry)) {
+            g.shape = m_s.addCircle(c, d.rx);
+        }
+        else {
+            const Vec2 u{std::cos(d.phi), std::sin(d.phi)};
+            const Id major = m_pool.fresh(at(add(d.center, mul(u, d.rx))));
+            const Id minor = m_pool.fresh(at(add(d.center, mul(Vec2{-u.y, u.x}, d.ry))));
+            made.insert(made.end(), {major, minor});
+            g.shape = m_s.addEllipse(c, major, minor);
+        }
+        m_s.entity(g.shape).construction = true;
+        made.push_back(g.shape);
+        if (d.focal) {
+            g.focal = m_pool.fresh(at(*d.focal));
+            made.push_back(g.focal);
+        }
+        return g;
+    }
+
 private:
     Vec2 at(Vec2 p) const { return add(p, m_shift); }
 
@@ -2031,6 +2241,7 @@ Report build(core::Sketch& sketch, const Drawing& drawing, const Options& o)
         double x0, y0, x1, y1;
     };
     std::map<Id, std::vector<Filled>> fillsByLayer;  // (by our layer: fills are found per layer)
+    std::map<const Shape*, core::Gradient> fillGradients;
     std::set<Id> imported;
     std::vector<Id> sublayersUsed;
     const double size = std::max({bx1 - bx0, by1 - by0, 1.0});
@@ -2039,6 +2250,18 @@ Report build(core::Sketch& sketch, const Drawing& drawing, const Options& o)
         PointPool pool(sketch, std::max(1e-6, 1e-7 * size));
         Builder builder(sketch, pool, shift, o.curves);
         std::vector<Id> made;
+        // Gradients placed so far in this layer: shapes painted alike share one (and its geometry).
+        std::vector<std::pair<GradientDef, core::Gradient>> placed;
+        auto gradientOf = [&](const GradientDef& d) {
+            for (const auto& [def, g] : placed) {
+                if (def == d) {
+                    return g;
+                }
+            }
+            placed.emplace_back(d, builder.gradient(d, made));
+            ++report.gradients;
+            return placed.back().second;
+        };
         for (const Shape* shape : byLayer[l]) {
             std::vector<Id> curves;
             for (const Contour& c : shape->contours) {
@@ -2046,6 +2269,11 @@ Report build(core::Sketch& sketch, const Drawing& drawing, const Options& o)
                 curves.insert(curves.end(), ids.begin(), ids.end());
             }
             const Style& st = shape->style;
+            const core::Gradient strokeGradient =
+                st.strokeGradient && st.stroke && !st.construction && !curves.empty() ? gradientOf(*st.strokeGradient) : core::Gradient{};
+            if (st.fillGradient && st.fill && !st.construction) {
+                fillGradients[shape] = gradientOf(*st.fillGradient);
+            }
             for (Id id : curves) {
                 if (st.construction) {
                     sketch.entity(id).construction = true;
@@ -2055,6 +2283,7 @@ Report build(core::Sketch& sketch, const Drawing& drawing, const Options& o)
                     stroke.color = *st.stroke;
                     stroke.width = st.strokeWidth;
                     stroke.dash = st.dash;
+                    stroke.gradient = strokeGradient;
                     sketch.setStroke(id, stroke);
                 }
                 else if (st.fill) {
@@ -2125,7 +2354,10 @@ Report build(core::Sketch& sketch, const Drawing& drawing, const Options& o)
                 continue;
             }
             core::Fill fill;
-            fill.color = *top->shape->style.fill;
+            fill.color = *top->shape->style.fill;  // (a gradient's: its average, should it lose its geometry)
+            if (const auto it = fillGradients.find(top->shape); it != fillGradients.end()) {
+                fill.gradient = it->second;
+            }
             fill.seed = core::Point{p.x, p.y};
             fill.boundary = region.boundary;
             fill.layer = layer;

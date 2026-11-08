@@ -46,12 +46,29 @@ struct Contour
     bool closed = false;
 };
 
+// A gradient as the file places it, in drawing coordinates. Built as sketch geometry for it to
+// follow (construction points; a construction circle or ellipse), held in the layer's group.
+struct GradientDef
+{
+    core::GradientKind kind = core::GradientKind::Linear;
+    core::GradientSpread spread = core::GradientSpread::Pad;
+    std::vector<core::GradientStop> stops;
+    core::Vec2 start, end;  // linear: offset 0 to offset 1 (the colours change straight across)
+    core::Vec2 center;      // radial: offset 1 on the ellipse round `center`, radii rx (along phi), ry
+    double rx = 0, ry = 0, phi = 0;
+    std::optional<core::Vec2> focal;  // radial: offset 0, when it isn't the centre
+    bool operator==(const GradientDef& o) const;
+};
+
 struct Style
 {
     std::optional<core::Color> stroke;  // none: no line
     double strokeWidth = 0.25;          // mm
     core::Dash dash = core::Dash::Solid;
     std::optional<core::Color> fill;
+    // Painted with these where given (`fill` and `stroke` are then their average colour).
+    std::optional<GradientDef> fillGradient;
+    std::optional<GradientDef> strokeGradient;
     bool evenOdd = false;       // the fill rule (else nonzero)
     bool construction = false;  // reference geometry (e.g. our own exports' Construction layer)
 };
@@ -120,6 +137,7 @@ struct Report
 {
     int curves = 0;
     int fills = 0;
+    int gradients = 0;
     int groups = 0;
     std::vector<std::string> sublayers;  // where it went
     std::map<std::string, int> skipped;
