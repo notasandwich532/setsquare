@@ -916,6 +916,7 @@ bool SketchView::tryEdit(const QString& label, const std::function<void(Editor&)
 
 void SketchView::onDocumentChanged()
 {
+    ++m_documentStamp;  // (the cached picture of it is out of date)
     // Drop references to entities that no longer exist (undo, delete cascades).
     const core::Sketch& s = m_doc.sketch();
     std::set<core::Id> kept;
@@ -953,23 +954,47 @@ void SketchView::paintEvent(QPaintEvent*)
     if (m_tool) {
         m_tool->beforePaint();  // e.g. run this frame's drag solve with the latest mouse position
     }
-    QPainter painter(this);
-    painter.fillRect(rect(), theme::canvas().background);
-    if (!m_presentation) {
-        // Reference images, under everything, the grid too (not part of the drawing: never in
-        // presentation view). Bottom layer first.
-        const auto& layers = m_doc.sketch().layers();
-        for (auto it = layers.rbegin(); it != layers.rend(); ++it) {
-            if (it->visible) {
-                drawImages(painter, it->id);
+    const qreal ratio = devicePixelRatioF();
+    const BaseKey key{m_documentStamp, m_previewStamp, m_zoom,         m_pan,      size(),
+                      ratio,           m_presentation, m_showConstraints, m_selection};
+    if (!m_baseKey || !(*m_baseKey == key) || m_base.isNull()) {
+        QImage base(QSize(static_cast<int>(std::ceil(width() * ratio)), static_cast<int>(std::ceil(height() * ratio))),
+                    QImage::Format_ARGB32_Premultiplied);
+        base.setDevicePixelRatio(ratio);
+        QPainter painter(&base);
+        painter.fillRect(rect(), theme::canvas().background);
+        if (!m_presentation) {
+            // Reference images, under everything, the grid too (not part of the drawing: never in
+            // presentation view). Bottom layer first.
+            const auto& layers = m_doc.sketch().layers();
+            for (auto it = layers.rbegin(); it != layers.rend(); ++it) {
+                if (it->visible) {
+                    drawImages(painter, it->id);
+                }
             }
         }
+        drawGrid(painter);
+        painter.setRenderHint(QPainter::Antialiasing);
+        drawPage(painter);
+        // With nothing hovered (that's drawn over it, below).
+        struct Unhover
+        {
+            core::Id& hovered;
+            core::Id was;
+            ~Unhover() { hovered = was; }
+        } unhover{m_hovered, std::exchange(m_hovered, core::kNoId)};
+        drawSketch(painter);
+        painter.end();
+        m_base = std::move(base);
+        m_baseKey = key;
+        m_imageCache.prune();  // (only the pictures just drawn are kept)
     }
-    drawGrid(painter);
+    QPainter painter(this);
+    painter.drawImage(QPointF(0, 0), m_base);
     painter.setRenderHint(QPainter::Antialiasing);
-    drawPage(painter);
-    drawSketch(painter);
-    m_imageCache.prune();
+    if (m_hovered != core::kNoId) {
+        drawSketch(painter, m_hovered);
+    }
     if (m_tool) {
         m_tool->paintOverlay(painter);
     }
@@ -984,6 +1009,7 @@ void SketchView::paintEvent(QPaintEvent*)
 void SketchView::setImagePreview(std::optional<core::Image> image)
 {
     m_imagePreview = std::move(image);
+    ++m_previewStamp;
     scheduleRepaint();
 }
 
@@ -1194,7 +1220,7 @@ void SketchView::drawControlPolygon(QPainter& painter, const core::Sketch& sketc
     painter.restore();
 }
 
-void SketchView::drawSketch(QPainter& painter) const
+void SketchView::drawSketch(QPainter& painter, core::Id only) const
 {
     const auto& colors = theme::canvas();
     const core::Sketch& sketch = m_doc.sketch();
@@ -1287,6 +1313,9 @@ void SketchView::drawSketch(QPainter& painter) const
 
     // The axes are drawn with the grid; here they only light up when hovered or selected.
     for (core::Id axis : {sketch.xAxis(), sketch.yAxis()}) {
+        if (only != core::kNoId && axis != only) {
+            continue;
+        }
         const bool pink = constrained.contains(axis);
         if (axis == core::kNoId || m_presentation || !(pink || m_selection.contains(axis) || axis == m_hovered)) {
             continue;
@@ -1338,7 +1367,7 @@ void SketchView::drawSketch(QPainter& painter) const
 
 
     // Fills, underneath the rest: each found afresh from the geometry (see core/Regions.h).
-    {
+    if (only == core::kNoId) {
         const auto& regions = fillRegions(layer);
         for (const auto& [id, f] : sketch.fills()) {
             if (f.layer != layer) {
@@ -1368,8 +1397,8 @@ void SketchView::drawSketch(QPainter& painter) const
         if (!sketch.hasEntity(id) || sketch.entity(id).construction || hidden(id) || !inLayer(id)) {
             continue;
         }
-        if (style.none()) {
-            decorated.insert(id);  // no line: in presentation view, nothing shows
+        if (style.none() || only != core::kNoId) {
+            decorated.insert(id);  // no line: in presentation view, nothing shows (or: just one item)
             continue;
         }
         QPen pen = strokePen(style);
@@ -1389,7 +1418,7 @@ void SketchView::drawSketch(QPainter& painter) const
     // Texts: filled faintly with an outline while sketching (in their anchor's colour, or their
     // own), solid in presentation view.
     for (const auto& [id, t] : sketch.texts()) {
-        if (!sketch.hasEntity(t.anchor) || hidden(id) || !inLayer(id)) {
+        if ((only != core::kNoId && id != only) || !sketch.hasEntity(t.anchor) || hidden(id) || !inLayer(id)) {
             continue;
         }
         const QPainterPath path = textPath(t);
@@ -1429,7 +1458,8 @@ void SketchView::drawSketch(QPainter& painter) const
 
     // Curves (points go on top of everything, below).
     for (const auto& [id, e] : sketch.entities()) {
-        if (sketch.isAxis(id) || e.kind() == core::EntityKind::Point || hidden(id) || !inLayer(id)) {
+        if ((only != core::kNoId && id != only) || sketch.isAxis(id) || e.kind() == core::EntityKind::Point || hidden(id)
+            || !inLayer(id)) {
             continue;
         }
         if (m_presentation && e.construction) {
@@ -1463,7 +1493,7 @@ void SketchView::drawSketch(QPainter& painter) const
     if (m_presentation) {
         return;  // no constraint symbols, dimensions or points: just the drawing
     }
-    drawAnnotations(painter);
+    drawAnnotations(painter, only);
 
     const std::set<core::Id> placedPoints = core::feature::placedOffsetPoints(sketch);  // (follow their source)
     // Plain dots a colour at a time, stamped (below): an imported drawing can have thousands.
@@ -1479,7 +1509,8 @@ void SketchView::drawSketch(QPainter& painter) const
     std::vector<Special> special;
     const QRectF onScreen = QRectF(rect()).adjusted(-10, -10, 10, 10);
     for (const auto& [id, e] : sketch.entities()) {
-        if (e.kind() != core::EntityKind::Point || sketch.isHiddenReference(id) || hidden(id) || placedPoints.contains(id)) {
+        if ((only != core::kNoId && id != only) || e.kind() != core::EntityKind::Point || sketch.isHiddenReference(id)
+            || hidden(id) || placedPoints.contains(id)) {
             continue;
         }
         if (const core::Id layer = sketch.layerOf(id); layer != core::kNoId && layer != activeLayer) {

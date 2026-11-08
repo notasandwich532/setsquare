@@ -422,9 +422,12 @@ QColor SketchView::annotationColor(Id constraint, const QColor& normal) const
 // Drawing
 // ---------------------------------------------------------------------------------------------
 
-void SketchView::drawAnnotations(QPainter& painter) const
+void SketchView::drawAnnotations(QPainter& painter, Id only) const
 {
     for (const Annotation& a : layoutAnnotations()) {
+        if (only != kNoId && a.id != only) {
+            continue;
+        }
         if (a.isDimension) {
             drawDimension(painter, a.dimension, a.text, annotationColor(a.id, theme::canvas().dimension));
             continue;

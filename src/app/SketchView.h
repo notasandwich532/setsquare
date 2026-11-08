@@ -13,6 +13,7 @@
 #include <QPainterPath>
 
 #include <QElapsedTimer>
+#include <QImage>
 #include <QPen>
 #include <QPointF>
 #include <QPolygonF>
@@ -228,8 +229,9 @@ private:
     void drawGrid(QPainter& painter) const;
     void drawPage(QPainter& painter) const;  // the sheet (see core::Page)
     void drawImages(QPainter& painter, core::Id layer) const;  // a layer's reference images
-    void drawSketch(QPainter& painter) const;
-    void drawAnnotations(QPainter& painter) const;  // constraint symbols + dimensions
+    // `only`: just that item (drawn over the cached picture as it's hovered), not the rest.
+    void drawSketch(QPainter& painter, core::Id only = core::kNoId) const;
+    void drawAnnotations(QPainter& painter, core::Id only = core::kNoId) const;  // constraint symbols + dimensions
     void drawArcPath(QPainter& painter, const core::ArcShape& arc) const;
     // Ellipses, elliptical arcs and splines (any curve, really), as their path.
     QPainterPath curvePath(const core::Sketch& sketch, core::Id curve) const;
@@ -280,6 +282,27 @@ private:
     mutable std::map<core::Id, FillCache> m_fillCache;
     const std::map<core::Id, std::optional<core::regions::Region>>& fillRegions(core::Id layer) const;
     std::optional<core::Image> m_imagePreview;
+    // The drawing as last painted (background, images, grid, page, sketch: all but the tool's
+    // overlay), with nothing hovered: while only the hover changes (the mouse moving over it), a
+    // paint copies it and draws the hovered item over it. Painted again when anything it shows
+    // changes: the document, the view, the selection, the view's settings.
+    struct BaseKey
+    {
+        quint64 document = 0;
+        quint64 preview = 0;
+        double zoom = 0.0;
+        QPointF pan;
+        QSize size;
+        qreal ratio = 0.0;
+        bool presentation = false;
+        bool showConstraints = false;
+        std::set<core::Id> selection;
+        bool operator==(const BaseKey&) const = default;
+    };
+    QImage m_base;
+    std::optional<BaseKey> m_baseKey;
+    quint64 m_documentStamp = 0;  // counts the document's changes
+    quint64 m_previewStamp = 0;   // and the image preview's
     core::Id m_editFeature = core::kNoId;  // the pattern the next pattern command edits
     // Settings panel for the tools that have settings but no command (fillet, polygon, ...).
     class CommandPanel* m_optionsPanel = nullptr;

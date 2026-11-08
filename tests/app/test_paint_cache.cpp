@@ -1,5 +1,6 @@
 // What the canvas keeps between paints (fill areas, found once and moved along with a group
-// dragged round as a whole): it must always show what finding them afresh would.
+// dragged round as a whole; the picture of the drawing, with what's hovered drawn over it): it
+// must always show what painting everything afresh would.
 
 #include "Document.h"
 #include "SketchView.h"
@@ -10,6 +11,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QImage>
+#include <QWheelEvent>
+#include "Theme.h"
 
 using namespace core;
 
@@ -107,4 +110,92 @@ TEST_CASE("Paint cache: a group dragged round, its fill moved along", "[paint]")
     f.doc.endDrag();
     CHECK(f.doc.sketch().point(corner).x != was.x);
     CHECK(f.differences() < 40);
+}
+
+namespace
+{
+// Pixels that differ noticeably between two pictures of the same size.
+int differing(const QImage& a, const QImage& b)
+{
+    REQUIRE(a.size() == b.size());
+    int n = 0;
+    for (int y = 0; y < a.height(); ++y) {
+        for (int x = 0; x < a.width(); ++x) {
+            const QColor p = a.pixelColor(x, y), q = b.pixelColor(x, y);
+            n += std::abs(p.red() - q.red()) + std::abs(p.green() - q.green()) + std::abs(p.blue() - q.blue()) > 30;
+        }
+    }
+    return n;
+}
+
+// The same drawing, painted by a canvas that's kept nothing, as `view` is set up.
+QImage afresh(Document& doc, const SketchView& view, Id hovered)
+{
+    SketchView fresh(doc);
+    fresh.resize(view.size());
+    fresh.show();
+    fresh.resetView();
+    fresh.setPresentation(view.presentation());
+    fresh.setSelection(view.selection());
+    fresh.setHovered(hovered);
+    return fresh.grab().toImage();
+}
+}  // namespace
+
+TEST_CASE("Paint cache: hovering, selecting and editing show as painting afresh would", "[paint]")
+{
+    Document doc;
+    SketchView view(doc);
+    view.resize(800, 600);
+    view.show();
+    view.resetView();
+    build::Rectangle rect;
+    Id dimension = kNoId;
+    doc.modify("rect", [&](Sketch& s) { rect = build::rectangle(s, s.addPoint(0, 0), s.addPoint(40, 20)); });
+    REQUIRE(view.tryEdit("fill", [&](Editor& ed) { ed.fill({10, 10}, {255, 0, 0, 255}); }));
+    REQUIRE(view.tryEdit("dimension", [&](Editor& ed) { dimension = ed.constrain(ConstraintType::Distance, {rect.corners[0], rect.corners[1]}, 40.0); }));
+    const Id bottom = rect.sides[0], corner = rect.corners[2];
+    auto pixel = [&](double x, double y) { return view.grab().toImage().pixelColor(view.toScreen({x, y}).toPoint()); };
+    auto near = [](const QColor& a, const QColor& b) {
+        return std::abs(a.red() - b.red()) + std::abs(a.green() - b.green()) + std::abs(a.blue() - b.blue()) < 40;
+    };
+    view.grab();
+
+    // Hovered, one thing after another (a line, a point, a dimension), then nothing.
+    for (Id hovered : {bottom, corner, dimension, kNoId}) {
+        view.setHovered(hovered);
+        CHECK(differing(view.grab().toImage(), afresh(doc, view, hovered)) == 0);
+    }
+    view.setHovered(bottom);
+    CHECK(near(pixel(20, 0), theme::canvas().hover));
+    view.setHovered(kNoId);
+    CHECK(!near(pixel(20, 0), theme::canvas().hover));
+
+    // Selected.
+    view.setSelection({bottom});
+    CHECK(near(pixel(20, 0), theme::canvas().selection));
+    CHECK(differing(view.grab().toImage(), afresh(doc, view, kNoId)) == 0);
+    view.setSelection({});
+
+    // An edit while something's hovered: the picture under it is painted again.
+    view.setHovered(rect.sides[2]);
+    view.grab();
+    doc.beginDrag({corner});
+    doc.dragTo(10, 0);
+    doc.endDrag();
+    CHECK(differing(view.grab().toImage(), afresh(doc, view, rect.sides[2])) == 0);
+    view.setHovered(kNoId);
+
+    // Presentation view, and back.
+    view.setPresentation(true);
+    CHECK(differing(view.grab().toImage(), afresh(doc, view, kNoId)) == 0);
+    view.setPresentation(false);
+    CHECK(differing(view.grab().toImage(), afresh(doc, view, kNoId)) == 0);
+
+    // Zoomed: not the picture from before.
+    const QImage before = view.grab().toImage();
+    const QPointF c(400, 300);
+    QWheelEvent wheel(c, view.mapToGlobal(c), QPoint(), QPoint(0, 120), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+    QCoreApplication::sendEvent(&view, &wheel);
+    CHECK(differing(view.grab().toImage(), before) > 100);
 }
