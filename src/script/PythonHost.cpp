@@ -1281,7 +1281,16 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
         .def_property_readonly("path", [textOf](const TextH& t) -> py::object {
             const core::Text& text = textOf(t.id);
             return text.path != kNoId ? wrap(text.path) : py::none();
-        }, "The curve it follows, if it's set along one.")
+        }, "The curve it follows, if it's set along one (along a chain: its first; see path_curves).")
+        .def_property_readonly("path_curves", [textOf](const TextH& t) {
+            const core::Text& text = textOf(t.id);
+            std::vector<Id> all;
+            if (text.path != kNoId) {
+                all.push_back(text.path);
+                all.insert(all.end(), text.pathMore.begin(), text.pathMore.end());
+            }
+            return wrapAll(all);
+        }, "The curves it follows, in order along them (empty if it isn't set along a path).")
         .def_property_readonly("color", [textOf](const TextH& t) -> py::object {
             const core::Text& text = textOf(t.id);
             return text.hasColor ? py::cast(text.color.hex()) : py::none();
@@ -1807,10 +1816,32 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
                 throw py::value_error("align: 'left', 'center' or 'right'; valign: 'baseline', 'top', 'middle' or 'bottom'");
             }
             if (!path.is_none()) {
-                t.path = idOf(path);
-                if (!sketch().hasEntity(t.path) || sketch().entity(t.path).kind() == EntityKind::Point) {
-                    throw py::value_error("path: a line, arc or circle");
+                // A curve, or curves joined end to end (put in order along their chain).
+                std::vector<Id> curves;
+                if (py::isinstance<py::sequence>(path) && !py::isinstance<py::str>(path)) {
+                    for (py::handle c : path.cast<py::sequence>()) {
+                        curves.push_back(idOf(c));
+                    }
                 }
+                else {
+                    curves.push_back(idOf(path));
+                }
+                for (Id c : curves) {
+                    if (!sketch().hasEntity(c) || sketch().entity(c).kind() == EntityKind::Point) {
+                        throw py::value_error("path: a curve, or a list of curves joined end to end");
+                    }
+                }
+                if (curves.empty()) {
+                    throw py::value_error("path: a curve, or a list of curves joined end to end");
+                }
+                try {
+                    curves = core::feature::chainOrder(sketch(), curves);
+                }
+                catch (const core::SketchError& e) {
+                    throw py::value_error(std::string("path: ") + e.what());
+                }
+                t.path = curves.front();
+                t.pathMore.assign(curves.begin() + 1, curves.end());
             }
             else if (at.is_none() && box.is_none()) {
                 throw py::value_error("give where it goes (at=, or a box=(corner, opposite)), or a curve to follow (path=)");
@@ -1858,8 +1889,9 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
            "at \\n. spacing: extra between letters, % of the size. align/valign: which part sits on `at`. "
            "flip_h/flip_v: mirrored. box=(corner, opposite): in a box (a construction rectangle made between them; "
            "align: against its left/centre/right, valign: top (the default)/middle/bottom). path=curve: set along a "
-           "line, arc or circle instead (align: start/middle/end of it; valign: standing on it, centred, or hanging "
-           "below; flip_h: the other way round).")
+           "curve instead (any: line, arc, circle, ellipse, spline), or path=[curves] along a chain of them joined "
+           "end to end (align: start/middle/end of it; valign: standing on it, centred, or hanging below; flip_h: "
+           "the other way round).")
         .def("edit_text", [](const SketchH&, py::handle text, py::object str, py::object height, py::object font,
                              py::object angle, py::object bold, py::object italic, py::object outline,
                              py::object minThickness, py::object color, py::object spacing, py::object align,

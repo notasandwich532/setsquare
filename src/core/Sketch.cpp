@@ -604,8 +604,8 @@ Id Sketch::project(Id source)
     else if (const auto* sp = std::get_if<Spline>(&copy.geom)) {
         // Its points (and a piece's ends) projected: the same curve, following the original's.
         Spline projected = *sp;
-        for (Id& p : projected.points) {
-            p = point(p);
+        for (Id& q : projected.points) {
+            q = point(q);
         }
         if (projected.isPiece()) {
             projected.start = point(sp->start);
@@ -1430,6 +1430,11 @@ void Sketch::remove(Id id)
         m_entities.erase(d);
         m_strokes.erase(d);
     }
+    // A text along a chain: cut short where a curve of it goes (it goes with its first).
+    for (auto& [key, t] : m_texts) {
+        const auto gone = std::ranges::find_if(t.pathMore, [&](Id c) { return doomed.contains(c); });
+        t.pathMore.erase(gone, t.pathMore.end());
+    }
     std::erase_if(m_texts, [&](const auto& kv) {
         return doomed.contains(kv.second.anchor) || doomed.contains(kv.second.path) || doomed.contains(kv.second.boxSide)
             || doomed.contains(kv.second.boxCorner);
@@ -1829,6 +1834,39 @@ void checkText(const Sketch& s, const Text& t)
             throw SketchError("text: text along a path is anchored at the path's first point");
         }
     }
+    // A chain: curves with ends (not closed ones), each joined to the one before.
+    auto ends = [&](Id c) -> std::vector<Id> {
+        const Entity& e = s.entity(c);
+        if (const auto* l = std::get_if<Line>(&e.geom)) {
+            return {l->p1, l->p2};
+        }
+        if (const auto* a = std::get_if<Arc>(&e.geom)) {
+            return {a->start, a->end};
+        }
+        if (const auto* ea = std::get_if<EllipseArc>(&e.geom)) {
+            return {ea->start, ea->end};
+        }
+        if (const auto* sp = std::get_if<Spline>(&e.geom)) {
+            if (sp->isPiece()) {
+                return {sp->start, sp->end};
+            }
+            if (!sp->closed) {
+                return {sp->points.front(), sp->points.back()};
+            }
+        }
+        return {};
+    };
+    Id before = t.path;
+    for (Id c : t.pathMore) {
+        if (t.path == kNoId || !s.hasEntity(c) || s.entity(c).kind() == EntityKind::Point || s.isReference(c)) {
+            throw SketchError("text: a path's curves must be curves");
+        }
+        const std::vector<Id> a = ends(before), b = ends(c);
+        if (a.empty() || b.empty() || std::ranges::none_of(a, [&](Id p) { return std::ranges::find(b, p) != b.end(); })) {
+            throw SketchError("text: a path's curves must be joined end to end, in order (and not be closed ones)");
+        }
+        before = c;
+    }
 }
 }  // namespace
 
@@ -1837,6 +1875,7 @@ Id Sketch::addText(const Text& text)
     checkText(*this, text);
     std::vector<Id> on = textPoints(*this, text);
     on.push_back(text.path);
+    on.insert(on.end(), text.pathMore.begin(), text.pathMore.end());
     requireLayer(on, activeLayer());
     Text t = text;
     t.id = nextId();
@@ -1854,6 +1893,7 @@ void Sketch::setText(const Text& text)
     checkText(*this, text);
     std::vector<Id> on = textPoints(*this, text);
     on.push_back(text.path);
+    on.insert(on.end(), text.pathMore.begin(), text.pathMore.end());
     requireLayer(on, layerOf(text.id));
     it->second = text;
 }

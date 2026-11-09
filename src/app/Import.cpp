@@ -765,7 +765,7 @@ Node parseXml(const QByteArray& data)
             parent.text += xml.text();
             // In text, words and the tspans between them in order: as children of their own.
             if (parent.tag == QStringLiteral("text") || parent.tag == QStringLiteral("tspan")
-                || parent.tag == QStringLiteral("a")) {
+                || parent.tag == QStringLiteral("textPath") || parent.tag == QStringLiteral("a")) {
                 Node words;
                 words.tag = QStringLiteral("#text");
                 words.text = xml.text().toString();
@@ -1601,7 +1601,7 @@ private:
             return k.tag == QStringLiteral("textPath") || std::ranges::any_of(k.kids, alongPath);
         };
         if (alongPath(n)) {
-            skip("texts along paths");
+            textOnPath(n, m, paint, opacity, layer);
             return;
         }
         // A run: the words put at one place (the text's, or a placed tspan's: a line), in chunks
@@ -1715,6 +1715,100 @@ private:
                 x += widths[i];
             }
         }
+    }
+
+    // Text along a path (<textPath href="#path">): its words set along that path, which comes in
+    // as construction curves for it to follow. Placed at its start, middle or end (startOffset 0,
+    // 50% or 100% with text-anchor start, middle or end); part way along: at its start (noted).
+    void textOnPath(const Node& n, const Affine& m, const Paint& paint, double opacity, const std::string& layer)
+    {
+        std::function<const Node*(const Node&)> find = [&](const Node& k) -> const Node* {
+            if (k.tag == QStringLiteral("textPath")) {
+                return &k;
+            }
+            for (const Node& c : k.kids) {
+                if (const Node* f = find(c)) {
+                    return f;
+                }
+            }
+            return nullptr;
+        };
+        const Node* tp = find(n);
+        const QString href = tp->attrs.value(QStringLiteral("href"));
+        const Node* target = href.startsWith(QLatin1Char('#')) ? m_byId.value(href.mid(1)) : nullptr;
+        std::vector<Contour> outline;
+        Affine at = m;
+        if (target) {
+            at = m * transformOf(target->attrs.value(QStringLiteral("transform")));
+            outline = shapeContours(*target);
+        }
+        else if (tp->attrs.contains(QStringLiteral("path"))) {
+            outline = pathContours(tp->attrs.value(QStringLiteral("path")));  // (SVG 2: its own path)
+        }
+        std::erase_if(outline, [](const Contour& c) { return c.segments.empty(); });
+        if (outline.empty()) {
+            skip("texts along paths that can't be found");
+            return;
+        }
+        if (outline.size() > 1) {
+            note("texts along paths of several parts follow the first");
+        }
+        Contour path = outline.front();
+        for (Segment& s : path.segments) {
+            s = transformed(s, at);
+        }
+        // Its words (in one style: the first words').
+        Paint style = paint;
+        inherit(style, ownStyle(*tp));
+        QString words;
+        bool styled = false;
+        std::function<void(const Node&, const Paint&)> collect = [&](const Node& k, const Paint& p) {
+            for (const Node& c : k.kids) {
+                if (c.tag == QStringLiteral("#text")) {
+                    if (!styled && !c.text.trimmed().isEmpty()) {
+                        style = p;
+                        styled = true;
+                    }
+                    words += c.text;
+                }
+                else if (c.tag == QStringLiteral("tspan") || c.tag == QStringLiteral("a")) {
+                    Paint cp = p;
+                    inherit(cp, ownStyle(c));
+                    collect(c, cp);
+                }
+            }
+        };
+        Paint tpPaint = paint;
+        inherit(tpPaint, ownStyle(*tp));
+        collect(*tp, tpPaint);
+        words = words.simplified();
+        // Where along it: its start, middle or end.
+        const QString offsetText = tp->attrs.value(QStringLiteral("startOffset"), QStringLiteral("0")).trimmed();
+        const bool percent = offsetText.endsWith(QLatin1Char('%'));
+        const double offset = firstOr(numbers(offsetText), 0.0);
+        const QString anchor = style.textAnchor;
+        QString placed = QStringLiteral("start");
+        if (std::abs(offset) < 1e-9 && anchor == QStringLiteral("start")) {
+            placed = QStringLiteral("start");
+        }
+        else if (percent && std::abs(offset - 50) < 1e-6 && anchor == QStringLiteral("middle")) {
+            placed = QStringLiteral("middle");
+        }
+        else if (percent && std::abs(offset - 100) < 1e-6 && anchor == QStringLiteral("end")) {
+            placed = QStringLiteral("end");
+        }
+        else {
+            note("texts placed part way along their paths came in at the path's start");
+        }
+        auto def = textDef(words, style, placed, at, path.segments.front().start(), opacity, layer);
+        if (!def) {
+            return;
+        }
+        def->text.flipH = false;  // (the path sets its way; see build)
+        def->text.angle = 0.0;
+        def->at = path.segments.front().start();
+        def->path = std::move(path);
+        m_out.texts.push_back(std::move(*def));
     }
 
     // How far words run in a style (user units).
@@ -4258,9 +4352,35 @@ Report build(core::Sketch& sketch, const Drawing& drawing, const Options& o)
         // Texts, on points of their own held in the group with the rest.
         for (const TextDef* td : textsByLayer[l]) {
             core::Text text = td->text;
+            text.sublayer = target[l];
+            if (td->path) {
+                // Along its path: construction curves, in the way the path runs.
+                std::vector<Id> chain = builder.contour(*td->path);
+                if (chain.empty()) {
+                    continue;
+                }
+                for (Id c : chain) {
+                    sketch.entity(c).construction = true;
+                }
+                made.insert(made.end(), chain.begin(), chain.end());
+                text.path = chain.front();
+                text.pathMore.assign(chain.begin() + 1, chain.end());
+                text.anchor = sketch.definingPoints(text.path).front();
+                // (along one arc, the text runs clockwise unless flipped: the path's way, then)
+                const core::EntityKind kind = sketch.entity(text.path).kind();
+                if (chain.size() == 1 && (kind == core::EntityKind::Arc || kind == core::EntityKind::EllipseArc)) {
+                    const Id start = kind == core::EntityKind::Arc ? sketch.arc(text.path).start : sketch.ellipseArc(text.path).start;
+                    const Vec2 from = add(td->path->segments.front().start(), shift);
+                    const core::Point& s0 = sketch.point(start);
+                    text.flipH = std::hypot(s0.x - from.x, s0.y - from.y) < 1e-6 * std::max(1.0, size);  // (it runs anticlockwise)
+                }
+                textshapes::update(text, &sketch);
+                sketch.addText(text);
+                ++report.texts;
+                continue;
+            }
             const Vec2 p = add(td->at, shift);
             text.anchor = sketch.addPoint(p.x, p.y);
-            text.sublayer = target[l];
             textshapes::update(text, &sketch);
             sketch.addText(text);
             made.push_back(text.anchor);

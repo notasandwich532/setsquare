@@ -391,6 +391,9 @@ std::string toJson(const Sketch& sketch, bool compact, const std::vector<std::st
             }
             if (t.path != kNoId) {
                 j["path"] = t.path;
+                if (!t.pathMore.empty()) {
+                    j["pathMore"] = t.pathMore;
+                }
             }
             if (t.inBox()) {
                 j["box"] = {t.boxSide, t.boxCorner};
@@ -618,6 +621,7 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
             t.flipH = j.value("flip_h", false);
             t.flipV = j.value("flip_v", false);
             t.path = j.value("path", Id{kNoId});
+            t.pathMore = j.value("pathMore", std::vector<Id>{});
             t.sublayer = j.value("sublayer", Id{kNoId});
             if (j.contains("box")) {
                 t.boxSide = j.at("box").at(0).get<Id>();

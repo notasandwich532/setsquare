@@ -110,6 +110,9 @@ struct TextDef
     core::Text text;  // its words and settings: font, height (of capitals, mm), angle, alignment, colour
     core::Vec2 at;    // its anchor, in drawing coordinates
     std::string layer;
+    // Set along a path: its outline (drawing coordinates), which comes in as construction curves
+    // for the text to follow, in the way it runs.
+    std::optional<Contour> path;
 };
 
 // A file, read.

@@ -656,7 +656,12 @@ Id Editor::text(core::Text t)
     settleGradient(t.gradient, t.color, m_sketch.activeLayer());
     textshapes::update(t, &m_sketch);
     const Id id = m_sketch.addText(t);
-    const QString where = t.path != core::kNoId ? QStringLiteral("path=") + name(m_sketch, t.path) : name(m_sketch, t.anchor);
+    QString where = t.path != core::kNoId ? QStringLiteral("path=") + name(m_sketch, t.path) : name(m_sketch, t.anchor);
+    if (!t.pathMore.empty()) {  // (a chain: its curves in order)
+        std::vector<Id> chain{t.path};
+        chain.insert(chain.end(), t.pathMore.begin(), t.pathMore.end());
+        where = QStringLiteral("path=") + list(m_sketch, chain);
+    }
     log(QStringLiteral("%1 = s.text(%2, %3, %4)").arg(name(m_sketch, id), pyString(t.text), where, textArgs(m_sketch, t)));
     return id;
 }
@@ -785,9 +790,14 @@ void Editor::moveToSublayer(const std::vector<Id>& items, Id sublayer)
             for (Id p : core::textPoints(m_sketch, t)) {
                 moving.insert(p);
             }
+            std::vector<Id> chain;
             if (t.path != core::kNoId) {
-                moving.insert(t.path);
-                for (Id p : m_sketch.definingPoints(t.path)) {
+                chain.push_back(t.path);
+                chain.insert(chain.end(), t.pathMore.begin(), t.pathMore.end());
+            }
+            for (Id c : chain) {
+                moving.insert(c);
+                for (Id p : m_sketch.definingPoints(c)) {
                     moving.insert(p);
                 }
             }
@@ -820,6 +830,7 @@ void Editor::moveToSublayer(const std::vector<Id>& items, Id sublayer)
             }
             std::vector<Id> on = core::textPoints(m_sketch, t);
             on.push_back(t.path);
+            on.insert(on.end(), t.pathMore.begin(), t.pathMore.end());
             if (std::ranges::any_of(on, [&](Id p) { return moving.contains(p); })) {
                 throw core::SketchError("a text sits on that geometry: move it too");
             }

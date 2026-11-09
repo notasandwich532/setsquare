@@ -285,10 +285,12 @@ words = write("words.svg", """<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlin
 </svg>""")
 doc.new()
 rep = s.import_file(words)
-assert rep["texts"] == 7 and rep["skipped"] == {"texts along paths": 1}, rep
+assert rep["texts"] == 8 and not rep["skipped"], rep
 healthy()
 by_words = {t.text: t for t in s.texts}
-assert sorted(by_words) == ["Hello", "Line one", "Line two", "bold", "mirror", "spaced out", "world"], sorted(by_words)
+assert sorted(by_words) == ["Hello", "Line one", "Line two", "along", "bold", "mirror", "spaced out", "world"], sorted(by_words)
+along = by_words["along"]  # (along its path: a construction line)
+assert len(along.path_curves) == 1 and along.path_curves[0].construction and along.align == "left", along.path_curves
 # A word in its own style within a line: a text of its own, after the one before it.
 hello, bold, world = by_words["Hello"], by_words["bold"], by_words["world"]
 assert hello.font != "No Such Font" and not hello.bold and hello.color == "#123456", (hello.font, hello.color)
@@ -392,6 +394,39 @@ dots = [f for f in s.fills if f.color == "#ff0000"]
 assert len([c for c in s.circles if isclose(c.radius, 2)]) == 4, [c.radius for c in s.circles]  # (the 2 cut in half: arcs)
 assert isclose(sum(f.area for f in dots), 5 * pi * 4, rel_tol=1e-3), sum(f.area for f in dots)
 assert max(p.x for p in s.points if p.x > 45) <= 75 + 1e-6
+
+# Text along paths: a curve then a line (a chain), from its middle; single arcs, run their way.
+paths = write("paths.svg", """<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="100mm" height="100mm" viewBox="0 0 100 100">
+  <defs>
+    <path id="wave" d="M10,50 C30,30 50,30 70,50 L90,50"/>
+    <path id="over" d="M10,90 A20,20 0 0 1 50,90"/>
+    <path id="under" d="M10,90 A20,20 0 0 0 50,90"/>
+  </defs>
+  <text font-size="5" text-anchor="middle"><textPath xlink:href="#wave" startOffset="50%">middle of the wave</textPath></text>
+  <text font-size="4"><textPath xlink:href="#over">over the top</textPath></text>
+  <text font-size="4"><textPath xlink:href="#under">under the bottom</textPath></text>
+</svg>""")
+doc.new()
+rep = s.import_file(paths)
+assert rep["texts"] == 3 and not rep["skipped"] and not rep["notes"], rep
+healthy()
+by_words = {t.text: t for t in s.texts}
+wave = by_words["middle of the wave"]
+assert [type(c).__name__ for c in wave.path_curves] == ["Spline", "Line"] and wave.align == "center", wave.path_curves
+assert all(c.construction for c in wave.path_curves)
+
+
+def centre(contour):
+    return (sum(p[0] for p in contour) / len(contour), sum(p[1] for p in contour) / len(contour))
+
+
+for words in ("over the top", "under the bottom"):
+    tx = by_words[words]
+    first, last = centre(tx.contours[0]), centre(tx.contours[-1])
+    assert hypot(first[0] - 10, first[1] - 10) < hypot(last[0] - 10, last[1] - 10), (words, first, last)  # (from its start)
+over, under = by_words["over the top"], by_words["under the bottom"]
+assert min(p[1] for c in over.contours for p in c) > 8 and max(p[1] for c in under.contours for p in c) < 12  # (each its side)
 
 notes = write("notes.dxf", "\n".join(str(x) for x in [
     0, "SECTION", 2, "HEADER", 9, "$INSUNITS", 70, 4, 0, "ENDSEC",

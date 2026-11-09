@@ -319,9 +319,12 @@ struct Text
     TextVAlign valign = TextVAlign::Baseline;
     bool flipH = false;  // mirrored left to right (along a path: running the other way)
     bool flipV = false;  // mirrored top to bottom (along a path: on the other side of it)
-    // Text along a curve (a line, arc or circle) instead of in lines: it follows the curve as it
-    // moves. Its anchor is then the curve's first point, and the shape is remade as it changes.
+    // Text along a curve (any: a line, arc, circle, ellipse, spline) instead of in lines: it follows
+    // the curve as it moves. Its anchor is then the curve's first point, and the shape is remade as
+    // it changes. Along a chain of curves joined end to end: `path` the first, `pathMore` the rest,
+    // in order.
     Id path = kNoId;
+    std::vector<Id> pathMore;
     // Text in a box (a construction rectangle): anchor is its corner at the start of the bottom
     // side, boxSide the other end of that side, boxCorner the corner opposite the anchor. The
     // text is aligned in it (left/centre/right; top/middle/bottom), turned with it, and remade as

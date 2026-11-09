@@ -522,6 +522,31 @@ OffsetRefs offsetRefs(const Constraint& c)
     return out;
 }
 
+std::vector<Id> chainOrder(const Sketch& s, const std::vector<Id>& curves)
+{
+    if (curves.size() == 1) {
+        return curves;  // (any curve, closed or not, is a chain of one)
+    }
+    for (Id c : curves) {
+        if (!s.hasEntity(c) || !endsOf(s, c)) {
+            throw SketchError("a closed curve (circle, ellipse, closed spline) can't be part of a chain");
+        }
+    }
+    bool closed = false;
+    std::vector<Step> steps;
+    try {
+        steps = orderChain(s, curves, closed);
+    }
+    catch (const SketchError&) {
+        throw SketchError("the curves must be joined end to end in one chain (not branching)");
+    }
+    std::vector<Id> out;
+    for (const Step& step : steps) {
+        out.push_back(step.curve);
+    }
+    return out;
+}
+
 std::vector<Id> chainAt(const Sketch& s, Id curve)
 {
     if (!endsOf(s, curve)) {

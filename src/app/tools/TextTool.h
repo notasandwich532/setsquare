@@ -42,6 +42,8 @@ private:
     bool corners(core::Vec2& a, core::Vec2& b) const;
     core::Text settings() const;  // from the panel (anchor and path too, once they're known)
     bool where(core::Vec2& at) const;
+    // The picked path curves in order along their chain (none if they aren't one chain).
+    std::optional<std::vector<core::Id>> pathChain() const;
 
     core::Id m_editing;
     int m_position = 0;

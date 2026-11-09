@@ -7,6 +7,8 @@
 #include "../TextShapes.h"
 #include "../Theme.h"
 
+#include <core/Features.h>
+
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -77,8 +79,9 @@ void TextTool::buildPanel()
                        [this](Id id) { return isPoint(id); }, false);
     m_opposite = addPick(QObject::tr("Opposite corner"), "opposite", QObject::tr("click the opposite corner of the box"),
                          [this](Id id) { return isPoint(id); }, false);
-    m_path = addPick(QObject::tr("Path"), "path", QObject::tr("click the curve to set the text along"),
-                     [this](Id id) { return isCurve(id); }, false);
+    m_path = addPick(QObject::tr("Path"), "path",
+                     QObject::tr("click the curve to set the text along (or curves joined end to end: click each)"),
+                     [this](Id id) { return isCurve(id); }, true);
     m_position = addPick(QObject::tr("Position"), "position", QObject::tr("click where the text goes"),
                          [this](Id id) { return isPoint(id); }, false);
     m_text = new QPlainTextEdit(QString::fromStdString(t.text));
@@ -123,7 +126,9 @@ void TextTool::buildPanel()
             setPicked(m_opposite, {t.boxCorner});
         }
         else if (t.path != kNoId) {
-            setPicked(m_path, {t.path});
+            std::vector<Id> chain{t.path};
+            chain.insert(chain.end(), t.pathMore.begin(), t.pathMore.end());
+            setPicked(m_path, chain);
         }
         else {
             setPicked(m_position, {t.anchor});
@@ -165,11 +170,27 @@ core::Text TextTool::settings() const
     t.flipV = m_flipV->isChecked();
     t.outline = static_cast<core::TextOutline>(m_outline->currentIndex());
     t.minThickness = m_thickness->value();
-    if (kind() == Kind::Path && !picked(m_path).empty()) {
-        t.path = picked(m_path).front();
-        t.anchor = s.definingPoints(t.path).front();
+    if (kind() == Kind::Path) {
+        if (const auto chain = pathChain()) {
+            t.path = chain->front();
+            t.pathMore.assign(chain->begin() + 1, chain->end());
+            t.anchor = s.definingPoints(t.path).front();
+        }
     }
     return t;
+}
+
+std::optional<std::vector<Id>> TextTool::pathChain() const
+{
+    if (picked(m_path).empty()) {
+        return std::nullopt;
+    }
+    try {
+        return core::feature::chainOrder(doc().sketch(), picked(m_path));
+    }
+    catch (const core::SketchError&) {
+        return std::nullopt;  // (not one chain: not ready)
+    }
 }
 
 bool TextTool::corners(core::Vec2& a, core::Vec2& b) const
@@ -205,10 +226,11 @@ bool TextTool::where(core::Vec2& at) const
             return corners(at, b);
         }
         case Kind::Path: {
-            if (picked(m_path).empty()) {
+            const auto chain = pathChain();
+            if (!chain) {
                 return false;
             }
-            const core::Point& p = s.point(s.definingPoints(picked(m_path).front()).front());
+            const core::Point& p = s.point(s.definingPoints(chain->front()).front());
             at = {p.x, p.y};
             return true;
         }
@@ -345,7 +367,7 @@ void TextTool::paintPreview(QPainter& painter)
         + std::to_string(static_cast<int>(t.outline)) + ':' + std::to_string(t.minThickness) + ':'
         + std::to_string(t.spacing) + ':' + std::to_string(static_cast<int>(t.align))
         + std::to_string(static_cast<int>(t.valign)) + (t.flipH ? "h" : "") + (t.flipV ? "v" : "") + ':'
-        + std::to_string(t.path) + ':' + std::to_string(static_cast<int>(kind()));
+        + std::to_string(t.path) + ':' + std::to_string(t.pathMore.size()) + ':' + std::to_string(static_cast<int>(kind()));
     if (key != m_shapeKey) {
         m_shapeKey = key;
         m_shape = (kind() == Kind::Path && t.path == kNoId) ? decltype(m_shape){} : textshapes::make(t, &layoutIn);

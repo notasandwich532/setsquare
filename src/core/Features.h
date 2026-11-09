@@ -85,6 +85,10 @@ OffsetRefs offsetRefs(const Constraint& c);
 // in order along the chain. A circle is a chain by itself.
 std::vector<Id> chainAt(const Sketch& sketch, Id curve);
 
+// Curves joined end to end, in order along their chain (from a free end, if it has one). Throws
+// SketchError if they branch, aren't one connected chain, or one of them is closed (a circle, say).
+std::vector<Id> chainOrder(const Sketch& sketch, const std::vector<Id>& curves);
+
 // Offsets a chain of lines and arcs (or one circle) by `distance` towards the side `toward` is
 // on. Neighbouring offset curves meet where they cross (sharp corners) or continue smoothly
 // (tangent joins). With `bothSides`, it offsets to both sides at once (one distance drives

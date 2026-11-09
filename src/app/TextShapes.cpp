@@ -767,11 +767,40 @@ QPainterPath layoutAlongPath(const core::Text& t, const core::Sketch& s, const Q
     const core::Entity& e = s.entity(t.path);
     const core::EntityKind kind = e.kind();
     const auto* spline = std::get_if<core::Spline>(&e.geom);
-    // (whole ellipses and closed splines go round too; elliptical curves run clockwise, as arcs)
-    const bool closed = kind == core::EntityKind::Circle || kind == core::EntityKind::Ellipse
+    // (whole ellipses and closed splines go round too; elliptical curves run clockwise, as arcs;
+    // a chain that comes back to its start too)
+    bool closed = kind == core::EntityKind::Circle || kind == core::EntityKind::Ellipse
         || (spline && spline->closed && !spline->isPiece());
     std::vector<core::Vec2> world;
-    if (kind == core::EntityKind::Circle) {
+    if (!t.pathMore.empty()) {
+        // A chain: each curve along it in turn, run the way that carries on from the one before
+        // (the first: away from where it joins the second).
+        std::vector<core::Id> chain{t.path};
+        chain.insert(chain.end(), t.pathMore.begin(), t.pathMore.end());
+        auto near = [](core::Vec2 a, core::Vec2 b) { return std::hypot(a.x - b.x, a.y - b.y); };
+        for (size_t k = 0; k < chain.size(); ++k) {
+            if (!s.hasEntity(chain[k])) {
+                break;
+            }
+            std::vector<core::Vec2> pts = core::sample(s, chain[k], 240);
+            if (pts.size() < 2) {
+                continue;
+            }
+            if (k == 0 && chain.size() > 1 && s.hasEntity(chain[1])) {
+                const std::vector<core::Vec2> next = core::sample(s, chain[1], 2);
+                const double toFront = std::min(near(pts.front(), next.front()), near(pts.front(), next.back()));
+                const double toBack = std::min(near(pts.back(), next.front()), near(pts.back(), next.back()));
+                if (toFront < toBack) {
+                    std::ranges::reverse(pts);
+                }
+            }
+            else if (k > 0 && near(pts.back(), world.back()) < near(pts.front(), world.back())) {
+                std::ranges::reverse(pts);
+            }
+            world.insert(world.end(), pts.begin() + (world.empty() ? 0 : 1), pts.end());
+        }
+    }
+    else if (kind == core::EntityKind::Circle) {
         const core::Circle& c = s.circle(t.path);
         const core::Point& o = s.point(c.center);
         constexpr int kSteps = 720;
@@ -792,6 +821,9 @@ QPainterPath layoutAlongPath(const core::Text& t, const core::Sketch& s, const Q
             std::ranges::rotate(world, top);
             world.push_back(world.front());
         }
+    }
+    if (!t.pathMore.empty()) {
+        closed = world.size() > 2 && std::hypot(world.front().x - world.back().x, world.front().y - world.back().y) < 1e-9;
     }
     std::vector<QPointF> curve;
     for (const core::Vec2& p : world) {
@@ -980,7 +1012,14 @@ std::vector<std::vector<core::Point>> make(const core::Text& t, const core::Sket
 std::size_t linkKey(const core::Sketch& s, const core::Text& t)
 {
     if (t.path != core::kNoId) {
-        return s.hasEntity(t.path) ? curveKey(s, t.path) : 0;
+        if (!s.hasEntity(t.path)) {
+            return 0;
+        }
+        std::size_t key = curveKey(s, t.path);
+        for (core::Id c : t.pathMore) {  // (the rest of its chain)
+            key = key * 1000003u ^ (s.hasEntity(c) ? curveKey(s, c) : 0);
+        }
+        return key;
     }
     if (t.inBox()) {
         std::size_t key = 17;
