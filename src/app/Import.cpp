@@ -6,6 +6,7 @@
 
 #include <core/Export.h>
 #include <core/Groups.h>
+#include <core/Hatch.h>
 #include <core/Regions.h>
 
 #include <QFile>
@@ -453,6 +454,9 @@ QString Report::summary() const
     }
     if (images > 0) {
         parts << counted(images, QObject::tr("1 image"), QObject::tr("%1 images"));
+    }
+    if (hatches > 0) {
+        parts << counted(hatches, QObject::tr("1 hatch"), QObject::tr("%1 hatches"));
     }
     if (gradients > 0) {
         parts << counted(gradients, QObject::tr("1 gradient"), QObject::tr("%1 gradients"));
@@ -2409,10 +2413,30 @@ private:
             text(r, local, layer, col);
             return;
         }
+        else if (type == "HATCH") {
+            hatch(r, local, layer, col);
+            return;
+        }
+        else if (type == "SOLID") {
+            // A filled triangle or quadrilateral (its corners in the order 1, 2, 4, 3).
+            const Vec2 p[4] = {{r.num(10), r.num(20)}, {r.num(11), r.num(21)}, {r.num(13), r.num(23)}, {r.num(12), r.num(22)}};
+            Contour c;
+            c.closed = true;
+            for (int k = 0; k < 4; ++k) {
+                const Vec2 a = local(p[k]), b = local(p[(k + 1) % 4]);
+                if (len(sub(a, b)) > 1e-12) {
+                    c.segments.push_back(line(a, b));
+                }
+            }
+            if (c.segments.size() >= 3) {
+                filledShape({std::move(c)}, layer, col, std::nullopt, std::nullopt);
+            }
+            return;
+        }
         else {
             static const std::map<std::string, std::string> names = {
                 {"TEXT", "texts"},          {"MTEXT", "texts"},       {"ATTRIB", "texts"},       {"ATTDEF", "texts"},
-                {"DIMENSION", "dimensions"}, {"HATCH", "hatches"},    {"SOLID", "solid fills"},  {"3DFACE", "3D faces"},
+                {"DIMENSION", "dimensions"}, {"3DFACE", "3D faces"},
                 {"IMAGE", "images"},        {"LEADER", "leaders"},    {"MLEADER", "leaders"},    {"POINT", "points"},
                 {"WIPEOUT", "wipeouts"},    {"MULTILEADER", "leaders"}, {"TOLERANCE", "tolerances"}};
             if (type == "VIEWPORT" || type == "SEQEND" || type == "ENDBLK" || type == "BLOCK") {
@@ -2429,6 +2453,319 @@ private:
         }
         std::erase_if(contours, [](const Contour& c) { return c.segments.empty(); });
         addShape(contours, layer, info, col, r);
+    }
+
+    // A filled area without an outline of its own (a hatch's, a solid's): solid, a gradient, or hatched.
+    void filledShape(std::vector<Contour> contours, const std::string& layer, Color col, std::optional<core::Hatch> hatched,
+                     std::optional<GradientDef> gradient)
+    {
+        Shape s;
+        s.contours = std::move(contours);
+        s.layer = layer;
+        s.style.fill = col;
+        s.style.evenOdd = true;  // (islands inside are left out, as "normal" hatching does)
+        s.style.hatch = std::move(hatched);
+        s.style.fillGradient = std::move(gradient);
+        if (std::ranges::find(m_out.layers, layer) == m_out.layers.end()) {
+            m_out.layers.push_back(layer);
+        }
+        m_out.shapes.push_back(std::move(s));
+    }
+
+    // HATCH: its boundary paths (polylines, or edges: lines, arcs, elliptical arcs, splines), then
+    // its pattern's lines (stored turned and scaled, offsets in drawing coordinates), or a solid
+    // or gradient fill. Its group codes come in order, so they're read in order.
+    void hatch(const Record& r, const Affine& m, const std::string& layer, Color col)
+    {
+        const auto& c = r.codes;
+        size_t i = 0;
+        auto value = [&](size_t k) {
+            try {
+                return std::stod(c[k].second);
+            }
+            catch (...) {
+                return 0.0;
+            }
+        };
+        // The next pair with this code from here (and past it); -1 if there's none.
+        auto next = [&](int code) -> double {
+            while (i < c.size() && c[i].first != code) {
+                ++i;
+            }
+            return i < c.size() ? value(i++) : -1.0;
+        };
+        auto point = [&](int xCode, int yCode) {
+            const double x = next(xCode);
+            return Vec2{x, next(yCode)};
+        };
+        std::vector<Contour> contours;
+        const int paths = static_cast<int>(next(91));
+        for (int p = 0; p < paths && i < c.size(); ++p) {
+            const int flags = static_cast<int>(next(92));
+            Contour ct;
+            ct.closed = true;
+            if (flags & 2) {  // a polyline
+                const bool bulges = next(72) != 0;
+                next(73);
+                const int count = static_cast<int>(next(93));
+                std::vector<std::pair<Vec2, double>> vs;
+                for (int k = 0; k < count && i < c.size(); ++k) {
+                    const Vec2 v = point(10, 20);
+                    double bulge = 0.0;
+                    if (bulges && i < c.size() && c[i].first == 42) {
+                        bulge = value(i++);
+                    }
+                    vs.push_back({v, bulge});
+                }
+                ct = polyline(vs, true);
+            }
+            else {
+                const int edges = static_cast<int>(next(93));
+                for (int k = 0; k < edges && i < c.size(); ++k) {
+                    const int kind = static_cast<int>(next(72));
+                    if (kind == 1) {
+                        const Vec2 a = point(10, 20), b = point(11, 21);
+                        ct.segments.push_back(line(a, b));
+                    }
+                    else if (kind == 2 || kind == 3) {
+                        const Vec2 centre = point(10, 20);
+                        Vec2 major{1, 0};
+                        double rx = 0, ry = 0;
+                        if (kind == 2) {
+                            rx = ry = next(40);
+                        }
+                        else {
+                            major = point(11, 21);
+                            rx = len(major);
+                            ry = rx * next(40);
+                        }
+                        double a0 = next(50), a1 = next(51);
+                        const bool ccw = i < c.size() && c[i].first == 73 ? value(i++) != 0 : true;
+                        if (!ccw) {
+                            std::tie(a0, a1) = std::pair{-a1, -a0};  // (stored mirrored: the same arc, run the other way)
+                        }
+                        double sweep = std::fmod(a1 - a0, 360.0);
+                        if (sweep <= 1e-9) {
+                            sweep += 360.0;
+                        }
+                        ct.segments.push_back(ellipse(centre, rx, ry, std::atan2(major.y, major.x), a0 * kPi / 180, sweep * kPi / 180));
+                    }
+                    else if (kind == 4) {
+                        // As a SPLINE entity's codes, for the reader of those.
+                        Record s;
+                        s.type = "SPLINE";
+                        const int degree = static_cast<int>(next(94));
+                        const bool rational = next(73) != 0;
+                        next(74);
+                        const int knots = static_cast<int>(next(95)), controls = static_cast<int>(next(96));
+                        s.codes.push_back({71, std::to_string(degree)});
+                        for (int n = 0; n < knots; ++n) {
+                            s.codes.push_back({40, std::to_string(next(40))});
+                        }
+                        for (int n = 0; n < controls; ++n) {
+                            const Vec2 q = point(10, 20);
+                            s.codes.push_back({10, std::to_string(q.x)});
+                            s.codes.push_back({20, std::to_string(q.y)});
+                            if (rational && i < c.size() && c[i].first == 42) {
+                                s.codes.push_back({41, std::to_string(value(i++))});
+                            }
+                        }
+                        if (i < c.size() && c[i].first == 97) {
+                            const int fits = static_cast<int>(value(i++));
+                            for (int n = 0; n < fits; ++n) {
+                                const Vec2 q = point(11, 21);
+                                s.codes.push_back({11, std::to_string(q.x)});
+                                s.codes.push_back({21, std::to_string(q.y)});
+                            }
+                        }
+                        const Contour piece = spline(s);
+                        ct.segments.insert(ct.segments.end(), piece.segments.begin(), piece.segments.end());
+                    }
+                }
+            }
+            // (the objects it was made from: not needed)
+            if (i < c.size() && c[i].first == 97) {
+                const int sources = static_cast<int>(value(i++));
+                for (int k = 0; k < sources && i < c.size() && c[i].first == 330; ++k) {
+                    ++i;
+                }
+            }
+            for (Segment& s : ct.segments) {
+                s = transformed(s, m);
+            }
+            if (!ct.segments.empty()) {
+                contours.push_back(std::move(ct));
+            }
+        }
+        if (contours.empty()) {
+            return;
+        }
+        const std::string name = r.get(2) ? *r.get(2) : std::string("HATCH");
+        const bool solid = r.num(70) != 0 || upper(name) == "SOLID";
+        // A gradient: two colours (or one and a tint of it), placed across the area.
+        if (r.num(450) != 0) {
+            filledShape(std::move(contours), layer, col, std::nullopt, std::nullopt);
+            gradientHatch(r, m_out.shapes.back(), col);
+            return;
+        }
+        if (solid) {
+            filledShape(std::move(contours), layer, col, std::nullopt, std::nullopt);
+            return;
+        }
+        // The pattern's lines: each its angle, base point and offset (in drawing coordinates),
+        // and dashes, as drawn here: through the transform.
+        i = 0;
+        for (size_t k = 0; k < c.size(); ++k) {
+            if (c[k].first == 78) {
+                i = k;  // (the last: after the boundaries, before any seed points)
+            }
+        }
+        const int count = i < c.size() && c[i].first == 78 ? static_cast<int>(value(i++)) : 0;
+        core::Hatch h;
+        h.pattern = name;
+        for (int k = 0; k < count && i < c.size(); ++k) {
+            const double angle = next(53) * kPi / 180;
+            const Vec2 base = point(43, 44), offset = point(45, 46);
+            const int dashCount = static_cast<int>(next(79));
+            std::vector<double> dashes;
+            for (int d = 0; d < dashCount; ++d) {
+                dashes.push_back(next(49));
+            }
+            const Vec2 u0{std::cos(angle), std::sin(angle)};
+            Vec2 u = m.linear(u0);
+            const double s = len(u);
+            if (s < 1e-12) {
+                continue;
+            }
+            u = mul(u, 1.0 / s);
+            const Vec2 n{-u.y, u.x};
+            const Vec2 o = m.linear(offset), b = m(base);
+            core::HatchLine l;
+            l.angle = std::atan2(u.y, u.x) * 180 / kPi;
+            l.x = b.x;
+            l.y = b.y;
+            l.dx = dot(o, u);
+            l.dy = dot(o, n);
+            for (double& d : dashes) {
+                d *= s;
+            }
+            l.dashes = std::move(dashes);
+            if (std::abs(l.dy) > 1e-9) {
+                h.lines.push_back(std::move(l));
+            }
+        }
+        if (h.lines.empty()) {
+            filledShape(std::move(contours), layer, col, std::nullopt, std::nullopt);
+            note("hatches without a pattern came in filled solid");
+            return;
+        }
+        // A pattern of ours at its own angle and scale: kept so (to change them later).
+        const double turn = std::atan2(m.linear({1, 0}).y, m.linear({1, 0}).x) * 180 / kPi;
+        const double size = std::sqrt(std::abs(m.det()));
+        for (const double unit : {1.0, 25.4}) {  // (metric patterns, or AutoCAD's inch ones)
+            if (const auto known = core::hatch::builtin(name, r.num(52) + turn, r.num(41, 1.0) * size * unit)) {
+                if (sameLines(core::hatch::placed(*known), h.lines)) {
+                    filledShape(std::move(contours), layer, col, *known, std::nullopt);
+                    return;
+                }
+            }
+        }
+        filledShape(std::move(contours), layer, col, std::move(h), std::nullopt);
+    }
+
+    // Two sets of hatch lines alike (to within a hair; angles a turn apart are alike).
+    static bool sameLines(const std::vector<core::HatchLine>& a, const std::vector<core::HatchLine>& b)
+    {
+        if (a.size() != b.size()) {
+            return false;
+        }
+        auto near = [](double x, double y) { return std::abs(x - y) <= 1e-6 * std::max({1.0, std::abs(x), std::abs(y)}); };
+        for (size_t k = 0; k < a.size(); ++k) {
+            const double turn = std::remainder(a[k].angle - b[k].angle, 360.0);
+            if (std::abs(turn) > 1e-6 || !near(a[k].x, b[k].x) || !near(a[k].y, b[k].y) || !near(a[k].dx, b[k].dx)
+                || !near(a[k].dy, b[k].dy) || a[k].dashes.size() != b[k].dashes.size()) {
+                return false;
+            }
+            for (size_t d = 0; d < a[k].dashes.size(); ++d) {
+                if (!near(a[k].dashes[d], b[k].dashes[d])) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    // A gradient hatch (450): its colours (421s, else ACI 63s; one colour: tinted, 462) across the
+    // area at its angle (460, radians): linear ones from side to side, spherical ones from the middle.
+    void gradientHatch(const Record& r, Shape& shape, Color col)
+    {
+        std::vector<Color> colours;
+        bool seen = false;
+        for (const auto& [code, v] : r.codes) {
+            seen = seen || code == 450;
+            if (seen && code == 421) {
+                colours.push_back(trueColor(std::stol(v)));
+            }
+        }
+        if (colours.empty()) {
+            colours.push_back(col);
+        }
+        if (colours.size() == 1) {
+            // Its tint: the colour towards white (above a half) or towards black (below).
+            const double tint = std::clamp(r.num(462, 1.0), 0.0, 1.0);
+            const double toward = tint >= 0.5 ? 255.0 : 0.0, amount = std::abs(tint - 0.5) * 2;
+            auto mix = [&](std::uint8_t v) { return static_cast<std::uint8_t>(std::lround(v + (toward - v) * amount)); };
+            const Color a = colours.front();
+            colours.push_back(Color{mix(a.r), mix(a.g), mix(a.b), a.a});
+        }
+        double x0 = 1e300, y0 = 1e300, x1 = -1e300, y1 = -1e300;
+        for (const Contour& ct : shape.contours) {
+            for (const Segment& s : ct.segments) {
+                for (const Vec2& p : s.sample(8)) {
+                    x0 = std::min(x0, p.x);
+                    y0 = std::min(y0, p.y);
+                    x1 = std::max(x1, p.x);
+                    y1 = std::max(y1, p.y);
+                }
+            }
+        }
+        const Vec2 centre{(x0 + x1) / 2, (y0 + y1) / 2};
+        const std::string name = upper(r.get(470) ? *r.get(470) : std::string("LINEAR"));
+        const Color& a = colours[0];
+        const Color& b = colours[1];
+        GradientDef g;
+        if (name.find("SPHERICAL") != std::string::npos) {
+            g.kind = core::GradientKind::Radial;
+            g.center = centre;
+            g.rx = g.ry = std::max(len(sub({x1, y1}, centre)), 1e-6);
+            g.stops = name.find("INV") == 0 ? std::vector<core::GradientStop>{{0, b}, {1, a}}
+                                            : std::vector<core::GradientStop>{{0, a}, {1, b}};
+        }
+        else {
+            const double angle = r.num(460);
+            const Vec2 dir{std::cos(angle), std::sin(angle)};
+            double lo = 1e300, hi = -1e300;
+            for (const Vec2& corner : {Vec2{x0, y0}, Vec2{x1, y0}, Vec2{x1, y1}, Vec2{x0, y1}}) {
+                lo = std::min(lo, dot(sub(corner, centre), dir));
+                hi = std::max(hi, dot(sub(corner, centre), dir));
+            }
+            g.start = add(centre, mul(dir, lo));
+            g.end = add(centre, mul(dir, hi));
+            if (len(sub(g.end, g.start)) < 1e-9) {
+                return;
+            }
+            const bool inverted = name.find("INV") == 0;
+            if (name.find("CYLINDER") != std::string::npos) {  // (across and back)
+                g.stops = inverted ? std::vector<core::GradientStop>{{0, b}, {0.5, a}, {1, b}}
+                                   : std::vector<core::GradientStop>{{0, a}, {0.5, b}, {1, a}};
+            }
+            else {
+                g.stops = inverted ? std::vector<core::GradientStop>{{0, b}, {1, a}} : std::vector<core::GradientStop>{{0, a}, {1, b}};
+            }
+        }
+        note("DXF gradient hatches came in as gradients close to how they look");
+        shape.style.fill = colours[0];
+        shape.style.fillGradient = g;
     }
 
     void addShape(std::vector<Contour>& contours, const std::string& layer, const LayerInfo& info, Color col,
@@ -2647,7 +2984,7 @@ private:
             case Segment::Kind::Line: {
                 const Id a = m_pool.at(at(s.p[0])), b = m_pool.at(at(s.p[1]));
                 if (a != b) {
-                    out.push_back(m_s.addLine(a, b));
+                    out.push_back(once({0, std::min(a, b), std::max(a, b), 0}, [&] { return m_s.addLine(a, b); }));
                 }
                 break;
             }
@@ -2680,7 +3017,7 @@ private:
                 };
                 if (s.whole()) {
                     if (round) {
-                        out.push_back(m_s.addCircle(c, s.rx));
+                        out.push_back(once({1, c, 0, std::llround(s.rx * 1e6)}, [&] { return m_s.addCircle(c, s.rx); }));
                     }
                     else {
                         const auto [major, minor] = axes();
@@ -2699,7 +3036,7 @@ private:
                     std::swap(a, b);  // (ours run counter-clockwise)
                 }
                 if (round) {
-                    out.push_back(m_s.addArc(c, a, b));
+                    out.push_back(once({2, c, a, static_cast<long long>(b)}, [&] { return m_s.addArc(c, a, b); }));
                 }
                 else {
                     const auto [major, minor] = axes();
@@ -2750,10 +3087,22 @@ private:
         out.push_back(m_s.addSpline(sp));
     }
 
+    // A curve the file has twice (a hatch's boundary over its outline, say): made once.
+    template <typename Make>
+    Id once(const std::array<long long, 4>& key, const Make& make)
+    {
+        const auto [it, fresh] = m_made.try_emplace(key, kNoId);
+        if (fresh) {
+            it->second = make();
+        }
+        return it->second;
+    }
+
     core::Sketch& m_s;
     PointPool& m_pool;
     Vec2 m_shift;
     Curves m_curves;
+    std::map<std::array<long long, 4>, Id> m_made;  // lines, circles and arcs made, by their points
 };
 }  // namespace
 
@@ -2909,7 +3258,7 @@ Report build(core::Sketch& sketch, const Drawing& drawing, const Options& o)
                     stroke.gradient = strokeGradient;
                     sketch.setStroke(id, stroke);
                 }
-                else if (st.fill) {
+                else if (st.fill && !sketch.stroke(id)) {
                     core::StrokeStyle none;
                     none.width = core::StrokeStyle::kNone;  // (a fill's outline: no line of its own)
                     sketch.setStroke(id, none);
@@ -3001,6 +3350,10 @@ Report build(core::Sketch& sketch, const Drawing& drawing, const Options& o)
             fill.color = *top->shape->style.fill;  // (a gradient's: its average, should it lose its geometry)
             if (const auto it = fillGradients.find(top->shape); it != fillGradients.end()) {
                 fill.gradient = it->second;
+            }
+            if (top->shape->style.hatch) {
+                fill.hatch = *top->shape->style.hatch;
+                ++report.hatches;
             }
             fill.seed = core::Point{p.x, p.y};
             fill.boundary = region.boundary;

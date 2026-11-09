@@ -1954,6 +1954,7 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
             d["curves"] = report.curves;
             d["fills"] = report.fills;
             d["gradients"] = report.gradients;
+            d["hatches"] = report.hatches;
             d["images"] = report.images;
             d["texts"] = report.texts;
             d["groups"] = report.groups;

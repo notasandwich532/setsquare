@@ -70,6 +70,7 @@ struct Style
     // Painted with these where given (`fill` and `stroke` are then their average colour).
     std::optional<GradientDef> fillGradient;
     std::optional<GradientDef> strokeGradient;
+    std::optional<core::Hatch> hatch;  // the fill drawn with these lines (in `fill`'s colour)
     bool evenOdd = false;       // the fill rule (else nonzero)
     bool construction = false;  // reference geometry (e.g. our own exports' Construction layer)
 };
@@ -158,6 +159,7 @@ struct Report
     int curves = 0;
     int fills = 0;
     int gradients = 0;
+    int hatches = 0;
     int images = 0;
     int texts = 0;
     int groups = 0;

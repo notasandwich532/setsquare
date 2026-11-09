@@ -195,7 +195,7 @@ dxf = write("part.dxf", "\n".join(str(x) for x in [
 doc.new()
 rep = s.import_file(dxf)
 assert sorted(rep["sublayers"]) == ["Cut", "Guide"] and rep["groups"] == 2, rep
-assert rep["skipped"] == {"hatches": 1} and rep["texts"] == 1, rep
+assert not rep["skipped"] and rep["texts"] == 1, rep  # (the empty HATCH: nothing to bring in)
 healthy()
 k = kinds()
 assert k.get("Spline") == 1 and k.get("Ellipse") == 1 and k.get("Arc") == 2 and k.get("Circle") == 1, k
@@ -325,6 +325,47 @@ dia = by_words["\u230010 \u00b10.1"]
 assert dia.align == "center" and isclose(dia.angle, 30) and isclose(dia.height, 2.5) and near(dia.anchor.pos, (20, 10)), dia
 m = by_words["First\nSecond 1/2"]
 assert m.align == "center" and m.valign == "middle" and isclose(m.height, 3) and near(m.anchor.pos, (40, 40)), m
+
+# --- DXF hatches: patterns (ours kept editable, others exact), islands, solid, gradient; SOLIDs ------
+d45 = 3.175 / 2 ** 0.5
+hatched = write("hatched.dxf", "\n".join(str(x) for x in [
+    0, "SECTION", 2, "HEADER", 9, "$INSUNITS", 70, 4, 0, "ENDSEC",
+    0, "SECTION", 2, "ENTITIES",
+    # The rectangle's outline as its own polyline too (the hatch's boundary mustn't double it).
+    0, "LWPOLYLINE", 8, "H", 90, 4, 70, 1, 10, 0, 20, 0, 10, 40, 20, 0, 10, 40, 20, 20, 10, 0, 20, 20,
+    0, "HATCH", 8, "H", 2, "ANSI31", 70, 0, 71, 0, 91, 2,
+    92, 3, 72, 0, 73, 1, 93, 4, 10, 0, 20, 0, 10, 40, 20, 0, 10, 40, 20, 20, 10, 0, 20, 20, 97, 0,
+    92, 16, 93, 1, 72, 2, 10, 20, 20, 10, 40, 5, 50, 0, 51, 360, 73, 1, 97, 0,
+    75, 0, 76, 1, 52, 0, 41, 1, 77, 0, 78, 1, 53, 45, 43, 0, 44, 0, 45, -d45, 46, d45, 79, 0, 98, 1, 10, 1, 20, 1,
+    # A pattern of the file's own, at 30 degrees, dashed, on a D (a bulge's half circle).
+    0, "HATCH", 8, "H", 2, "MINE", 70, 0, 71, 0, 91, 1,
+    92, 3, 72, 1, 73, 1, 93, 2, 10, 50, 20, 0, 42, 0, 10, 70, 20, 0, 42, 1, 97, 0,
+    75, 0, 76, 1, 52, 0, 41, 1, 77, 0, 78, 1, 53, 30, 43, 0, 44, 0, 45, -1.1339746, 46, 3.9641016, 79, 2, 49, 3, 49, -1,
+    0, "HATCH", 8, "H", 2, "SOLID", 70, 1, 71, 0, 91, 1,
+    92, 3, 72, 0, 73, 1, 93, 4, 10, 80, 20, 0, 10, 90, 20, 0, 10, 90, 20, 10, 10, 80, 20, 10, 97, 0,
+    0, "SOLID", 8, "H", 10, 100, 20, 0, 11, 110, 21, 0, 12, 105, 22, 8, 13, 105, 23, 8,
+    0, "HATCH", 8, "H", 2, "SOLID", 70, 1, 71, 0, 91, 1,
+    92, 3, 72, 0, 73, 1, 93, 4, 10, 120, 20, 0, 10, 140, 20, 0, 10, 140, 20, 10, 10, 120, 20, 10, 97, 0,
+    450, 1, 451, 0, 452, 0, 453, 2, 460, 0, 461, 0, 462, 1, 470, "LINEAR", 463, 0, 63, 5, 421, 255, 463, 1, 63, 2, 421, 16776960,
+    0, "ENDSEC", 0, "EOF"]) + "\n")
+doc.new()
+rep = s.import_file(hatched)
+assert rep["hatches"] == 2 and rep["fills"] == 5 and not rep["skipped"], rep
+healthy()
+assert len([l for l in s.lines if near(l.p1.pos, (0, 0)) or near(l.p2.pos, (0, 0))]) == 2, "the outline doubled"
+by_pattern = {f.hatch.pattern: f for f in s.fills if f.hatch}
+ansi = by_pattern["ANSI31"].hatch
+assert ansi == drawapp.hatch("ANSI31"), ansi  # (one of ours: its angle and scale can be changed)
+assert isclose(by_pattern["ANSI31"].area, 40 * 20 - pi * 25, rel_tol=1e-3), by_pattern["ANSI31"].area  # (the island left out)
+mine = by_pattern["MINE"].hatch
+(angle, x, y, dx, dy, dashes), = mine.lines
+assert isclose(angle, 30) and isclose(dx, 1, abs_tol=1e-6) and isclose(dy, 4, abs_tol=1e-6) and dashes == [3, -1], mine.lines
+assert isclose(by_pattern["MINE"].area, pi * 100 / 2, rel_tol=1e-3)
+solid = [f for f in s.fills if not f.hatch and not f.gradient]
+assert len(solid) == 2, solid  # (the solid hatch, the SOLID triangle)
+grad = [f for f in s.fills if f.gradient][0].gradient
+assert grad.type == "linear" and [c for _, c in grad.stops] == ["#0000ff", "#ffff00"], grad
+assert near(grad.start.pos, (120, 5)) and near(grad.end.pos, (140, 5)), (grad.start.pos, grad.end.pos)
 
 # --- what it records makes it again ------------------------------------------------------------------
 doc.new()
