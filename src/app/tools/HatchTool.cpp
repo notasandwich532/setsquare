@@ -124,8 +124,11 @@ void HatchTool::activate()
         setHatch(h);
     };
     QObject::connect(m_pattern, &QComboBox::activated, m_panel, change);
-    QObject::connect(m_angle, &QDoubleSpinBox::editingFinished, m_panel, change);
-    QObject::connect(m_scale, &QDoubleSpinBox::editingFinished, m_panel, change);
+    // (On Enter, the arrows or the wheel; not each key typed: no edit for the 4 of 45.)
+    for (QDoubleSpinBox* box : {m_angle, m_scale}) {
+        box->setKeyboardTracking(false);
+        QObject::connect(box, &QDoubleSpinBox::valueChanged, m_panel, change);
+    }
     QObject::connect(m_width, &QComboBox::activated, m_panel, change);
     QObject::connect(m_width->lineEdit(), &QLineEdit::editingFinished, m_panel, change);
     QObject::connect(m_panel, &CommandPanel::accepted, m_panel, [this] { view().setTool(ToolKind::Select); });

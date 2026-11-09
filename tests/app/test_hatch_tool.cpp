@@ -68,11 +68,14 @@ struct Fixture
         FAIL("no fill there");
         throw;
     }
+    // Typed in, as a person would, then left (what leaving the box does: its text taken).
     void setNumber(const char* name, double v)
     {
         auto* box = input<QDoubleSpinBox>(name);
-        box->setValue(v);
-        emit box->editingFinished();
+        box->setFocus();
+        box->selectAll();
+        QTest::keyClicks(box, QString::number(v));
+        box->interpretText();
     }
 };
 }  // namespace
@@ -121,8 +124,19 @@ TEST_CASE("Hatch tool: hatching areas, and changing them all from the panel", "[
     CHECK(f.fillAt(20, 20).hatch.angle == 45);
     CHECK(f.fillAt(60, 20).hatch.angle == 30);
 
-    // Enter: done.
-    QTest::keyClick(&f.view, Qt::Key_Return);
+    // The arrows step it (no Enter needed).
+    auto* scale = f.input<QDoubleSpinBox>("hatchScale");
+    scale->setFocus();
+    QTest::keyClick(scale, Qt::Key_Up);
+    CHECK(f.fillAt(20, 20).hatch.scale == 3);
+
+    // Typed, then Enter: it's taken, and the tool's done.
+    auto* angle = f.input<QDoubleSpinBox>("hatchAngle");
+    angle->setFocus();
+    angle->selectAll();
+    QTest::keyClicks(angle, QStringLiteral("60"));
+    QTest::keyClick(angle, Qt::Key_Return);
+    CHECK(f.fillAt(20, 20).hatch.angle == 60);
     CHECK(f.view.toolKind() == ToolKind::Select);
 }
 
