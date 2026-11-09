@@ -262,6 +262,7 @@ struct Fill
     Id id = kNoId;
     Color color;
     Gradient gradient;         // when active: filled with this rather than `color`
+    Hatch hatch;               // when active: drawn with its lines in `color` rather than filled
     Point seed;                // a point inside the area
     Id layer = kNoId;          // the layer whose geometry outlines it
     std::vector<Id> boundary;  // the curves around it when it was last found (sorted)

@@ -43,7 +43,9 @@ struct DxfOptions
 // DXF (R12, the version every CAD/CAM program reads) of the geometry: exact LINE, CIRCLE and ARC
 // entities in millimetres, y up. Layers: GEOMETRY (curves without a stroke), STROKES (with one,
 // each in its colour, matched to the nearest AutoCAD colour, and line style), CONSTRUCTION
-// (optional, off). R12 has no fills, true colours or line weights, so those aren't written.
+// (optional, off), HATCH (hatched fills: their lines, cut to their areas, as LINEs and POINTs, as
+// R12 itself writes a hatch). R12 has no solid fills, true colours or line weights, so those
+// aren't written.
 // Throws SketchError if there's nothing to export.
 std::string toDxf(const Sketch& sketch, const DxfOptions& options = {});
 

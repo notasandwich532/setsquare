@@ -6,6 +6,7 @@
 #include <core/Dimensions.h>
 #include <core/Geometry.h>
 #include <core/Gradient.h>
+#include <core/Hatch.h>
 #include <core/Regions.h>
 
 #include "Images.h"
@@ -193,6 +194,8 @@ public:
     QBrush gradientBrush(const core::Gradient& g, double alpha = 1.0) const;
     // A closed area (with its holes) on screen, for filling.
     QPainterPath regionPath(const core::regions::Region& region) const;
+    // A hatched fill's lines over its area (its shade, where they're too close together to show).
+    void drawHatch(QPainter& painter, const core::Fill& fill, const core::regions::Region& region) const;
     QPainterPath textPath(const core::Text& text) const;  // its letters, on screen
     QPolygonF textBox(const core::Text& text) const;      // round its letters, on screen
 

@@ -3,6 +3,7 @@
 #include "Curves.h"
 #include "Geometry.h"
 #include "Gradient.h"
+#include "Hatch.h"
 #include "Regions.h"
 
 #include <algorithm>
@@ -97,6 +98,7 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
         Color color;
         Gradient gradient;
         regions::Region region;
+        Hatch hatch;  // when active: drawn with its lines
     };
     struct TextArea
     {
@@ -148,7 +150,7 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
                     continue;
                 }
                 if (auto region = regions::resolve(arrangements, f)) {
-                    g.fills.push_back({f.color, f.gradient, std::move(*region)});
+                    g.fills.push_back({f.color, f.gradient, std::move(*region), f.hatch});
                 }
             }
         }
@@ -401,6 +403,22 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
         if (!g.fills.empty()) {
             layer("fills", "Fills");
             for (const Area& a : g.fills) {
+                // A hatch: its lines, cut exactly to the area (dots as round caps on no length).
+                std::vector<hatch::Segment> pieces;
+                if (a.hatch.active() && hatch::within(a.hatch, a.region, 2000000, pieces)) {
+                    std::string lines;
+                    for (const hatch::Segment& p : pieces) {
+                        lines += "M" + X(p.a.x) + ',' + Y(p.a.y) + (p.a.x == p.b.x && p.a.y == p.b.y ? std::string(" l0,0 ") : " L" + X(p.b.x) + ',' + Y(p.b.y) + ' ');
+                    }
+                    if (!lines.empty()) {
+                        lines.pop_back();
+                        out << indent << "  <path d=\"" << lines << "\" fill=\"none\" stroke=\"" << rgb(a.color) << '"'
+                            << (a.color.a < 255 ? " stroke-opacity=\"" + num(a.color.a / 255.0) + '"' : std::string())
+                            << " stroke-width=\"" << num(a.hatch.width > 0 ? a.hatch.width : kHairline)
+                            << "\" stroke-linecap=\"round\"/>\n";
+                    }
+                    continue;
+                }
                 std::string d;
                 auto loop = [&](const std::vector<Vec2>& pts) {
                     for (size_t i = 0; i < pts.size(); ++i) {
@@ -642,7 +660,25 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
             }
         }
     }
-    if (items.empty() && textOutlines.empty()) {
+    // Hatched fills: their lines, cut to their areas (each hatch in its colour).
+    struct HatchLines
+    {
+        int color;
+        std::vector<hatch::Segment> pieces;
+    };
+    std::vector<HatchLines> hatches;
+    const regions::Arrangements arrangements(s);
+    for (const auto& [id, f] : s.fills()) {
+        if (!f.hatch.active() || (s.hasLayer(f.layer) && !s.layer(f.layer).visible)) {
+            continue;
+        }
+        HatchLines h{o.styles ? nearestAci(f.color) : 256, {}};
+        if (const auto region = regions::resolve(arrangements, f);
+            region && hatch::within(f.hatch, *region, 2000000, h.pieces) && !h.pieces.empty()) {
+            hatches.push_back(std::move(h));
+        }
+    }
+    if (items.empty() && textOutlines.empty() && hatches.empty()) {
         throw SketchError("there's nothing to export");
     }
 
@@ -653,6 +689,16 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
             y0 = std::min(y0, p.y);
             x1 = std::max(x1, p.x);
             y1 = std::max(y1, p.y);
+        }
+    }
+    for (const HatchLines& h : hatches) {
+        for (const hatch::Segment& p : h.pieces) {
+            for (const Vec2& q : {p.a, p.b}) {
+                x0 = std::min(x0, q.x);
+                y0 = std::min(y0, q.y);
+                x1 = std::max(x1, q.x);
+                y1 = std::max(y1, q.y);
+            }
         }
     }
     for (const TextOutline& t : textOutlines) {
@@ -719,7 +765,8 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
                             {"GEOMETRY", 7, "CONTINUOUS"},
                             {"STROKES", 7, "CONTINUOUS"},
                             {"CONSTRUCTION", -8, "DASHED"},
-                            {"TEXT", 7, "CONTINUOUS"}};
+                            {"TEXT", 7, "CONTINUOUS"},
+                            {"HATCH", 7, "CONTINUOUS"}};
     w.pair(0, "TABLE");
     w.pair(2, "LAYER");
     w.pair(70, static_cast<int>(std::size(layers)));
@@ -821,6 +868,24 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
         }
         w.pair(0, "SEQEND");
         w.pair(8, "TEXT");
+    }
+    for (const HatchLines& h : hatches) {
+        for (const hatch::Segment& p : h.pieces) {
+            const bool dot = p.a.x == p.b.x && p.a.y == p.b.y;
+            w.pair(0, dot ? "POINT" : "LINE");
+            w.pair(8, "HATCH");
+            if (h.color != 256) {
+                w.pair(62, h.color);
+            }
+            w.real(10, p.a.x);
+            w.real(20, p.a.y);
+            w.real(30, 0.0);
+            if (!dot) {
+                w.real(11, p.b.x);
+                w.real(21, p.b.y);
+                w.real(31, 0.0);
+            }
+        }
     }
     w.pair(0, "ENDSEC");
     w.pair(0, "EOF");

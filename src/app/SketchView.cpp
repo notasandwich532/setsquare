@@ -556,6 +556,49 @@ const std::map<core::Id, std::optional<core::regions::Region>>& SketchView::fill
     return cache.regions;
 }
 
+void SketchView::drawHatch(QPainter& painter, const core::Fill& f, const core::regions::Region& region) const
+{
+    QColor color(f.color.r, f.color.g, f.color.b, f.color.a);
+    color.setAlphaF(color.alphaF() * (m_presentation ? 1.0 : 0.6));
+    const QPainterPath area = regionPath(region);
+    QColor tone = color;  // (its lines too close together to tell apart: the shade they'd make)
+    tone.setAlphaF(tone.alphaF() * 0.45);
+    if (core::hatch::spacing(f.hatch) * m_zoom < 2.5) {
+        painter.fillPath(area, tone);
+        return;
+    }
+    // Its lines across what of the area is on screen, cut to the area by the clip.
+    const QRectF box = area.boundingRect().intersected(QRectF(rect()).adjusted(-4, -4, 4, 4));
+    if (box.isEmpty()) {
+        return;
+    }
+    const core::Vec2 a = toWorld(box.topLeft()), b = toWorld(box.bottomRight());
+    std::vector<core::hatch::Segment> pieces;
+    if (!core::hatch::across(f.hatch, std::min(a.x, b.x), std::min(a.y, b.y), std::max(a.x, b.x), std::max(a.y, b.y),
+                             200000, pieces)) {
+        painter.fillPath(area, tone);
+        return;
+    }
+    QList<QLineF> lines;
+    QPolygonF dots;
+    for (const core::hatch::Segment& s : pieces) {
+        if (s.a.x == s.b.x && s.a.y == s.b.y) {
+            dots << toScreen(s.a);
+        }
+        else {
+            lines << QLineF(toScreen(s.a), toScreen(s.b));
+        }
+    }
+    painter.save();
+    painter.setClipPath(area, Qt::IntersectClip);
+    const double width = f.hatch.width > 0 ? std::max(f.hatch.width * m_zoom, 1.0) : 1.0;
+    painter.setPen(QPen(color, width, Qt::SolidLine, Qt::FlatCap));
+    painter.drawLines(lines);
+    painter.setPen(QPen(color, std::max(width, 2.0), Qt::SolidLine, Qt::RoundCap));
+    painter.drawPoints(dots);
+    painter.restore();
+}
+
 QPainterPath SketchView::regionPath(const core::regions::Region& region) const
 {
     QPainterPath path;
@@ -1440,6 +1483,10 @@ void SketchView::drawSketch(QPainter& painter, core::Id only) const
                 continue;  // its outline is open: nothing to fill until it's closed again
             }
             const auto& region = found->second;
+            if (f.hatch.active()) {
+                drawHatch(painter, f, *region);
+                continue;
+            }
             const double alpha = m_presentation ? 1.0 : 0.35;
             if (f.gradient.active()) {
                 painter.fillPath(regionPath(*region), gradientBrush(f.gradient, alpha));

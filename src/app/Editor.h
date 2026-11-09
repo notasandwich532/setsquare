@@ -97,8 +97,15 @@ public:
     static QString strokeArgs(const core::Sketch& sketch, const core::StrokeStyle& style);
     // Fills the closed area around `at` (a fill already there is recoloured). Throws
     // SketchError, saying how many loose ends there are, if `at` isn't enclosed. With a gradient
-    // (active), the area is filled with that instead of the colour.
-    core::Id fill(core::Vec2 at, const core::Color& color, const core::Gradient& gradient = {});
+    // (active), the area is filled with that instead of the colour; with a hatch (active), it's
+    // drawn with the hatch's lines in the colour instead (a fill is one or the other).
+    core::Id fill(core::Vec2 at, const core::Color& color, const core::Gradient& gradient = {},
+                  const core::Hatch& hatch = {});
+    // A fill's hatch (an inactive one: back to filled solid). Throws SketchError for a scale of 0
+    // or less.
+    void setFillHatch(core::Id fill, const core::Hatch& hatch);
+    // e.g. drawapp.hatch("ANSI31", angle=45, scale=2) (a pattern that isn't built in: its lines=)
+    static QString hatchCall(const core::Hatch& hatch);
     // Paint edits check their gradient (its geometry of the right kinds, in the layer; see
     // core::gradient::check, which throws). One whose geometry has been deleted is dropped: the
     // item goes back to a plain colour, the gradient's average.

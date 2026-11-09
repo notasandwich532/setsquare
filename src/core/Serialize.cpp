@@ -115,6 +115,39 @@ Gradient gradientFromJson(const json& j)
     g.focal = id("focal");
     return g;
 }
+
+// A hatch: its pattern (each family as [angle, x, y, dx, dy, [dashes]]), turned and scaled.
+json hatchToJson(const Hatch& h)
+{
+    json lines = json::array();
+    for (const HatchLine& l : h.lines) {
+        lines.push_back({l.angle, l.x, l.y, l.dx, l.dy, l.dashes});
+    }
+    return {{"pattern", h.pattern}, {"lines", std::move(lines)}, {"angle", h.angle}, {"scale", h.scale}, {"width", h.width}};
+}
+
+Hatch hatchFromJson(const json& j)
+{
+    Hatch h;
+    h.pattern = j.value("pattern", std::string());
+    h.angle = j.value("angle", 0.0);
+    h.scale = j.value("scale", 1.0);
+    h.width = j.value("width", 0.0);
+    for (const json& l : j.value("lines", json::array())) {
+        HatchLine line;
+        line.angle = l.at(0).get<double>();
+        line.x = l.at(1).get<double>();
+        line.y = l.at(2).get<double>();
+        line.dx = l.at(3).get<double>();
+        line.dy = l.at(4).get<double>();
+        line.dashes = l.size() > 5 ? l.at(5).get<std::vector<double>>() : std::vector<double>{};
+        h.lines.push_back(std::move(line));
+    }
+    if (!(h.scale > 0)) {
+        throw SketchError("a hatch's scale must be more than 0");
+    }
+    return h;
+}
 json entityToJson(const Entity& e)
 {
     json j{{"id", e.id}, {"type", toString(e.kind())}};
@@ -310,6 +343,9 @@ std::string toJson(const Sketch& sketch, bool compact, const std::vector<std::st
                    {"layer", f.layer}};
             if (f.gradient.active()) {
                 j["gradient"] = gradientToJson(f.gradient);
+            }
+            if (f.hatch.active()) {
+                j["hatch"] = hatchToJson(f.hatch);
             }
             fills.push_back(std::move(j));
         }
@@ -554,6 +590,9 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
             }
             if (j.contains("gradient")) {
                 f.gradient = gradientFromJson(j.at("gradient"));
+            }
+            if (j.contains("hatch")) {
+                f.hatch = hatchFromJson(j.at("hatch"));
             }
             const auto& seed = j.at("seed");
             f.seed = Point{seed.at(0).get<double>(), seed.at(1).get<double>()};

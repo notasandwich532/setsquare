@@ -3,6 +3,7 @@
 #include "TextShapes.h"
 
 #include <core/Gradient.h>
+#include <core/Hatch.h>
 #include <core/Regions.h>
 #include <core/Serialize.h>
 
@@ -1043,15 +1044,64 @@ void Editor::setFillGradient(Id id, const core::Gradient& given)
     core::Gradient gradient = given;
     settleGradient(gradient, f.color, f.layer);
     f.gradient = gradient;
+    if (gradient.active()) {
+        f.hatch = {};  // (filled with the gradient: not hatched)
+    }
     m_sketch.setFill(f);
     log(QStringLiteral("%1.gradient = %2")
             .arg(name(m_sketch, id), gradient.active() ? gradientCall(m_sketch, gradient) : QStringLiteral("None")));
 }
 
-Id Editor::fill(core::Vec2 at, const core::Color& givenColor, const core::Gradient& givenGradient)
+void Editor::setFillHatch(Id id, const core::Hatch& hatch)
 {
+    if (hatch.active() && !(hatch.scale > 0)) {
+        throw core::SketchError("a hatch's scale must be more than 0");
+    }
+    core::Fill f = m_sketch.fill(id);
+    f.hatch = hatch;
+    if (hatch.active()) {
+        f.gradient = {};  // (hatched: its lines in the plain colour)
+    }
+    m_sketch.setFill(f);
+    log(QStringLiteral("%1.hatch = %2").arg(name(m_sketch, id), hatch.active() ? hatchCall(hatch) : QStringLiteral("None")));
+}
+
+QString Editor::hatchCall(const core::Hatch& h)
+{
+    QStringList args{QStringLiteral("\"%1\"").arg(QString::fromStdString(h.pattern))};
+    // A built-in pattern by its name alone; any other with its lines.
+    const auto known = core::hatch::builtin(h.pattern);
+    if (!known || known->lines != h.lines) {
+        QStringList lines;
+        for (const core::HatchLine& l : h.lines) {
+            QStringList dashes;
+            for (double d : l.dashes) {
+                dashes << number(d);
+            }
+            lines << QStringLiteral("(%1, %2, %3, %4, %5, [%6])")
+                         .arg(number(l.angle), number(l.x), number(l.y), number(l.dx), number(l.dy), dashes.join(QStringLiteral(", ")));
+        }
+        args << QStringLiteral("lines=[%1]").arg(lines.join(QStringLiteral(", ")));
+    }
+    if (h.angle != 0.0) {
+        args << QStringLiteral("angle=%1").arg(number(h.angle));
+    }
+    if (h.scale != 1.0) {
+        args << QStringLiteral("scale=%1").arg(number(h.scale));
+    }
+    if (h.width != 0.0) {
+        args << QStringLiteral("width=%1").arg(number(h.width));
+    }
+    return QStringLiteral("drawapp.hatch(%1)").arg(args.join(QStringLiteral(", ")));
+}
+
+Id Editor::fill(core::Vec2 at, const core::Color& givenColor, const core::Gradient& givenGradient, const core::Hatch& hatch)
+{
+    if (hatch.active() && !(hatch.scale > 0)) {
+        throw core::SketchError("a hatch's scale must be more than 0");
+    }
     core::Color color = givenColor;
-    core::Gradient gradient = givenGradient;
+    core::Gradient gradient = hatch.active() ? core::Gradient{} : givenGradient;
     settleGradient(gradient, color, m_sketch.activeLayer());
     const core::regions::Arrangement arrangement(m_sketch, m_sketch.activeLayer());
     const auto region = arrangement.regionAt(at);
@@ -1078,20 +1128,23 @@ Id Editor::fill(core::Vec2 at, const core::Color& givenColor, const core::Gradie
         core::Fill f = m_sketch.fill(id);
         f.color = color;
         f.gradient = gradient;
+        f.hatch = hatch;
         m_sketch.setFill(f);
     }
     else {
         core::Fill f;
         f.color = color;
         f.gradient = gradient;
+        f.hatch = hatch;
         f.seed = core::Point{at.x, at.y};
         f.boundary = region->boundary;
         id = m_sketch.addFill(f);
     }
-    log(QStringLiteral("%1 = s.fill(at=%2, color=%3)")
+    log(QStringLiteral("%1 = s.fill(at=%2, color=%3%4)")
             .arg(name(m_sketch, id), pair(at),
                  gradient.active() ? gradientCall(m_sketch, gradient)
-                                   : QStringLiteral("\"%1\"").arg(QString::fromStdString(color.hex()))));
+                                   : QStringLiteral("\"%1\"").arg(QString::fromStdString(color.hex())),
+                 hatch.active() ? QStringLiteral(", hatch=") + hatchCall(hatch) : QString()));
     return id;
 }
 

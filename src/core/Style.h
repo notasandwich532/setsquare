@@ -89,6 +89,32 @@ struct Gradient
     bool operator==(const Gradient&) const = default;
 };
 
+// One family of a hatch's lines (as in AutoCAD's .pat files): parallel lines at `angle` (degrees
+// from +x), one through (x, y), each next one shifted by (dx along the lines, dy across them), and
+// dashed by `dashes` (mm: positive a dash, negative a gap, 0 a dot; none: unbroken).
+struct HatchLine
+{
+    double angle = 0.0;
+    double x = 0.0, y = 0.0;
+    double dx = 0.0, dy = 1.0;
+    std::vector<double> dashes;
+    bool operator==(const HatchLine&) const = default;
+};
+
+// An area drawn with lines rather than filled solid (a fill's, when active): a pattern of families
+// of lines, turned and scaled as a whole, in the fill's colour. See core/Hatch.h for the built-in
+// patterns and for laying the lines out.
+struct Hatch
+{
+    std::string pattern;           // its name: a built-in's, or that of the file it came from
+    std::vector<HatchLine> lines;  // the pattern, at scale 1 and angle 0
+    double angle = 0.0;            // degrees, the whole pattern turned (about the origin)
+    double scale = 1.0;
+    double width = 0.0;  // its lines', mm (on the drawing); 0: hairlines
+    bool active() const { return !lines.empty(); }
+    bool operator==(const Hatch&) const = default;
+};
+
 // A curve's line in the drawing.
 struct StrokeStyle
 {

@@ -17,6 +17,7 @@
 #include <core/Export.h>
 #include <core/Features.h>
 #include <core/Gradient.h>
+#include <core/Hatch.h>
 #include <core/Regions.h>
 #include <core/Modify.h>
 #include <core/Serialize.h>
@@ -605,6 +606,74 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
         .def(py::self == py::self)
         .def("__repr__", [](const core::Gradient& g) { return Editor::gradientCall(sketch(), g).toStdString(); });
 
+    // --- hatches -----------------------------------------------------------------------------
+
+    py::class_<core::Hatch>(m, "Hatch",
+                            "A hatch for a fill: lines in a pattern instead of a solid colour (made by drawapp.hatch).")
+        .def_property_readonly("pattern", [](const core::Hatch& h) { return h.pattern; }, "Its pattern's name.")
+        .def_property_readonly("lines", [](const core::Hatch& h) {
+            py::list out;
+            for (const core::HatchLine& l : h.lines) {
+                out.append(py::make_tuple(l.angle, l.x, l.y, l.dx, l.dy, l.dashes));
+            }
+            return out;
+        }, "The pattern, at scale 1: [(angle, x, y, dx, dy, [dashes]), ...] (see drawapp.hatch).")
+        .def_property_readonly("angle", [](const core::Hatch& h) { return h.angle; }, "Degrees, the pattern turned.")
+        .def_property_readonly("scale", [](const core::Hatch& h) { return h.scale; })
+        .def_property_readonly("width", [](const core::Hatch& h) { return h.width; }, "Its lines' width, mm (0: hairlines).")
+        .def(py::self == py::self)
+        .def("__repr__", [](const core::Hatch& h) { return Editor::hatchCall(h).toStdString(); });
+    m.def("hatch", [](const std::string& pattern, py::object lines, double angle, double scale, double width) {
+        core::Hatch h;
+        if (lines.is_none()) {
+            const auto known = core::hatch::builtin(pattern, angle, scale, width);
+            if (!known) {
+                throw py::value_error("no pattern called '" + pattern + "' (see drawapp.hatch_patterns()); give lines= for one of your own");
+            }
+            h = *known;
+        }
+        else {
+            h.pattern = pattern;
+            h.angle = angle;
+            h.scale = scale;
+            h.width = width;
+            for (py::handle item : lines.cast<py::sequence>()) {
+                const auto seq = item.cast<py::sequence>();
+                if (py::len(seq) < 5) {
+                    throw py::value_error("a hatch line is (angle, x, y, dx, dy[, [dashes]])");
+                }
+                core::HatchLine l{seq[0].cast<double>(), seq[1].cast<double>(), seq[2].cast<double>(),
+                                  seq[3].cast<double>(), seq[4].cast<double>(), {}};
+                if (py::len(seq) > 5) {
+                    l.dashes = seq[5].cast<std::vector<double>>();
+                }
+                if (std::abs(l.dy) < 1e-9) {
+                    throw py::value_error("a hatch line's dy (the gap to the next line) can't be 0");
+                }
+                h.lines.push_back(std::move(l));
+            }
+            if (h.lines.empty()) {
+                throw py::value_error("a hatch needs at least one line");
+            }
+        }
+        if (!(scale > 0) || width < 0) {
+            throw py::value_error("a hatch's scale must be more than 0, and its width 0 or more");
+        }
+        return h;
+    }, py::arg("pattern"), py::arg("lines") = py::none(), py::arg("angle") = 0.0, py::arg("scale") = 1.0,
+       py::arg("width") = 0.0,
+       "A hatch for Sketch.fill(hatch=) or Fill.hatch: a built-in pattern by name (see hatch_patterns()), or one "
+       "of your own named `pattern` with lines=[(angle, x, y, dx, dy, [dashes]), ...] as in AutoCAD .pat files "
+       "(mm: lines at `angle` degrees, one through (x, y), each next shifted dx along and dy across; dashes "
+       "positive, gaps negative, 0 a dot). angle turns it, scale sizes it, width is its lines' (mm; 0 hairlines).");
+    m.def("hatch_patterns", [] {
+        py::list out;
+        for (const core::hatch::Pattern& p : core::hatch::builtins()) {
+            out.append(py::make_tuple(p.name, p.description));
+        }
+        return out;
+    }, "The built-in hatch patterns: [(name, description), ...].");
+
     // The geometry a gradient is placed by: items of the sketch.
     auto gradientPoint = [](py::handle h, const char* what) {
         const Id id = idOf(h);
@@ -1058,6 +1127,21 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
                 });
             },
             "Its gradient (drawapp.Gradient), or None for its plain colour. Set it to change; None takes it off.")
+        .def_property(
+            "hatch", [fillOf](const FillH& f) -> py::object {
+                const core::Fill& fill = fillOf(f.id);
+                return fill.hatch.active() ? py::cast(fill.hatch) : py::none();
+            },
+            [fillOf](const FillH& f, py::object hatch) {
+                fillOf(f.id);
+                const core::Hatch h = hatch.is_none() ? core::Hatch{} : hatch.cast<core::Hatch>();
+                editReturningId("Hatch", [&](Editor& ed) {
+                    ed.setFillHatch(f.id, h);
+                    return f.id;
+                });
+            },
+            "Its hatch (drawapp.Hatch: the area drawn with lines in its colour), or None (filled solid). Set it to "
+            "change; None takes it off.")
         .def_property_readonly("at", [fillOf](const FillH& f) {
             const core::Fill& fill = fillOf(f.id);
             return py::make_tuple(fill.seed.x, fill.seed.y);
@@ -1090,7 +1174,9 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
             }
             const core::Fill& fill = sketch().fill(f.id);
             return "<Fill f" + std::to_string(f.id) + " "
-                   + (fill.gradient.active() ? std::string(core::toString(fill.gradient.kind)) + " gradient" : fill.color.hex())
+                   + (fill.gradient.active() ? std::string(core::toString(fill.gradient.kind)) + " gradient"
+                      : fill.hatch.active()  ? fill.color.hex() + " " + fill.hatch.pattern + " hatch"
+                                             : fill.color.hex())
                    + ">";
         });
 
@@ -1698,13 +1784,15 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
            "Give curves a stroke: color as '#rrggbb' (or '#rrggbbaa', or an (r, g, b[, a]) tuple), width in mm "
            "(0 = hairline; \"none\": no line, e.g. for a fill without an outline; color may be a drawapp.linear / "
            "drawapp.radial gradient), dash 'solid', 'dashed', 'dotted', 'dash_dot' or 'dash_dot_dot'.")
-        .def("fill", [](const SketchH&, py::handle at, py::handle color) {
+        .def("fill", [](const SketchH&, py::handle at, py::handle color, py::object hatch) {
             const core::Vec2 where = vecArg(at);
             const PaintArg p = paintArg(color);
-            return wrap(editReturningId("Fill", [&](Editor& ed) { return ed.fill(where, p.color, p.gradient); }));
-        }, py::arg("at"), py::arg("color") = "#c3c3c3",
+            const core::Hatch h = hatch.is_none() ? core::Hatch{} : hatch.cast<core::Hatch>();
+            return wrap(editReturningId("Fill", [&](Editor& ed) { return ed.fill(where, p.color, p.gradient, h); }));
+        }, py::arg("at"), py::arg("color") = "#c3c3c3", py::arg("hatch") = py::none(),
            "Fill the closed area around `at` (as a paint bucket would; a fill already there is recoloured). color: a "
-           "colour, or a gradient (drawapp.linear / drawapp.radial). "
+           "colour, or a gradient (drawapp.linear / drawapp.radial). hatch: a drawapp.hatch, to draw the area with "
+           "its lines in the colour instead. "
            "Raises ValueError if `at` isn't enclosed: see loose_ends().")
         .def("text", [](const SketchH&, const std::string& text, py::object at, double height, py::object font,
                         double angle, bool bold, bool italic, const std::string& outline, double minThickness,
