@@ -4,6 +4,7 @@
 #include "Images.h"
 #include "TextShapes.h"
 
+#include <core/Curves.h>
 #include <core/Export.h>
 #include <core/Groups.h>
 #include <core/Hatch.h>
@@ -303,6 +304,199 @@ QString findLinked(const QString& given, const QString& folder)
     const QString name = QString(path).replace(QLatin1Char('\\'), QLatin1Char('/')).section(QLatin1Char('/'), -1);
     const QFileInfo byName(QDir(folder).filePath(name));
     return !folder.isEmpty() && byName.isFile() ? byName.absoluteFilePath() : QString();
+}
+
+// --- Cutting outlines (clip paths, pattern tiles) ---------------------------------------------
+
+// A segment as one of the sketch's curve paths (to find where it crosses others).
+core::curve::Path pathOf(const Segment& s)
+{
+    switch (s.kind) {
+        case Segment::Kind::Line: return core::curve::Path::line(s.p[0], s.p[1]);
+        case Segment::Kind::Cubic:
+            return core::curve::Path::spline({core::curve::Bezier{{s.p[0], s.p[1], s.p[2], s.p[3]}}}, false, 0.0, 1.0);
+        case Segment::Kind::Ellipse: break;
+    }
+    core::curve::EllipseFrame f;
+    f.c = s.c;
+    f.u = {std::cos(s.phi), std::sin(s.phi)};
+    f.a = s.rx;
+    f.b = s.ry;
+    if (s.whole()) {
+        return core::curve::Path::ellipse(f);
+    }
+    return s.dt > 0 ? core::curve::Path::ellipseArc(f, s.t0, s.dt) : core::curve::Path::ellipseArc(f, s.t0 + s.dt, -s.dt);
+}
+
+// How far along a segment (0 to 1) a point on it is.
+double fractionAlong(const Segment& s, const core::curve::Path& p, Vec2 q)
+{
+    const double t = p.param(q);
+    if (s.kind != Segment::Kind::Ellipse) {
+        return std::clamp(t, 0.0, 1.0);
+    }
+    if (s.whole()) {
+        double f = std::fmod((s.dt > 0 ? t - s.t0 : s.t0 - t) / kTwoPi, 1.0);
+        return f < 0 ? f + 1.0 : f;
+    }
+    const double f = std::clamp(t / std::abs(s.dt), 0.0, 1.0);
+    return s.dt > 0 ? f : 1.0 - f;
+}
+
+// The same curve between two fractions along it.
+Segment pieceOf(const Segment& s, double f0, double f1)
+{
+    switch (s.kind) {
+        case Segment::Kind::Line: return line(lerp(s.p[0], s.p[1], f0), lerp(s.p[0], s.p[1], f1));
+        case Segment::Kind::Cubic: {
+            const core::curve::Bezier part = core::curve::Bezier{{s.p[0], s.p[1], s.p[2], s.p[3]}}.part(f0, f1);
+            return cubic(part.p[0], part.p[1], part.p[2], part.p[3]);
+        }
+        case Segment::Kind::Ellipse: break;
+    }
+    return ellipse(s.c, s.rx, s.ry, s.phi, s.t0 + s.dt * f0, s.dt * (f1 - f0));
+}
+
+std::vector<std::vector<Vec2>> ringsOf(const std::vector<Contour>& contours)
+{
+    std::vector<std::vector<Vec2>> rings;
+    for (const Contour& c : contours) {
+        std::vector<Vec2> ring;
+        for (const Segment& s : c.segments) {
+            const std::vector<Vec2> pts = s.sample(12);
+            ring.insert(ring.end(), pts.begin(), pts.end());
+        }
+        if (ring.size() >= 3) {
+            rings.push_back(std::move(ring));  // (open ones close themselves, as SVG fills them)
+        }
+    }
+    return rings;
+}
+
+bool pointInShape(const std::vector<std::vector<Vec2>>& rings, Vec2 p, bool evenOdd);
+
+bool inArea(const Area& a, Vec2 p)
+{
+    return pointInShape(a.rings, p, a.evenOdd);
+}
+
+// Segments with what they need for finding crossings quickly.
+struct Cuttable
+{
+    const Segment* segment;
+    core::curve::Path path;
+    std::vector<Vec2> samples;
+    double x0, y0, x1, y1;
+};
+
+std::vector<Cuttable> cuttable(const std::vector<const Segment*>& segments)
+{
+    std::vector<Cuttable> out;
+    for (const Segment* s : segments) {
+        Cuttable c{s, pathOf(*s), {}, 1e300, 1e300, -1e300, -1e300};
+        c.samples = core::curve::crossingSamples(c.path);
+        for (const Vec2& p : s->sample(16)) {
+            c.x0 = std::min(c.x0, p.x);
+            c.y0 = std::min(c.y0, p.y);
+            c.x1 = std::max(c.x1, p.x);
+            c.y1 = std::max(c.y1, p.y);
+        }
+        const double pad = 1e-6 * std::max({1.0, c.x1 - c.x0, c.y1 - c.y0});
+        c.x0 -= pad;
+        c.y0 -= pad;
+        c.x1 += pad;
+        c.y1 += pad;
+        out.push_back(std::move(c));
+    }
+    return out;
+}
+
+// The pieces of a segment between where it crosses the others, each kept if `keep` says so of
+// its middle.
+template <typename Keep>
+void cutSegment(const Cuttable& s, const std::vector<Cuttable>& by, const Keep& keep, std::vector<Segment>& out)
+{
+    std::vector<double> cuts{0.0, 1.0};
+    for (const Cuttable& o : by) {
+        if (o.x0 > s.x1 || o.x1 < s.x0 || o.y0 > s.y1 || o.y1 < s.y0) {
+            continue;
+        }
+        for (const Vec2& q : core::curve::intersections(s.path, s.samples, o.path, o.samples)) {
+            cuts.push_back(fractionAlong(*s.segment, s.path, q));
+        }
+    }
+    std::ranges::sort(cuts);
+    for (size_t i = 0; i + 1 < cuts.size(); ++i) {
+        if (cuts[i + 1] - cuts[i] < 1e-9) {
+            continue;
+        }
+        const double middle = (cuts[i] + cuts[i + 1]) / 2;
+        if (keep(pieceOf(*s.segment, cuts[i], middle).end())) {
+            out.push_back(pieceOf(*s.segment, cuts[i], cuts[i + 1]));
+        }
+    }
+}
+
+// A shape's outlines cut to a clip (inside any of its areas). A filled one also gets the parts of
+// the clip's outline that are inside it (`insideShape`), with no line of their own, so its fill
+// closes where it's cut.
+std::vector<Contour> cutTo(const std::vector<Contour>& contours, const std::vector<Area>& clip, bool filled,
+                           const std::function<bool(Vec2)>& insideShape)
+{
+    auto inClip = [&](Vec2 p) { return std::ranges::any_of(clip, [&](const Area& a) { return inArea(a, p); }); };
+    std::vector<const Segment*> shapeSegments, clipSegments;
+    for (const Contour& c : contours) {
+        for (const Segment& s : c.segments) {
+            shapeSegments.push_back(&s);
+        }
+    }
+    for (const Area& a : clip) {
+        for (const Contour& c : a.contours) {
+            for (const Segment& s : c.segments) {
+                clipSegments.push_back(&s);
+            }
+        }
+    }
+    const std::vector<Cuttable> shapeCut = cuttable(shapeSegments), clipCut = cuttable(clipSegments);
+    std::vector<Contour> out;
+    size_t k = 0;
+    for (const Contour& c : contours) {
+        Contour kept;
+        kept.lineless = c.lineless;
+        for (size_t i = 0; i < c.segments.size(); ++i, ++k) {
+            cutSegment(shapeCut[k], clipCut, inClip, kept.segments);
+        }
+        if (!kept.segments.empty()) {
+            out.push_back(std::move(kept));
+        }
+    }
+    if (filled) {
+        // (each area's outline where it's inside the shape, and not inside another of the clip's areas)
+        size_t j = 0;
+        for (size_t a = 0; a < clip.size(); ++a) {
+            for (const Contour& c : clip[a].contours) {
+                Contour edge;
+                edge.lineless = true;
+                for (size_t i = 0; i < c.segments.size(); ++i, ++j) {
+                    cutSegment(clipCut[j], shapeCut, [&](Vec2 p) {
+                        if (!insideShape(p)) {
+                            return false;
+                        }
+                        for (size_t b = 0; b < clip.size(); ++b) {
+                            if (b != a && inArea(clip[b], p)) {
+                                return false;
+                            }
+                        }
+                        return true;
+                    }, edge.segments);
+                }
+                if (!edge.segments.empty()) {
+                    out.push_back(std::move(edge));
+                }
+            }
+        }
+    }
+    return out;
 }
 
 // Which way a segment runs at its start and at its end.
@@ -1190,6 +1384,75 @@ private:
         m_out.images.push_back(std::move(def));
     }
 
+    // A clip-path's areas in drawing coordinates, for an element (`m`: its user space to the
+    // drawing). Each of its shapes is an area, by its clip-rule; inside the clip: inside any of
+    // them. None if it isn't a clip path (or can't be placed: its units a group's box).
+    std::optional<std::vector<Area>> clipAreas(const QString& value, const Affine& m, const Node& element)
+    {
+        static const QRegularExpression ref(QStringLiteral("url\\(\\s*['\"]?#([^)'\"]+)"));
+        const auto match = ref.match(value);
+        const Node* clip = match.hasMatch() ? m_byId.value(match.captured(1)) : nullptr;
+        if (!clip || clip->tag != QStringLiteral("clipPath")) {
+            return std::nullopt;
+        }
+        Affine base = m * transformOf(clip->attrs.value(QStringLiteral("transform")));
+        if (clip->attrs.value(QStringLiteral("clipPathUnits")) == QStringLiteral("objectBoundingBox")) {
+            // (in the element's own box: a shape's; a group's isn't known yet)
+            double x0 = 1e300, y0 = 1e300, x1 = -1e300, y1 = -1e300;
+            for (const Contour& c : shapeContours(element)) {
+                for (const Segment& s : c.segments) {
+                    for (const Vec2& p : s.sample(8)) {
+                        x0 = std::min(x0, p.x);
+                        y0 = std::min(y0, p.y);
+                        x1 = std::max(x1, p.x);
+                        y1 = std::max(y1, p.y);
+                    }
+                }
+            }
+            if (!(x1 > x0 && y1 > y0)) {
+                skip("clip paths sized to a group (drawn unclipped)");
+                return std::nullopt;
+            }
+            base = base * Affine::translate(x0, y0) * Affine::scale(x1 - x0, y1 - y0);
+        }
+        const QString rule = ownStyle(*clip).value(QStringLiteral("clip-rule"), QStringLiteral("nonzero"));
+        std::vector<Area> areas;
+        for (const Node& k : clip->kids) {
+            const QHash<QString, QString> style = ownStyle(k);
+            if (style.value(QStringLiteral("display")) == QStringLiteral("none")) {
+                continue;
+            }
+            Affine at = base * transformOf(k.attrs.value(QStringLiteral("transform")));
+            const Node* shape = &k;
+            if (k.tag == QStringLiteral("use")) {
+                const QString href = k.attrs.value(QStringLiteral("href"));
+                shape = href.startsWith(QLatin1Char('#')) ? m_byId.value(href.mid(1)) : nullptr;
+                if (!shape) {
+                    continue;
+                }
+                at = at * Affine::translate(number(k, "x"), number(k, "y")) * transformOf(shape->attrs.value(QStringLiteral("transform")));
+            }
+            else if (k.tag == QStringLiteral("text")) {
+                skip("clip paths made of text (drawn unclipped)");
+                return std::nullopt;
+            }
+            Area a;
+            a.contours = shapeContours(*shape);
+            for (Contour& c : a.contours) {
+                c.closed = true;  // (an open one clips as if closed)
+                for (Segment& s : c.segments) {
+                    s = transformed(s, at);
+                }
+            }
+            a.rings = ringsOf(a.contours);
+            a.evenOdd = style.value(QStringLiteral("clip-rule"), rule) == QStringLiteral("evenodd");
+            if (!a.rings.empty()) {
+                areas.push_back(std::move(a));
+            }
+        }
+        return areas;  // (none: nothing shows through)
+    }
+
     // A width or height in user units; 0 if it's missing or a percentage (then it isn't known here).
     double size(const Node& n, const char* name) const
     {
@@ -1517,13 +1780,29 @@ private:
         if (own.contains(QStringLiteral("opacity"))) {
             opacity *= firstOr(numbers(own.value(QStringLiteral("opacity"))), 1.0);
         }
-        if (own.contains(QStringLiteral("clip-path")) && own.value(QStringLiteral("clip-path")) != QStringLiteral("none")) {
-            skip("clip paths (drawn unclipped)");
-        }
         if (own.contains(QStringLiteral("mask")) && own.value(QStringLiteral("mask")) != QStringLiteral("none")) {
             skip("masks");
         }
         const Affine m = isRoot ? parent : parent * transformOf(n.attrs.value(QStringLiteral("transform")));
+        // A clip: everything in this element is cut to it (on top of any it's in already).
+        bool clipped = false;
+        if (own.contains(QStringLiteral("clip-path")) && own.value(QStringLiteral("clip-path")) != QStringLiteral("none")) {
+            if (auto areas = clipAreas(own.value(QStringLiteral("clip-path")), m, n)) {
+                m_clips.push_back(std::move(*areas));
+                clipped = true;
+            }
+        }
+        struct Unclip
+        {
+            std::vector<std::vector<Area>>& clips;
+            bool on;
+            ~Unclip()
+            {
+                if (on) {
+                    clips.pop_back();
+                }
+            }
+        } unclip{m_clips, clipped};
 
         const QString& tag = n.tag;
         if (tag == QStringLiteral("g") || tag == QStringLiteral("svg") || tag == QStringLiteral("a")
@@ -1566,10 +1845,16 @@ private:
             return;
         }
         if (tag == QStringLiteral("text")) {
+            if (!m_clips.empty()) {
+                note("texts and pictures in clip paths came in unclipped");
+            }
             text(n, m, paint, opacity, layer);
             return;
         }
         if (tag == QStringLiteral("image")) {
+            if (!m_clips.empty()) {
+                note("texts and pictures in clip paths came in unclipped");
+            }
             if (paint.visible) {
                 image(n, m, layer, opacity);
             }
@@ -1621,6 +1906,26 @@ private:
         // Our own exports: their Construction layer.
         const QString top = QString::fromStdString(layer).section(QLatin1Char('/'), -1);
         st.construction = top.compare(QStringLiteral("Construction"), Qt::CaseInsensitive) == 0;
+        // Cut to the clips it's in, one after another.
+        if (!m_clips.empty()) {
+            Area original{shape.contours, ringsOf(shape.contours), st.evenOdd};
+            for (const std::vector<Area>& clip : m_clips) {
+                auto inside = [&](Vec2 p) {
+                    if (!inArea(original, p)) {
+                        return false;
+                    }
+                    return std::ranges::all_of(shape.clips, [&](const std::vector<Area>& c) {
+                        return std::ranges::any_of(c, [&](const Area& a) { return inArea(a, p); });
+                    });
+                };
+                shape.contours = cutTo(shape.contours, clip, st.fill.has_value(), inside);
+                shape.clips.push_back(clip);
+            }
+            shape.fillArea = std::move(original);
+            if (shape.contours.empty()) {
+                return;  // (all of it outside)
+            }
+        }
         if (!layer.empty() && std::ranges::find(m_layerOrder, layer) == m_layerOrder.end()) {
             m_layerOrder.push_back(layer);
         }
@@ -1983,6 +2288,7 @@ private:
     std::vector<std::pair<QString, QHash<QString, QString>>> m_css;
     std::vector<std::string> m_layerOrder;
     Vec2 m_viewport;  // user units
+    std::vector<std::vector<Area>> m_clips;  // the clip paths of the elements being walked
     Drawing m_out;
 };
 }  // namespace
@@ -3502,9 +3808,13 @@ Report build(core::Sketch& sketch, const Drawing& drawing, const Options& o)
         };
         for (const Shape* shape : byLayer[l]) {
             std::vector<Id> curves;
+            std::set<Id> lineless;  // (a clip's edge across a fill: no line of its own)
             for (const Contour& c : shape->contours) {
                 const std::vector<Id> ids = builder.contour(c);
                 curves.insert(curves.end(), ids.begin(), ids.end());
+                if (c.lineless) {
+                    lineless.insert(ids.begin(), ids.end());
+                }
             }
             const Style& st = shape->style;
             const core::Gradient strokeGradient =
@@ -3513,6 +3823,14 @@ Report build(core::Sketch& sketch, const Drawing& drawing, const Options& o)
                 fillGradients[shape] = gradientOf(*st.fillGradient);
             }
             for (Id id : curves) {
+                if (lineless.contains(id)) {
+                    if (!st.construction && !sketch.stroke(id)) {
+                        core::StrokeStyle none;
+                        none.width = core::StrokeStyle::kNone;
+                        sketch.setStroke(id, none);
+                    }
+                    continue;
+                }
                 if (st.construction) {
                     sketch.entity(id).construction = true;
                 }
@@ -3534,22 +3852,17 @@ Report build(core::Sketch& sketch, const Drawing& drawing, const Options& o)
             made.insert(made.end(), curves.begin(), curves.end());
             report.curves += static_cast<int>(curves.size());
             if (st.fill && !st.construction) {
+                // Where it's filled: its outline (as it was before any clip cut it).
                 Filled f{shape, {}, 1e300, 1e300, -1e300, -1e300};
-                for (const Contour& c : shape->contours) {
-                    std::vector<Vec2> ring;
-                    for (const Segment& seg : c.segments) {
-                        for (const Vec2& p : seg.sample(12)) {
-                            const Vec2 q = add(p, shift);
-                            ring.push_back(q);
-                            f.x0 = std::min(f.x0, q.x);
-                            f.y0 = std::min(f.y0, q.y);
-                            f.x1 = std::max(f.x1, q.x);
-                            f.y1 = std::max(f.y1, q.y);
-                        }
+                for (std::vector<Vec2> ring : shape->fillArea ? shape->fillArea->rings : ringsOf(shape->contours)) {
+                    for (Vec2& q : ring) {
+                        q = add(q, shift);
+                        f.x0 = std::min(f.x0, q.x);
+                        f.y0 = std::min(f.y0, q.y);
+                        f.x1 = std::max(f.x1, q.x);
+                        f.y1 = std::max(f.y1, q.y);
                     }
-                    if (ring.size() >= 3) {
-                        f.rings.push_back(std::move(ring));  // (open ones close themselves, as SVG fills them)
-                    }
+                    f.rings.push_back(std::move(ring));
                 }
                 if (!f.rings.empty()) {
                     fillsByLayer[sketch.layerOfSublayer(target[l])].push_back(std::move(f));
@@ -3605,7 +3918,10 @@ Report build(core::Sketch& sketch, const Drawing& drawing, const Options& o)
             const Filled* top = nullptr;
             for (const Filled& f : shapes) {
                 if (p.x >= f.x0 && p.x <= f.x1 && p.y >= f.y0 && p.y <= f.y1
-                    && pointInShape(f.rings, p, f.shape->style.evenOdd)) {
+                    && pointInShape(f.rings, p, f.shape->style.evenOdd)
+                    && std::ranges::all_of(f.shape->clips, [&](const std::vector<Area>& clip) {  // (and inside its clips)
+                           return std::ranges::any_of(clip, [&](const Area& a) { return inArea(a, sub(p, shift)); });
+                       })) {
                     top = &f;
                 }
             }

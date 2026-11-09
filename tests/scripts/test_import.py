@@ -341,6 +341,32 @@ corners = {(round(p.x, 6), round(p.y, 6)) for p in s.points}
 for q in [(60, 50), (52, 54), (52, 46), (80, 60), (76, 52), (84, 52)]:
     assert q in corners, (q, sorted(corners))
 
+# Clip paths: shapes cut to them (fills closed along the cut, with no line there); a group's clip
+# of two windows; a line cut short.
+clips = write("clips.svg", """<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" viewBox="0 0 100 100">
+  <defs>
+    <clipPath id="half"><rect x="0" y="0" width="50" height="100"/></clipPath>
+    <clipPath id="two"><rect x="60" y="60" width="10" height="30"/><rect x="80" y="60" width="10" height="30"/></clipPath>
+  </defs>
+  <circle cx="50" cy="50" r="20" fill="blue" stroke="black" clip-path="url(#half)"/>
+  <g clip-path="url(#two)"><rect x="55" y="70" width="40" height="10" fill="green"/></g>
+  <line x1="0" y1="95" x2="100" y2="95" stroke="red" clip-path="url(#half)"/>
+</svg>""")
+doc.new()
+rep = s.import_file(clips)
+assert not rep["skipped"], rep
+healthy()
+blue = [f for f in s.fills if f.color == "#0000ff"]
+assert len(blue) == 1 and isclose(blue[0].area, pi * 400 / 2, rel_tol=1e-3), [f.area for f in blue]  # (the left half)
+assert max(p.x for p in s.points if hypot(p.x - 50, p.y - 50) <= 20 + 1e-6) <= 50 + 1e-6  # (nothing of it right of the cut)
+cut = [l for l in s.lines if near(l.p1.pos, (50, 30)) or near(l.p2.pos, (50, 30))]
+assert cut and cut[0].stroke["width"] == "none", cut  # (the cut edge: no line)
+assert [a for a in s.arcs if isclose(a.radius, 20)][0].stroke["color"] == "#000000"
+green = sorted(round(f.area, 6) for f in s.fills if f.color == "#008000")
+assert green == [100, 100], green  # (seen through both windows)
+red = [l for l in s.lines if l.stroke and l.stroke["color"] == "#ff0000"]
+assert len(red) == 1 and isclose(red[0].length, 50), [l.length for l in red]
+
 notes = write("notes.dxf", "\n".join(str(x) for x in [
     0, "SECTION", 2, "HEADER", 9, "$INSUNITS", 70, 4, 0, "ENDSEC",
     0, "SECTION", 2, "TABLES", 0, "TABLE", 2, "STYLE",

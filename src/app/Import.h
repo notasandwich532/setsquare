@@ -45,6 +45,16 @@ struct Contour
 {
     std::vector<Segment> segments;
     bool closed = false;
+    bool lineless = false;  // only bounds its shape's fill (where a clip cut it): no line of its own
+};
+
+// An area: closed outlines and their fill rule, in drawing coordinates (the outlines as they are,
+// and points along them, to tell what's inside).
+struct Area
+{
+    std::vector<Contour> contours;
+    std::vector<std::vector<core::Vec2>> rings;
+    bool evenOdd = false;
 };
 
 // A gradient as the file places it, in drawing coordinates. Built as sketch geometry for it to
@@ -80,6 +90,10 @@ struct Shape
     std::vector<Contour> contours;
     Style style;
     std::string layer;  // the file's layer it's on
+    // Cut by clips (its contours are then what's left): where it's filled, as it was before, and
+    // each clip it was cut to (inside it: inside any of the clip's areas).
+    std::optional<Area> fillArea;
+    std::vector<std::vector<Area>> clips;
 };
 
 // A picture in the file: it comes in as a reference image (see core::Image).
