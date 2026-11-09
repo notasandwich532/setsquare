@@ -499,6 +499,21 @@ std::vector<Contour> cutTo(const std::vector<Contour>& contours, const std::vect
     return out;
 }
 
+// A segment that's really straight (a line, or a cubic with its handles on the line).
+bool straightSegment(const Segment& s)
+{
+    if (s.kind == Segment::Kind::Line) {
+        return true;
+    }
+    if (s.kind != Segment::Kind::Cubic) {
+        return false;
+    }
+    const Vec2 d = sub(s.p[3], s.p[0]);
+    const double l = len(d);
+    return l > 1e-12 && std::abs(cross(d, sub(s.p[1], s.p[0]))) / l < 1e-9 * std::max(1.0, l)
+        && std::abs(cross(d, sub(s.p[2], s.p[0]))) / l < 1e-9 * std::max(1.0, l);
+}
+
 // Which way a segment runs at its start and at its end.
 Vec2 startDirection(const Segment& s)
 {
@@ -1874,6 +1889,16 @@ private:
         const std::vector<Contour> userContours = hasMarkers ? contours : std::vector<Contour>{};
         Shape shape;
         shape.layer = layer;
+        // Its box in its own space (what a pattern's objectBoundingBox units are of).
+        std::array<double, 4> patternBox{1e300, 1e300, -1e300, -1e300};
+        for (const Contour& c : contours) {
+            for (const Segment& s : c.segments) {
+                for (const Vec2& p : s.sample(8)) {
+                    patternBox = {std::min(patternBox[0], p.x), std::min(patternBox[1], p.y), std::max(patternBox[2], p.x),
+                                  std::max(patternBox[3], p.y)};
+                }
+            }
+        }
         // Gradients are placed by the shape's own outline (its box), before it's transformed.
         const std::optional<GradientDef> fillGradient = gradientFor(paint.fill, m, contours, paint.fillOpacity * opacity);
         const std::optional<GradientDef> strokeGradient =
@@ -1887,6 +1912,19 @@ private:
         Style& st = shape.style;
         st.fill = color(paint.fill, paint, paint.fillOpacity * opacity);
         st.stroke = color(paint.stroke, paint, paint.strokeOpacity * opacity);
+        if (!st.stroke) {
+            if (const Node* pattern = patternOf(paint.stroke)) {  // (a patterned line: the tile's colour)
+                if (const auto tile = tileOf(*pattern, m, patternBox, layer, depth)) {
+                    for (const Shape& s : tile->shapes) {
+                        if (s.style.fill || s.style.stroke) {
+                            st.stroke = s.style.fill ? *s.style.fill : *s.style.stroke;
+                            note("patterned lines came in in their pattern's colour");
+                            break;
+                        }
+                    }
+                }
+            }
+        }
         st.fillGradient = st.fill ? fillGradient : std::nullopt;
         st.strokeGradient = st.stroke ? strokeGradient : std::nullopt;
         auto byUrl = [](const QString& p) { return p.trimmed().startsWith(QStringLiteral("url(")); };
@@ -1906,33 +1944,381 @@ private:
         // Our own exports: their Construction layer.
         const QString top = QString::fromStdString(layer).section(QLatin1Char('/'), -1);
         st.construction = top.compare(QStringLiteral("Construction"), Qt::CaseInsensitive) == 0;
-        // Cut to the clips it's in, one after another.
-        if (!m_clips.empty()) {
-            Area original{shape.contours, ringsOf(shape.contours), st.evenOdd};
-            for (const std::vector<Area>& clip : m_clips) {
-                auto inside = [&](Vec2 p) {
-                    if (!inArea(original, p)) {
-                        return false;
-                    }
-                    return std::ranges::all_of(shape.clips, [&](const std::vector<Area>& c) {
-                        return std::ranges::any_of(c, [&](const Area& a) { return inArea(a, p); });
-                    });
-                };
-                shape.contours = cutTo(shape.contours, clip, st.fill.has_value(), inside);
-                shape.clips.push_back(clip);
-            }
-            shape.fillArea = std::move(original);
-            if (shape.contours.empty()) {
-                return;  // (all of it outside)
-            }
+        // A pattern: hatched (a tile of lines), or its tiles repeated across it (after it, so
+        // over its fill), or its average colour.
+        std::vector<Shape> tiles;
+        if (const Node* pattern = patternOf(paint.fill)) {
+            st.fill = std::nullopt;
+            fillWithPattern(*pattern, m, patternBox, shape, paint.fillOpacity * opacity, layer, depth, tiles);
+        }
+        if (!cutToClips(shape, m_clips)) {
+            return;  // (all of it outside)
         }
         if (!layer.empty() && std::ranges::find(m_layerOrder, layer) == m_layerOrder.end()) {
             m_layerOrder.push_back(layer);
         }
-        m_out.shapes.push_back(std::move(shape));
+        // (a pattern of tiles with no line round it: just the tiles)
+        if (st.fill || st.stroke || st.construction || tiles.empty()) {
+            m_out.shapes.push_back(std::move(shape));
+        }
+        for (Shape& tile : tiles) {
+            m_out.shapes.push_back(std::move(tile));
+        }
         if (hasMarkers) {
             markers(userContours, m, paint, opacity, layer, depth);
         }
+    }
+
+    // The <pattern> a paint ("url(#id)") refers to, if it's one.
+    const Node* patternOf(const QString& paintText) const
+    {
+        static const QRegularExpression ref(QStringLiteral("^\\s*url\\(\\s*['\"]?#([^)'\"]+)"));
+        const auto match = ref.match(paintText);
+        const Node* p = match.hasMatch() ? m_byId.value(match.captured(1)) : nullptr;
+        return p && p->tag == QStringLiteral("pattern") ? p : nullptr;
+    }
+
+    // A pattern's tile: its shapes in drawing coordinates (cut to the tile, as SVG cuts them),
+    // where the tiles repeat (origin, and the steps across and up), and its tile's outline.
+    struct Tile
+    {
+        std::vector<Shape> shapes;
+        Vec2 origin, across, up;
+    };
+    std::optional<Tile> tileOf(const Node& pattern, const Affine& m, const std::array<double, 4>& box,
+                               const std::string& layer, int depth)
+    {
+        // Its chain of templates (href): attributes and contents from the nearest that has them.
+        std::vector<const Node*> chain{&pattern};
+        for (int hops = 0; hops < 8; ++hops) {
+            const QString href = chain.back()->attrs.value(QStringLiteral("href"));
+            const Node* next = href.startsWith(QLatin1Char('#')) ? m_byId.value(href.mid(1)) : nullptr;
+            if (!next || std::ranges::find(chain, next) != chain.end()) {
+                break;
+            }
+            chain.push_back(next);
+        }
+        auto holder = [&](const char* name) -> const Node* {
+            for (const Node* n : chain) {
+                if (n->attrs.contains(QLatin1String(name))) {
+                    return n;
+                }
+            }
+            return nullptr;
+        };
+        auto attr = [&](const char* name, const QString& fallback) {
+            const Node* n = holder(name);
+            return n ? n->attrs.value(QLatin1String(name)) : fallback;
+        };
+        const Node* content = chain.front();
+        for (const Node* n : chain) {
+            if (std::ranges::any_of(n->kids, [](const Node& k) { return k.tag != QStringLiteral("#text"); })) {
+                content = n;
+                break;
+            }
+        }
+        const double bw = box[2] - box[0], bh = box[3] - box[1];
+        const bool boxUnits = attr("patternUnits", QStringLiteral("objectBoundingBox")) != QStringLiteral("userSpaceOnUse");
+        auto value = [&](const char* name, bool horizontal) {
+            const QString text = attr(name, QStringLiteral("0")).trimmed();
+            const double v = firstOr(numbers(text), 0.0) / (text.endsWith(QLatin1Char('%')) ? 100.0 : 1.0);
+            return boxUnits ? (horizontal ? box[0] + v * bw : box[1] + v * bh) : v;
+        };
+        auto extent = [&](const char* name, bool horizontal) {
+            const QString text = attr(name, QStringLiteral("0")).trimmed();
+            const double v = firstOr(numbers(text), 0.0) / (text.endsWith(QLatin1Char('%')) ? 100.0 : 1.0);
+            return boxUnits ? v * (horizontal ? bw : bh) : v;
+        };
+        const double x = value("x", true), y = value("y", false), w = extent("width", true), h = extent("height", false);
+        if (!(w > 1e-12 && h > 1e-12)) {
+            return std::nullopt;
+        }
+        const Affine turn = transformOf(attr("patternTransform", QString()));
+        Affine contentMap = Affine::translate(x, y);
+        if (const Node* vb = holder("viewBox")) {
+            contentMap = contentMap * viewBoxMap(*vb, w, h);
+        }
+        else if (attr("patternContentUnits", QStringLiteral("userSpaceOnUse")) == QStringLiteral("objectBoundingBox")) {
+            contentMap = Affine::translate(x, y) * Affine::scale(bw, bh);
+        }
+        Tile tile;
+        tile.origin = m(turn({x, y}));
+        tile.across = m.linear(turn.linear({w, 0}));
+        tile.up = m.linear(turn.linear({0, h}));
+
+        // Its contents, walked as any other shapes, then taken back out of the drawing.
+        const size_t shapes = m_out.shapes.size(), texts = m_out.texts.size(), images = m_out.images.size();
+        std::vector<std::vector<Area>> clips = std::move(m_clips);
+        m_clips.clear();
+        Paint paint;
+        inherit(paint, ownStyle(*content));
+        for (const Node& k : content->kids) {
+            walk(k, m * turn * contentMap, paint, 1.0, layer, depth + 1);
+        }
+        m_clips = std::move(clips);
+        if (m_out.texts.size() > texts || m_out.images.size() > images) {
+            note("texts and pictures in patterns were left out");
+            m_out.texts.resize(texts);
+            m_out.images.resize(images);
+        }
+        tile.shapes.assign(std::make_move_iterator(m_out.shapes.begin() + static_cast<long>(shapes)),
+                           std::make_move_iterator(m_out.shapes.end()));
+        m_out.shapes.resize(shapes);
+        // Cut to the tile (what overflows it doesn't show; a hair bigger, to keep lines on its edges).
+        Area cell;
+        constexpr double kHair = 1e-6;
+        const Vec2 o = sub(tile.origin, mul(add(tile.across, tile.up), kHair));
+        const Vec2 a = add(o, mul(tile.across, 1 + 2 * kHair)), b = add(a, mul(tile.up, 1 + 2 * kHair));
+        const Vec2 c = add(o, mul(tile.up, 1 + 2 * kHair));
+        cell.contours.push_back({{line(o, a), line(a, b), line(b, c), line(c, o)}, true});
+        cell.rings = ringsOf(cell.contours);
+        std::erase_if(tile.shapes, [&](Shape& s) { return !cutToClips(s, {{cell}}); });
+        return tile;
+    }
+
+    // A tile of lines only (straight, stroked, one colour and width, nothing filled) as a hatch:
+    // each line the family it repeats into. None if it isn't such a tile.
+    static std::optional<std::pair<core::Hatch, Color>> tileHatch(const Tile& tile)
+    {
+        std::optional<Color> colour;
+        double width = 0;
+        std::vector<std::pair<Vec2, Vec2>> lines;
+        // (a fill counts only if it covers something: a lone line "filled" by default doesn't)
+        auto covers = [](const Shape& s) {
+            double area = 0;
+            for (const auto& ring : ringsOf(s.contours)) {
+                for (size_t i = 0, j = ring.size() - 1; i < ring.size(); j = i++) {
+                    area += cross(ring[j], ring[i]);
+                }
+            }
+            return std::abs(area) > 1e-9;
+        };
+        for (const Shape& s : tile.shapes) {
+            if ((s.style.fill && covers(s)) || !s.style.stroke || (colour && !(*colour == *s.style.stroke))
+                || (!lines.empty() && std::abs(width - s.style.strokeWidth) > 1e-9)) {
+                return std::nullopt;
+            }
+            colour = s.style.stroke;
+            width = s.style.strokeWidth;
+            for (const Contour& c : s.contours) {
+                if (c.lineless) {
+                    continue;
+                }
+                for (const Segment& seg : c.segments) {
+                    if (seg.kind == Segment::Kind::Line || (seg.kind == Segment::Kind::Cubic && straightSegment(seg))) {
+                        lines.push_back({seg.start(), seg.end()});
+                    }
+                    else {
+                        return std::nullopt;
+                    }
+                }
+            }
+        }
+        if (!colour || lines.empty()) {
+            return std::nullopt;
+        }
+        const Vec2 A = tile.across, B = tile.up;
+        const double area = std::abs(cross(A, B));
+        if (area < 1e-12) {
+            return std::nullopt;
+        }
+        core::Hatch h;
+        h.pattern = "SVG pattern";
+        h.width = width;
+        for (const auto& [a, b] : lines) {
+            const double l = len(sub(b, a));
+            if (l < 1e-9) {
+                continue;
+            }
+            const Vec2 u = mul(sub(b, a), 1.0 / l);
+            // The step along the line from one tile's copy to the next in line (the shortest grid
+            // step that way), and the distance between neighbouring lines (the tile's area over it).
+            double period = 0;
+            for (int i = -12; i <= 12; ++i) {
+                for (int j = -12; j <= 12; ++j) {
+                    const Vec2 v = add(mul(A, i), mul(B, j));
+                    const double lv = len(v);
+                    if (lv > 1e-9 && dot(v, u) > 0 && std::abs(cross(v, u)) < 1e-7 * lv && (period == 0 || lv < period)) {
+                        period = lv;
+                    }
+                }
+            }
+            if (period == 0) {
+                return std::nullopt;  // (at an angle that never repeats along itself)
+            }
+            const double spacing = area / period;
+            std::optional<Vec2> next;
+            for (int i = -12; i <= 12 && !next; ++i) {
+                for (int j = -12; j <= 12 && !next; ++j) {
+                    const Vec2 v = add(mul(A, i), mul(B, j));
+                    if (std::abs(cross(u, v) - spacing) < 1e-7 * std::max(1.0, spacing)) {
+                        next = v;
+                    }
+                }
+            }
+            if (!next) {
+                return std::nullopt;
+            }
+            core::HatchLine family;
+            family.angle = std::atan2(u.y, u.x) * 180 / kPi;
+            family.x = a.x;
+            family.y = a.y;
+            family.dx = std::fmod(dot(*next, u), period);
+            family.dy = spacing;
+            if (l < period - 1e-9) {
+                family.dashes = {l, -(period - l)};
+            }
+            // (a line the tile has twice, say along both its edges: the same family)
+            const bool same = std::ranges::any_of(h.lines, [&](const core::HatchLine& o) {
+                if (std::abs(std::remainder(o.angle - family.angle, 360.0)) > 1e-6 || o.dashes.size() != family.dashes.size()) {
+                    return false;
+                }
+                const Vec2 d = sub(Vec2{family.x, family.y}, Vec2{o.x, o.y});
+                for (int i = -12; i <= 12; ++i) {
+                    for (int j = -12; j <= 12; ++j) {
+                        if (len(sub(d, add(mul(A, i), mul(B, j)))) < 1e-7 * std::max(1.0, len(d))) {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            });
+            if (!same) {
+                h.lines.push_back(std::move(family));
+            }
+        }
+        if (h.lines.empty()) {
+            return std::nullopt;
+        }
+        return std::pair{h, *colour};
+    }
+
+    // Fills a shape with a pattern: hatched where its tile is lines, else its tiles repeated
+    // across it (into `tiles`, cut to it), else (too many) the tile's average colour.
+    void fillWithPattern(const Node& pattern, const Affine& m, const std::array<double, 4>& box, Shape& shape,
+                         double opacity, const std::string& layer, int depth, std::vector<Shape>& tiles)
+    {
+        const std::optional<Tile> tile = tileOf(pattern, m, box, layer, depth);
+        if (!tile || tile->shapes.empty()) {
+            return;  // (an empty tile: nothing shows)
+        }
+        auto faded = [&](Color c) {
+            c.a = static_cast<std::uint8_t>(std::lround(c.a * std::clamp(opacity, 0.0, 1.0)));
+            return c;
+        };
+        if (auto hatched = tileHatch(*tile)) {
+            shape.style.fill = faded(hatched->second);
+            shape.style.hatch = hatched->first;
+            return;
+        }
+        // The tiles over the shape's box: which copies (the box in the tiles' own grid).
+        const Area area{shape.contours, ringsOf(shape.contours), shape.style.evenOdd};
+        const double det = cross(tile->across, tile->up);
+        double i0 = 1e300, i1 = -1e300, j0 = 1e300, j1 = -1e300;
+        for (const auto& ring : area.rings) {
+            for (const Vec2& p : ring) {
+                const Vec2 d = sub(p, tile->origin);
+                const double i = cross(d, tile->up) / det, j = cross(tile->across, d) / det;
+                i0 = std::min(i0, i);
+                i1 = std::max(i1, i);
+                j0 = std::min(j0, j);
+                j1 = std::max(j1, j);
+            }
+        }
+        const long long iFrom = static_cast<long long>(std::floor(i0)), iTo = static_cast<long long>(std::ceil(i1));
+        const long long jFrom = static_cast<long long>(std::floor(j0)), jTo = static_cast<long long>(std::ceil(j1));
+        size_t pieces = 0;
+        for (const Shape& s : tile->shapes) {
+            for (const Contour& c : s.contours) {
+                pieces += c.segments.size();
+            }
+        }
+        const double copies = double(iTo - iFrom) * double(jTo - jFrom);
+        if (copies * double(pieces) > 20000 || copies > 4000) {
+            // Too many to draw one by one: the tile's colour.
+            for (const Shape& s : tile->shapes) {
+                if (s.style.fill || s.style.stroke) {
+                    shape.style.fill = faded(s.style.fill ? *s.style.fill : *s.style.stroke);
+                    break;
+                }
+            }
+            note("patterns too fine to draw tile by tile came in as their colour");
+            return;
+        }
+        for (long long i = iFrom; i < iTo; ++i) {
+            for (long long j = jFrom; j < jTo; ++j) {
+                const Vec2 shift = add(mul(tile->across, double(i)), mul(tile->up, double(j)));
+                const Affine move = Affine::translate(shift.x, shift.y);
+                for (const Shape& s : tile->shapes) {
+                    Shape copy = s;
+                    copy.layer = layer;
+                    for (Contour& c : copy.contours) {
+                        for (Segment& seg : c.segments) {
+                            seg = transformed(seg, move);
+                        }
+                    }
+                    auto moveArea = [&](Area& a) {
+                        for (Contour& c : a.contours) {
+                            for (Segment& seg : c.segments) {
+                                seg = transformed(seg, move);
+                            }
+                        }
+                        for (auto& ring : a.rings) {
+                            for (Vec2& p : ring) {
+                                p = add(p, shift);
+                            }
+                        }
+                    };
+                    if (copy.fillArea) {
+                        moveArea(*copy.fillArea);
+                    }
+                    for (auto& clip : copy.clips) {
+                        for (Area& a : clip) {
+                            moveArea(a);
+                        }
+                    }
+                    for (auto* g : {&copy.style.fillGradient, &copy.style.strokeGradient}) {
+                        if (*g) {
+                            (*g)->start = add((*g)->start, shift);
+                            (*g)->end = add((*g)->end, shift);
+                            (*g)->center = add((*g)->center, shift);
+                            if ((*g)->focal) {
+                                *(*g)->focal = add(*(*g)->focal, shift);
+                            }
+                        }
+                    }
+                    // Cut to the shape (and whatever clips it's in).
+                    std::vector<std::vector<Area>> clips{{area}};
+                    clips.insert(clips.end(), m_clips.begin(), m_clips.end());
+                    if (cutToClips(copy, clips)) {
+                        tiles.push_back(std::move(copy));
+                    }
+                }
+            }
+        }
+    }
+
+    // Cuts a shape to clips, one after another; false if nothing of it is left.
+    static bool cutToClips(Shape& shape, const std::vector<std::vector<Area>>& clips)
+    {
+        if (clips.empty()) {
+            return true;
+        }
+        Area original = shape.fillArea ? *shape.fillArea : Area{shape.contours, ringsOf(shape.contours), shape.style.evenOdd};
+        for (const std::vector<Area>& clip : clips) {
+            auto inside = [&](Vec2 p) {
+                if (!inArea(original, p)) {
+                    return false;
+                }
+                return std::ranges::all_of(shape.clips, [&](const std::vector<Area>& c) {
+                    return std::ranges::any_of(c, [&](const Area& a) { return inArea(a, p); });
+                });
+            };
+            shape.contours = cutTo(shape.contours, clip, shape.style.fill.has_value(), inside);
+            shape.clips.push_back(clip);
+        }
+        shape.fillArea = std::move(original);
+        return !shape.contours.empty();
     }
 
     // The markers on a shape's vertices: its first (marker-start), its last (marker-end), the rest

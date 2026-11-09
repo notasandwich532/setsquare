@@ -367,6 +367,32 @@ assert green == [100, 100], green  # (seen through both windows)
 red = [l for l in s.lines if l.stroke and l.stroke["color"] == "#ff0000"]
 assert len(red) == 1 and isclose(red[0].length, 50), [l.length for l in red]
 
+# Patterns: a tile of lines comes in as a hatch; a grid tile (lines on its edges) as two families;
+# a tile of dots repeated as real circles, cut to the shape.
+pats = write("pats.svg", """<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" viewBox="0 0 100 100">
+  <defs>
+    <pattern id="diag" width="4" height="4" patternUnits="userSpaceOnUse"><path d="M0,0 L4,4" stroke="black" stroke-width="0.5"/></pattern>
+    <pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M0,0 H10 M0,0 V10 M10,0 V10" stroke="blue" stroke-width="0.2" fill="none"/></pattern>
+    <pattern id="dots" width="10" height="10" patternUnits="userSpaceOnUse"><circle cx="5" cy="5" r="2" fill="red"/></pattern>
+  </defs>
+  <rect x="0" y="0" width="40" height="20" fill="url(#diag)" stroke="black"/>
+  <rect x="0" y="30" width="40" height="20" fill="url(#grid)"/>
+  <rect x="50" y="0" width="25" height="20" fill="url(#dots)"/>
+</svg>""")
+doc.new()
+rep = s.import_file(pats)
+assert rep["hatches"] == 2, rep
+healthy()
+diag = [f for f in s.fills if f.hatch and f.color == "#000000"][0].hatch
+(angle, x, y, dx, dy, dashes), = diag.lines
+assert isclose(angle % 180, 135) and isclose(dy, 4 / 2 ** 0.5) and dashes == [] and diag.width == 0.5, diag.lines
+grid = [f for f in s.fills if f.hatch and f.color == "#0000ff"][0].hatch
+assert sorted(round(l[0] % 180) for l in grid.lines) == [0, 90] and all(isclose(l[4], 10) for l in grid.lines), grid.lines
+dots = [f for f in s.fills if f.color == "#ff0000"]
+assert len([c for c in s.circles if isclose(c.radius, 2)]) == 4, [c.radius for c in s.circles]  # (the 2 cut in half: arcs)
+assert isclose(sum(f.area for f in dots), 5 * pi * 4, rel_tol=1e-3), sum(f.area for f in dots)
+assert max(p.x for p in s.points if p.x > 45) <= 75 + 1e-6
+
 notes = write("notes.dxf", "\n".join(str(x) for x in [
     0, "SECTION", 2, "HEADER", 9, "$INSUNITS", 70, 4, 0, "ENDSEC",
     0, "SECTION", 2, "TABLES", 0, "TABLE", 2, "STYLE",
