@@ -45,7 +45,6 @@ TEST_CASE("Import dialog: reads the file and offers its options", "[import]")
     REQUIRE(dialog.readable());
     const QString summary = dialog.findChild<QLabel*>(QStringLiteral("importSummary"))->text();
     CHECK(summary.contains(QStringLiteral("2 layers")));
-    CHECK(summary.contains(QStringLiteral("1 texts")));
     CHECK(dialog.findChild<QCheckBox*>(QStringLiteral("importKeepLayers"))->isEnabled());
     CHECK(dialog.findChild<QComboBox*>(QStringLiteral("importPlacement"))->count() == 2);  // (no page)
 

@@ -2,6 +2,7 @@
 
 #include "Editor.h"
 #include "Images.h"
+#include "TextShapes.h"
 
 #include <core/Export.h>
 #include <core/Groups.h>
@@ -10,6 +11,10 @@
 #include <QFile>
 #include <QDir>
 #include <QFileInfo>
+#include <QFont>
+#include <QFontDatabase>
+#include <QFontInfo>
+#include <QFontMetricsF>
 #include <QUrl>
 #include <QHash>
 #include <QRegularExpression>
@@ -154,6 +159,131 @@ bool placeImage(ImageDef& def, Vec2 corner, Vec2 right, Vec2 up)
     return lr > 0 && lu > 0 && std::abs(dot(right, up)) <= 1e-6 * lr * lu && std::abs(lu - im.height()) <= 1e-3 * lu;
 }
 
+// The first of the fonts asked for that's installed (CSS's generic families too: serif, monospace,
+// ...); else the one new text starts with, and `substituted` is set.
+QString installedFamily(const QStringList& wanted, bool& substituted)
+{
+    static const QStringList installed = QFontDatabase::families();
+    for (QString name : wanted) {
+        name = name.trimmed();
+        name.remove(QLatin1Char('"')).remove(QLatin1Char('\''));
+        if (name.isEmpty()) {
+            continue;
+        }
+        for (const QString& f : installed) {
+            if (f.compare(name, Qt::CaseInsensitive) == 0) {
+                return f;
+            }
+        }
+        static const QHash<QString, QFont::StyleHint> generic = {
+            {QStringLiteral("serif"), QFont::Serif},          {QStringLiteral("sans-serif"), QFont::SansSerif},
+            {QStringLiteral("monospace"), QFont::Monospace},  {QStringLiteral("cursive"), QFont::Cursive},
+            {QStringLiteral("fantasy"), QFont::Fantasy},      {QStringLiteral("system-ui"), QFont::System},
+        };
+        if (const auto it = generic.find(name.toLower()); it != generic.end()) {
+            QFont f;
+            f.setStyleHint(it.value());
+            f.setFamily(QString());
+            return QFontInfo(f).family();
+        }
+    }
+    substituted = true;
+    return textshapes::defaultFamily();
+}
+
+// A font's capital height over its size (what text heights here are of, against CSS's font-size).
+double capitalRatio(const QString& family, bool bold, bool italic)
+{
+    QFont f(family);
+    f.setPixelSize(1000);
+    f.setBold(bold);
+    f.setItalic(italic);
+    const QFontMetricsF fm(f);
+    const double cap = fm.capHeight() > 0 ? fm.capHeight() : fm.ascent() * 0.7;
+    return std::clamp(cap / 1000.0, 0.3, 1.0);
+}
+
+// Turns a text to run along `right` with its letters standing along `up` (drawing coordinates);
+// mirrored if those turn the other way: flipped in place, its alignment swapped to stay put.
+void orientText(core::Text& t, Vec2 right, Vec2 up)
+{
+    if (cross(right, up) >= 0) {
+        t.angle = std::atan2(right.y, right.x) * 180 / kPi;
+        return;
+    }
+    t.angle = std::atan2(up.y, up.x) * 180 / kPi - 90;
+    t.flipH = true;
+    if (t.align != core::TextAlign::Center) {
+        t.align = t.align == core::TextAlign::Left ? core::TextAlign::Right : core::TextAlign::Left;
+    }
+}
+
+// A DXF string: UTF-8 (2007 on), else the old ANSI code page; its %%-codes and \U+ escapes.
+QString dxfString(const std::string& raw)
+{
+    QString s = QString::fromUtf8(raw);
+    if (s.contains(QChar::ReplacementCharacter)) {
+        s = QString::fromLatin1(raw);
+    }
+    static const QRegularExpression unicode(QStringLiteral("\\\\U\\+([0-9A-Fa-f]{4})"));
+    for (auto m = unicode.match(s); m.hasMatch(); m = unicode.match(s)) {
+        s.replace(m.capturedStart(), m.capturedLength(), QChar(static_cast<char16_t>(m.captured(1).toUInt(nullptr, 16))));
+    }
+    s.replace(QStringLiteral("%%c"), QStringLiteral("⌀"), Qt::CaseInsensitive);
+    s.replace(QStringLiteral("%%d"), QStringLiteral("°"), Qt::CaseInsensitive);
+    s.replace(QStringLiteral("%%p"), QStringLiteral("±"), Qt::CaseInsensitive);
+    static const QRegularExpression toggles(QStringLiteral("%%[uUoOkK]"));  // (underline, overline, strike: not kept)
+    s.remove(toggles);
+    s.replace(QStringLiteral("%%%"), QStringLiteral("%"));
+    return s;
+}
+
+// MTEXT's words without their formatting codes (\P a new line; fonts, heights, colours dropped;
+// stacked fractions as a/b). `font`: the first font it switches to, if any.
+QString mtextPlain(const QString& in, QString& font)
+{
+    QString out;
+    for (qsizetype i = 0; i < in.size(); ++i) {
+        const QChar c = in[i];
+        if (c == QLatin1Char('{') || c == QLatin1Char('}')) {
+            continue;  // (grouping)
+        }
+        if (c != QLatin1Char('\\') || i + 1 >= in.size()) {
+            out += c;
+            continue;
+        }
+        const QChar code = in[++i];
+        switch (code.unicode()) {
+            case 'P': out += QLatin1Char('\n'); break;
+            case '~': out += QChar(0x00a0); break;
+            case '\\': case '{': case '}': out += code; break;
+            case 'L': case 'l': case 'O': case 'o': case 'K': case 'k': case 'N': break;  // (toggles)
+            case 'S': {  // a stacked fraction up to ';': "1^2" or "1/2" or "1#2"
+                const qsizetype end = in.indexOf(QLatin1Char(';'), i);
+                QString frac = in.mid(i + 1, (end < 0 ? in.size() : end) - i - 1);
+                frac.replace(QLatin1Char('^'), QLatin1Char('/')).replace(QLatin1Char('#'), QLatin1Char('/'));
+                out += frac.trimmed();
+                i = end < 0 ? in.size() : end;
+                break;
+            }
+            case 'f': case 'F': {  // a font: "\fArial|b0|i0;"
+                const qsizetype end = in.indexOf(QLatin1Char(';'), i);
+                if (font.isEmpty()) {
+                    font = in.mid(i + 1, (end < 0 ? in.size() : end) - i - 1).section(QLatin1Char('|'), 0, 0);
+                }
+                i = end < 0 ? in.size() : end;
+                break;
+            }
+            default: {  // others with a value up to ';' (\H, \C, \T, \Q, \W, \A, \p, ...)
+                const qsizetype end = in.indexOf(QLatin1Char(';'), i);
+                i = end < 0 ? in.size() : end;
+                break;
+            }
+        }
+    }
+    return out;
+}
+
 // A linked picture: by its path as given (absolute, or from the file's folder), else by its name
 // in that folder. Empty if it isn't found.
 QString findLinked(const QString& given, const QString& folder)
@@ -273,6 +403,12 @@ bool Drawing::bounds(double& x0, double& y0, double& x1, double& y1) const
 {
     x0 = y0 = 1e300;
     x1 = y1 = -1e300;
+    for (const TextDef& td : texts) {  // (its anchor: the letters aren't made yet)
+        x0 = std::min(x0, td.at.x);
+        y0 = std::min(y0, td.at.y);
+        x1 = std::max(x1, td.at.x);
+        y1 = std::max(y1, td.at.y);
+    }
     for (const ImageDef& im : images) {
         for (const Vec2& p : im.corners) {
             x0 = std::min(x0, p.x);
@@ -311,6 +447,9 @@ QString Report::summary() const
     parts << counted(curves, QObject::tr("1 curve"), QObject::tr("%1 curves"));
     if (fills > 0) {
         parts << counted(fills, QObject::tr("1 fill"), QObject::tr("%1 fills"));
+    }
+    if (texts > 0) {
+        parts << counted(texts, QObject::tr("1 text"), QObject::tr("%1 texts"));
     }
     if (images > 0) {
         parts << counted(images, QObject::tr("1 image"), QObject::tr("%1 images"));
@@ -372,7 +511,16 @@ Node parseXml(const QByteArray& data)
             }
         }
         else if (xml.isCharacters() || xml.isCDATA()) {
-            stack.back()->text += xml.text();
+            Node& parent = *stack.back();
+            parent.text += xml.text();
+            // In text, words and the tspans between them in order: as children of their own.
+            if (parent.tag == QStringLiteral("text") || parent.tag == QStringLiteral("tspan")
+                || parent.tag == QStringLiteral("a")) {
+                Node words;
+                words.tag = QStringLiteral("#text");
+                words.text = xml.text().toString();
+                parent.kids.push_back(std::move(words));
+            }
         }
     }
     if (xml.hasError() && root.kids.empty()) {
@@ -520,6 +668,12 @@ private:
         QString fillRule = QStringLiteral("nonzero");
         QString color = QStringLiteral("black");
         bool visible = true;
+        QString fontFamily = QStringLiteral("sans-serif");
+        double fontSize = 16.0;  // user units
+        QString fontWeight = QStringLiteral("normal");
+        QString fontStyle = QStringLiteral("normal");
+        QString textAnchor = QStringLiteral("start");
+        double letterSpacing = 0.0;  // user units
     };
 
     void index(const Node& n)
@@ -575,7 +729,9 @@ private:
             QStringLiteral("stroke-dasharray"), QStringLiteral("fill-opacity"), QStringLiteral("stroke-opacity"),
             QStringLiteral("opacity"),       QStringLiteral("fill-rule"),      QStringLiteral("display"),
             QStringLiteral("visibility"),    QStringLiteral("color"),          QStringLiteral("clip-path"),
-            QStringLiteral("mask"),
+            QStringLiteral("mask"),          QStringLiteral("font-family"),    QStringLiteral("font-size"),
+            QStringLiteral("font-weight"),   QStringLiteral("font-style"),     QStringLiteral("text-anchor"),
+            QStringLiteral("letter-spacing"),
         };
         for (const QString& name : names) {
             if (n.attrs.contains(name)) {
@@ -991,17 +1147,9 @@ private:
         m_out.images.push_back(std::move(def));
     }
 
-    void walk(const Node& n, const Affine& parent, const Paint& inherited, double opacity, std::string layer, int depth,
-              bool isRoot = false)
+    // An element's own style over what it inherits (the properties that are inherited).
+    void inherit(Paint& paint, const QHash<QString, QString>& own) const
     {
-        if (depth > 64) {
-            return;
-        }
-        const QHash<QString, QString> own = ownStyle(n);
-        if (own.value(QStringLiteral("display")) == QStringLiteral("none")) {
-            return;
-        }
-        Paint paint = inherited;
         auto set = [&](const char* name, QString& field) {
             if (own.contains(QLatin1String(name)) && own.value(QLatin1String(name)) != QStringLiteral("inherit")) {
                 field = own.value(QLatin1String(name));
@@ -1012,6 +1160,10 @@ private:
         set("stroke-dasharray", paint.dash);
         set("fill-rule", paint.fillRule);
         set("color", paint.color);
+        set("font-family", paint.fontFamily);
+        set("font-weight", paint.fontWeight);
+        set("font-style", paint.fontStyle);
+        set("text-anchor", paint.textAnchor);
         if (own.contains(QStringLiteral("stroke-width"))) {
             const std::vector<double> v = numbers(own.value(QStringLiteral("stroke-width")));
             if (!v.empty()) {
@@ -1027,6 +1179,164 @@ private:
         if (own.contains(QStringLiteral("visibility"))) {
             paint.visible = own.value(QStringLiteral("visibility")) == QStringLiteral("visible");
         }
+        // Sizes: in user units (pixels), or relative to the parent's (em, %).
+        if (own.contains(QStringLiteral("font-size"))) {
+            paint.fontSize = fontLength(own.value(QStringLiteral("font-size")), paint.fontSize);
+        }
+        if (own.contains(QStringLiteral("letter-spacing"))) {
+            const QString ls = own.value(QStringLiteral("letter-spacing"));
+            paint.letterSpacing = ls == QStringLiteral("normal") ? 0.0 : fontLength(ls, paint.fontSize);
+        }
+    }
+
+    // A font size or spacing in user units: px (or none), pt, mm, ...; em and % of `em`.
+    double fontLength(const QString& text, double em) const
+    {
+        static const QHash<QString, double> named = {
+            {QStringLiteral("xx-small"), 9}, {QStringLiteral("x-small"), 10}, {QStringLiteral("small"), 13},
+            {QStringLiteral("medium"), 16},  {QStringLiteral("large"), 18},   {QStringLiteral("x-large"), 24},
+            {QStringLiteral("xx-large"), 32},
+        };
+        const QString t = text.trimmed();
+        if (const auto it = named.find(t); it != named.end()) {
+            return it.value();
+        }
+        const double v = firstOr(numbers(t), 0.0);
+        if (t.endsWith(QStringLiteral("em"))) return v * em;
+        if (t.endsWith(QLatin1Char('%'))) return v / 100 * em;
+        if (t.endsWith(QStringLiteral("pt"))) return v * 96.0 / 72.0;
+        if (t.endsWith(QStringLiteral("mm"))) return v * m_pxPerInch / 25.4;
+        if (t.endsWith(QStringLiteral("cm"))) return v * m_pxPerInch / 2.54;
+        if (t.endsWith(QStringLiteral("in"))) return v * m_pxPerInch;
+        return v;
+    }
+
+    // Text: a run of words for each place the text (or a tspan in it) is put, each a text here.
+    void text(const Node& n, const Affine& m, const Paint& paint, double opacity, const std::string& layer)
+    {
+        std::function<bool(const Node&)> alongPath = [&](const Node& k) {
+            return k.tag == QStringLiteral("textPath") || std::ranges::any_of(k.kids, alongPath);
+        };
+        if (alongPath(n)) {
+            skip("texts along paths");
+            return;
+        }
+        struct Run
+        {
+            QString words;
+            Vec2 at;  // user units
+            Paint paint;
+            bool styled = false;  // (its paint: that of its first words)
+        };
+        auto first = [&](const Node& k, const char* name) -> std::optional<double> {
+            const std::vector<double> v = numbers(k.attrs.value(QLatin1String(name)));
+            return v.empty() ? std::nullopt : std::optional<double>(v.front());
+        };
+        std::vector<Run> runs{{{}, {first(n, "x").value_or(0.0) + first(n, "dx").value_or(0.0),
+                                    first(n, "y").value_or(0.0) + first(n, "dy").value_or(0.0)},
+                               paint}};
+        std::function<void(const Node&, const Paint&, int)> collect = [&](const Node& at, const Paint& p, int depth) {
+            for (const Node& k : at.kids) {
+                if (k.tag == QStringLiteral("#text")) {
+                    QString words = k.text;
+                    words.replace(QLatin1Char('\n'), QLatin1Char(' ')).replace(QLatin1Char('\t'), QLatin1Char(' ')).replace(QLatin1Char('\r'), QLatin1Char(' '));
+                    Run& run = runs.back();
+                    if (!run.styled && !words.trimmed().isEmpty()) {
+                        run.paint = p;
+                        run.styled = true;
+                    }
+                    else if (!words.trimmed().isEmpty()) {
+                        const Paint& q = run.paint;  // (a text here has one style throughout)
+                        if (q.fill != p.fill || q.fontFamily != p.fontFamily || q.fontSize != p.fontSize
+                            || q.fontWeight != p.fontWeight || q.fontStyle != p.fontStyle) {
+                            note("words styled differently within a line took the line's style");
+                        }
+                    }
+                    run.words += words;
+                    continue;
+                }
+                if ((k.tag != QStringLiteral("tspan") && k.tag != QStringLiteral("a")) || depth > 8) {
+                    continue;
+                }
+                const QHash<QString, QString> own = ownStyle(k);
+                if (own.value(QStringLiteral("display")) == QStringLiteral("none")) {
+                    continue;
+                }
+                Paint kp = p;
+                inherit(kp, own);
+                const auto x = first(k, "x"), y = first(k, "y"), dx = first(k, "dx"), dy = first(k, "dy");
+                if (x || y || dx || dy) {  // (placed: words of their own, e.g. a line)
+                    const Vec2 from = runs.back().at;
+                    runs.push_back({{}, {x.value_or(from.x) + dx.value_or(0.0), y.value_or(from.y) + dy.value_or(0.0)}, kp});
+                }
+                collect(k, kp, depth + 1);
+            }
+        };
+        collect(n, paint, 0);
+
+        for (Run& run : runs) {
+            const QString words = run.words.simplified();
+            if (words.isEmpty() || !run.paint.visible) {
+                continue;
+            }
+            const Paint& p = run.paint;
+            TextDef def;
+            core::Text& t = def.text;
+            t.text = words.toStdString();
+            bool substituted = false;
+            t.font = installedFamily(p.fontFamily.split(QLatin1Char(',')), substituted).toStdString();
+            if (substituted) {
+                note("fonts that aren't installed were replaced");
+            }
+            const int weight = p.fontWeight == QStringLiteral("bold") || p.fontWeight == QStringLiteral("bolder") ? 700
+                             : static_cast<int>(firstOr(numbers(p.fontWeight), 400));
+            t.bold = weight >= 600;
+            t.italic = p.fontStyle == QStringLiteral("italic") || p.fontStyle == QStringLiteral("oblique");
+            t.align = p.textAnchor == QStringLiteral("middle") ? core::TextAlign::Center
+                    : p.textAnchor == QStringLiteral("end")    ? core::TextAlign::Right
+                                                               : core::TextAlign::Left;
+            // Its size: capitals of the font at that size, scaled as the transform scales up.
+            const Vec2 right = m.linear({1, 0}), up = m.linear({0, -1});
+            if (std::abs(len(right) - len(up)) > 1e-6 * len(up) || std::abs(dot(right, up)) > 1e-6 * len(right) * len(up)) {
+                note("stretched or skewed texts came in unstretched");
+            }
+            t.height = p.fontSize * len(up) * capitalRatio(QString::fromStdString(t.font), t.bold, t.italic);
+            if (!(t.height > 1e-9)) {
+                continue;
+            }
+            t.spacing = p.fontSize > 0 ? p.letterSpacing / p.fontSize * 100.0 : 0.0;
+            orientText(t, right, up);
+            // Filled in its colour (or, outlined only, its line's): that of plain geometry if none.
+            std::optional<Color> c = color(p.fill, p, p.fillOpacity * opacity);
+            if (!c) {
+                c = color(p.stroke, p, p.strokeOpacity * opacity);
+            }
+            if (!c) {
+                continue;  // (not painted at all)
+            }
+            t.hasColor = true;
+            t.color = *c;
+            def.at = m(run.at);
+            def.layer = layer;
+            if (!layer.empty() && std::ranges::find(m_layerOrder, layer) == m_layerOrder.end()) {
+                m_layerOrder.push_back(layer);
+            }
+            m_out.texts.push_back(std::move(def));
+        }
+    }
+
+    void walk(const Node& n, const Affine& parent, const Paint& inherited, double opacity, std::string layer, int depth,
+              bool isRoot = false)
+    {
+        if (depth > 64) {
+            return;
+        }
+        const QHash<QString, QString> own = ownStyle(n);
+        if (own.value(QStringLiteral("display")) == QStringLiteral("none")) {
+            return;
+        }
+        Paint paint = inherited;
+        inherit(paint, own);
         if (own.contains(QStringLiteral("opacity"))) {
             opacity *= firstOr(numbers(own.value(QStringLiteral("opacity"))), 1.0);
         }
@@ -1072,7 +1382,7 @@ private:
             return;
         }
         if (tag == QStringLiteral("text")) {
-            skip("texts");
+            text(n, m, paint, opacity, layer);
             return;
         }
         if (tag == QStringLiteral("image")) {
@@ -1664,6 +1974,19 @@ private:
     void tables(const std::vector<Record>& records)
     {
         for (const Record& r : records) {
+            if (r.type == "STYLE" && r.get(2)) {
+                // Its font: the family named in its extended data, else its font file's name
+                // ("arial.ttf"; AutoCAD's own .shx fonts aren't installed anywhere else).
+                std::string family = r.get(1000) ? *r.get(1000) : std::string();
+                if (family.empty() && r.get(3)) {
+                    const QFileInfo file(QString::fromStdString(*r.get(3)));
+                    if (file.suffix().compare(QStringLiteral("shx"), Qt::CaseInsensitive) != 0) {
+                        family = file.completeBaseName().toStdString();
+                    }
+                }
+                m_textStyles[upper(*r.get(2))] = family;
+                continue;
+            }
             if (r.type != "LAYER" || !r.get(2)) {
                 continue;
             }
@@ -1868,6 +2191,96 @@ private:
         m_out.images.push_back(std::move(def));
     }
 
+    // TEXT (one line: 10/20 its start, or 11/21 the point it's justified on (72, 73)) and MTEXT
+    // (lines: 10/20 its attachment point (71), its words in 3s then 1, with formatting codes).
+    void text(const Record& r, const Affine& m, const std::string& layer, Color col)
+    {
+        const bool multi = r.type == "MTEXT";
+        TextDef def;
+        core::Text& t = def.text;
+        QString words, font;
+        if (multi) {
+            QString raw;
+            for (const auto& [code, value] : r.codes) {
+                if (code == 3) {
+                    raw += dxfString(value);
+                }
+            }
+            if (const std::string* last = r.get(1)) {
+                raw += dxfString(*last);
+            }
+            words = mtextPlain(raw, font);
+        }
+        else {
+            words = r.get(1) ? dxfString(*r.get(1)) : QString();
+        }
+        words = words.trimmed();
+        if (words.isEmpty()) {
+            return;
+        }
+        // The point it's placed by, and how it's aligned on it.
+        Vec2 at{r.num(10), r.num(20)};
+        double angle = r.num(50) * kPi / 180;
+        if (multi) {
+            if (r.get(11)) {
+                angle = std::atan2(r.num(21), r.num(11));  // (a direction rather than an angle)
+            }
+            const int attach = std::clamp(static_cast<int>(r.num(71, 1)), 1, 9);
+            const int column = (attach - 1) % 3, row = (attach - 1) / 3;
+            t.align = column == 0 ? core::TextAlign::Left : column == 1 ? core::TextAlign::Center : core::TextAlign::Right;
+            t.valign = row == 0 ? core::TextVAlign::Top : row == 1 ? core::TextVAlign::Middle : core::TextVAlign::Bottom;
+            if (r.num(41) > 0) {
+                note("texts wrapped in a width came in as their own lines");
+            }
+        }
+        else {
+            const int h = static_cast<int>(r.num(72)), v = static_cast<int>(r.num(73));
+            if ((h != 0 || v != 0) && r.get(11)) {
+                at = {r.num(11), r.num(21)};
+            }
+            t.align = h == 1 || h == 4 ? core::TextAlign::Center : h == 2 ? core::TextAlign::Right : core::TextAlign::Left;
+            t.valign = h == 4 || v == 2 ? core::TextVAlign::Middle : v == 3 ? core::TextVAlign::Top : core::TextVAlign::Baseline;
+            if (h == 3 || h == 5) {
+                at = {r.num(10), r.num(20)};
+                note("texts fitted between two points came in at their size");
+            }
+            if (std::abs(r.num(41, 1.0) - 1.0) > 1e-6) {
+                note("narrowed or widened texts came in at their font's width");
+            }
+        }
+        t.text = words.toStdString();
+        // Its font: from MTEXT's own codes, else its style's.
+        if (font.isEmpty()) {
+            const auto style = m_textStyles.find(upper(r.get(7) ? *r.get(7) : std::string("STANDARD")));
+            font = style != m_textStyles.end() ? QString::fromStdString(style->second) : QString();
+        }
+        bool substituted = false;
+        t.font = installedFamily({font}, substituted).toStdString();
+        if (substituted && !font.isEmpty()) {
+            note("fonts that aren't installed were replaced");
+        }
+        // Turned, scaled and mirrored as its block insert is; mirrored on its own (71: 2 backwards, 4 upside down).
+        Vec2 dir{std::cos(angle), std::sin(angle)}, upDir{-dir.y, dir.x};
+        const int mirror = multi ? 0 : static_cast<int>(r.num(71));
+        if (mirror & 2) {
+            dir = mul(dir, -1);
+        }
+        if (mirror & 4) {
+            upDir = mul(upDir, -1);
+        }
+        const Vec2 right = m.linear(dir), up = m.linear(upDir);
+        t.height = r.num(40, 2.5) * len(up);  // (a DXF text's height is its capitals')
+        if (!(t.height > 1e-9)) {
+            return;
+        }
+        orientText(t, right, up);
+        t.hasColor = true;
+        t.color = col;
+        def.at = m(at);
+        def.layer = layer;
+        m_out.texts.push_back(std::move(def));
+    }
+
     void entity(const Record& r, const Affine& m, const std::string& parentLayer, std::optional<Color> parentColor,
                 int depth)
     {
@@ -1992,6 +2405,10 @@ private:
             image(r, local, layer);
             return;
         }
+        else if (type == "TEXT" || type == "MTEXT") {
+            text(r, local, layer, col);
+            return;
+        }
         else {
             static const std::map<std::string, std::string> names = {
                 {"TEXT", "texts"},          {"MTEXT", "texts"},       {"ATTRIB", "texts"},       {"ATTDEF", "texts"},
@@ -2048,6 +2465,7 @@ private:
     std::optional<double> m_mmPerUnit;
     QString m_folder;  // the file's own (for pictures it links to)
     std::map<std::string, std::string> m_imageFiles;  // IMAGEDEF handle -> the picture's path
+    std::map<std::string, std::string> m_textStyles;  // STYLE name (upper case) -> font family
     int m_insunits = 0;
     std::map<std::string, LayerInfo> m_layers;
     std::map<std::string, Block> m_blocks;
@@ -2374,12 +2792,20 @@ Report build(core::Sketch& sketch, const Drawing& drawing, const Options& o)
         }
         byLayer[key].push_back(&s);
     }
-    for (const ImageDef& im : drawing.images) {  // (a layer of only pictures is a layer too)
-        const std::string key = o.keepLayers ? im.layer : std::string();
+    std::map<std::string, std::vector<const TextDef*>> textsByLayer;
+    auto alsoLayer = [&](const std::string& fileLayer) {  // (a layer of only pictures or texts is a layer too)
+        const std::string key = o.keepLayers ? fileLayer : std::string();
         if (!byLayer.contains(key)) {
             fileLayers.push_back(key);
             byLayer[key];
         }
+        return key;
+    };
+    for (const ImageDef& im : drawing.images) {
+        alsoLayer(im.layer);
+    }
+    for (const TextDef& td : drawing.texts) {
+        textsByLayer[alsoLayer(td.layer)].push_back(&td);
     }
     if (o.keepLayers) {
         std::vector<std::string> ordered;  // (the file's own order where it gives one)
@@ -2514,6 +2940,17 @@ Report build(core::Sketch& sketch, const Drawing& drawing, const Options& o)
                     fillsByLayer[sketch.layerOfSublayer(target[l])].push_back(std::move(f));
                 }
             }
+        }
+        // Texts, on points of their own held in the group with the rest.
+        for (const TextDef* td : textsByLayer[l]) {
+            core::Text text = td->text;
+            const Vec2 p = add(td->at, shift);
+            text.anchor = sketch.addPoint(p.x, p.y);
+            text.sublayer = target[l];
+            textshapes::update(text, &sketch);
+            sketch.addText(text);
+            made.push_back(text.anchor);
+            ++report.texts;
         }
         if (!made.empty()) {
             try {

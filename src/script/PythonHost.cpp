@@ -1867,6 +1867,7 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
             d["fills"] = report.fills;
             d["gradients"] = report.gradients;
             d["images"] = report.images;
+            d["texts"] = report.texts;
             d["groups"] = report.groups;
             d["sublayers"] = report.sublayers;
             d["skipped"] = report.skipped;

@@ -89,11 +89,20 @@ struct ImageDef
     std::array<core::Vec2, 4> corners;  // where it is (for the drawing's extent)
 };
 
+// Text in the file: it comes in as text (see core::Text), in the same font where that's installed.
+struct TextDef
+{
+    core::Text text;  // its words and settings: font, height (of capitals, mm), angle, alignment, colour
+    core::Vec2 at;    // its anchor, in drawing coordinates
+    std::string layer;
+};
+
 // A file, read.
 struct Drawing
 {
     std::vector<Shape> shapes;
     std::vector<ImageDef> images;
+    std::vector<TextDef> texts;
     std::vector<std::string> layers;  // the file's layers, in order (bottom first)
     // The file's own canvas (an SVG's page), in drawing coordinates: x0, y0, x1, y1. None for DXF.
     std::optional<std::array<double, 4>> canvas;
@@ -150,6 +159,7 @@ struct Report
     int fills = 0;
     int gradients = 0;
     int images = 0;
+    int texts = 0;
     int groups = 0;
     std::vector<std::string> sublayers;  // where it went
     std::map<std::string, int> skipped;

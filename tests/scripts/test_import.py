@@ -57,7 +57,7 @@ svg = write("plan.svg", """<?xml version="1.0"?>
 </svg>""")
 rep = s.import_file(svg)
 assert rep["sublayers"] == ["Outline", "Paint"], rep
-assert rep["groups"] == 2 and rep["skipped"] == {"texts": 1}, rep
+assert rep["groups"] == 2 and rep["skipped"] == {} and rep["texts"] == 1, rep
 assert not any("gradient" in n for n in rep["notes"]), rep  # (a real gradient now)
 healthy()
 k = kinds()
@@ -195,7 +195,7 @@ dxf = write("part.dxf", "\n".join(str(x) for x in [
 doc.new()
 rep = s.import_file(dxf)
 assert sorted(rep["sublayers"]) == ["Cut", "Guide"] and rep["groups"] == 2, rep
-assert rep["skipped"] == {"hatches": 1, "texts": 1}, rep["skipped"]
+assert rep["skipped"] == {"hatches": 1} and rep["texts"] == 1, rep
 healthy()
 k = kinds()
 assert k.get("Spline") == 1 and k.get("Ellipse") == 1 and k.get("Arc") == 2 and k.get("Circle") == 1, k
@@ -270,6 +270,61 @@ rep = s.import_file(dxfpic)
 assert rep["images"] == 1, rep
 im = s.images[0]
 assert near(im.center, (7, 6)) and isclose(im.width, 4) and im.angle == 0, (im.center, im.width)
+
+# --- text: SVG text and tspans, DXF TEXT and MTEXT -------------------------------------------------------
+words = write("words.svg", """<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="100mm" height="100mm" viewBox="0 0 100 100">
+  <style>.t { font-family: 'No Such Font', Arial, sans-serif; font-size: 10px; }</style>
+  <defs><path id="p" d="M 0 0 L 50 0"/></defs>
+  <text class="t" x="10" y="20" fill="#123456">Hello <tspan font-weight="bold">bold</tspan> world</text>
+  <text x="50" y="50" font-size="8" text-anchor="middle" transform="rotate(-90 50 50)"><tspan x="50" y="50">Line one</tspan><tspan x="50" y="60">Line two</tspan></text>
+  <text x="10" y="90" font-size="5" letter-spacing="1" font-style="italic">   spaced
+     out  </text>
+  <text x="0" y="0" font-size="5" transform="scale(-1 1)">mirror</text>
+  <text><textPath xlink:href="#p">along</textPath></text>
+</svg>""")
+doc.new()
+rep = s.import_file(words)
+assert rep["texts"] == 5 and rep["skipped"] == {"texts along paths": 1}, rep
+assert "words styled differently within a line took the line's style" in rep["notes"], rep["notes"]
+healthy()
+by_words = {t.text: t for t in s.texts}
+assert sorted(by_words) == ["Hello bold world", "Line one", "Line two", "mirror", "spaced out"], sorted(by_words)
+hello = by_words["Hello bold world"]  # (the tspan in it carries on the line; its style is the first words')
+assert hello.font != "No Such Font" and not hello.bold and hello.color == "#123456", (hello.font, hello.color)
+assert near(hello.anchor.pos, (10, 80)) and hello.align == "left" and hello.angle == 0
+assert 5 < hello.height < 8.5, hello.height  # (10 px is the em; the height here is the capitals')
+one, two = by_words["Line one"], by_words["Line two"]
+assert one.align == "center" and isclose(one.angle, 90) and near(one.anchor.pos, (50, 50)), (one.angle, one.anchor.pos)
+assert near(two.anchor.pos, (60, 50)), two.anchor.pos  # (the next line, turned too)
+spaced = by_words["spaced out"]
+assert spaced.italic and isclose(spaced.spacing, 20), spaced.spacing  # (1 of 5: 20% of the size)
+mirror = by_words["mirror"]
+assert mirror.flip_h and mirror.align == "right" and near(mirror.anchor.pos, (0, 100)), (mirror.flip_h, mirror.align)
+# Held with the rest of the layer: moved together.
+gap = (two.anchor.pos[0] - one.anchor.pos[0], two.anchor.pos[1] - one.anchor.pos[1])
+one.anchor.move_to(55, 52)
+healthy()
+assert near((two.anchor.pos[0] - one.anchor.pos[0], two.anchor.pos[1] - one.anchor.pos[1]), gap) or \
+    isclose(hypot(two.anchor.pos[0] - one.anchor.pos[0], two.anchor.pos[1] - one.anchor.pos[1]), hypot(*gap))
+
+notes = write("notes.dxf", "\n".join(str(x) for x in [
+    0, "SECTION", 2, "HEADER", 9, "$INSUNITS", 70, 4, 0, "ENDSEC",
+    0, "SECTION", 2, "TABLES", 0, "TABLE", 2, "STYLE",
+    0, "STYLE", 2, "Notes", 70, 0, 40, 0, 41, 1, 3, "arial.ttf",
+    0, "ENDTAB", 0, "ENDSEC",
+    0, "SECTION", 2, "ENTITIES",
+    0, "TEXT", 8, "Words", 7, "Notes", 10, 0, 20, 0, 40, 2.5, 50, 30, 72, 1, 11, 20, 21, 10, 1, "%%c10 %%p0.1",
+    0, "MTEXT", 8, "Words", 10, 40, 20, 40, 40, 3, 71, 5, 3, r"{\fArial|b0|i0;First}\PSec", 1, r"ond \S1/2;",
+    0, "ENDSEC", 0, "EOF"]) + "\n")
+doc.new()
+rep = s.import_file(notes)
+assert rep["texts"] == 2 and not rep["skipped"], rep
+by_words = {t.text: t for t in s.texts}
+dia = by_words["\u230010 \u00b10.1"]
+assert dia.align == "center" and isclose(dia.angle, 30) and isclose(dia.height, 2.5) and near(dia.anchor.pos, (20, 10)), dia
+m = by_words["First\nSecond 1/2"]
+assert m.align == "center" and m.valign == "middle" and isclose(m.height, 3) and near(m.anchor.pos, (40, 40)), m
 
 # --- what it records makes it again ------------------------------------------------------------------
 doc.new()
