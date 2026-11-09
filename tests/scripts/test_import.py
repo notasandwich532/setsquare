@@ -327,6 +327,20 @@ assert xs[0] == 50 and xs[-1] == 80, xs  # (the symbol's 10 units: 30)
 short = s.texts[0]
 assert short.bold and short.italic and 5 < short.height < 7, (short.bold, short.italic, short.height)
 
+# Markers: an arrowhead on each line's end, its tip on the end, sized to the stroke, turned with it.
+arrows = write("arrows.svg", """<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" viewBox="0 0 100 100">
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="4" markerHeight="4" orient="auto">
+    <path d="M0,0 L10,5 L0,10 z" fill="red"/></marker></defs>
+  <line x1="10" y1="50" x2="60" y2="50" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M80,90 L80,40" stroke="black" stroke-width="2" marker-end="url(#arrow)"/>
+</svg>""")
+doc.new()
+rep = s.import_file(arrows)
+assert rep["fills"] == 4 and all(f.color == "#ff0000" for f in s.fills), rep  # (the arrowheads, each halved by its line)
+corners = {(round(p.x, 6), round(p.y, 6)) for p in s.points}
+for q in [(60, 50), (52, 54), (52, 46), (80, 60), (76, 52), (84, 52)]:
+    assert q in corners, (q, sorted(corners))
+
 notes = write("notes.dxf", "\n".join(str(x) for x in [
     0, "SECTION", 2, "HEADER", 9, "$INSUNITS", 70, 4, 0, "ENDSEC",
     0, "SECTION", 2, "TABLES", 0, "TABLE", 2, "STYLE",

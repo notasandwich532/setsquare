@@ -305,6 +305,43 @@ QString findLinked(const QString& given, const QString& folder)
     return !folder.isEmpty() && byName.isFile() ? byName.absoluteFilePath() : QString();
 }
 
+// Which way a segment runs at its start and at its end.
+Vec2 startDirection(const Segment& s)
+{
+    switch (s.kind) {
+        case Segment::Kind::Line: return sub(s.p[1], s.p[0]);
+        case Segment::Kind::Cubic:
+            for (int k = 1; k <= 3; ++k) {
+                if (len(sub(s.p[k], s.p[0])) > 1e-12) {
+                    return sub(s.p[k], s.p[0]);
+                }
+            }
+            return {1, 0};
+        case Segment::Kind::Ellipse: break;
+    }
+    const double t = s.t0, sign = s.dt < 0 ? -1.0 : 1.0;
+    const Vec2 d{-s.rx * std::sin(t) * sign, s.ry * std::cos(t) * sign};
+    return {d.x * std::cos(s.phi) - d.y * std::sin(s.phi), d.x * std::sin(s.phi) + d.y * std::cos(s.phi)};
+}
+
+Vec2 endDirection(const Segment& s)
+{
+    switch (s.kind) {
+        case Segment::Kind::Line: return sub(s.p[1], s.p[0]);
+        case Segment::Kind::Cubic:
+            for (int k = 2; k >= 0; --k) {
+                if (len(sub(s.p[3], s.p[k])) > 1e-12) {
+                    return sub(s.p[3], s.p[k]);
+                }
+            }
+            return {1, 0};
+        case Segment::Kind::Ellipse: break;
+    }
+    const double t = s.t0 + s.dt, sign = s.dt < 0 ? -1.0 : 1.0;
+    const Vec2 d{-s.rx * std::sin(t) * sign, s.ry * std::cos(t) * sign};
+    return {d.x * std::cos(s.phi) - d.y * std::sin(s.phi), d.x * std::sin(s.phi) + d.y * std::cos(s.phi)};
+}
+
 bool pointInShape(const std::vector<std::vector<Vec2>>& rings, Vec2 p, bool evenOdd)
 {
     int winding = 0, crossings = 0;
@@ -678,6 +715,7 @@ private:
         QString fontStyle = QStringLiteral("normal");
         QString textAnchor = QStringLiteral("start");
         double letterSpacing = 0.0;  // user units
+        QString markerStart, markerMid, markerEnd;  // url(#id)s, or empty
     };
 
     void index(const Node& n)
@@ -735,7 +773,8 @@ private:
             QStringLiteral("visibility"),    QStringLiteral("color"),          QStringLiteral("clip-path"),
             QStringLiteral("mask"),          QStringLiteral("font-family"),    QStringLiteral("font-size"),
             QStringLiteral("font-weight"),   QStringLiteral("font-style"),     QStringLiteral("text-anchor"),
-            QStringLiteral("letter-spacing"), QStringLiteral("font"),
+            QStringLiteral("letter-spacing"), QStringLiteral("font"),           QStringLiteral("marker"),
+            QStringLiteral("marker-start"),  QStringLiteral("marker-mid"),     QStringLiteral("marker-end"),
         };
         for (const QString& name : names) {
             if (n.attrs.contains(name)) {
@@ -1224,6 +1263,12 @@ private:
         set("font-weight", paint.fontWeight);
         set("font-style", paint.fontStyle);
         set("text-anchor", paint.textAnchor);
+        if (own.contains(QStringLiteral("marker"))) {  // (all three at once)
+            paint.markerStart = paint.markerMid = paint.markerEnd = own.value(QStringLiteral("marker"));
+        }
+        set("marker-start", paint.markerStart);
+        set("marker-mid", paint.markerMid);
+        set("marker-end", paint.markerEnd);
         if (own.contains(QStringLiteral("stroke-width"))) {
             const std::vector<double> v = numbers(own.value(QStringLiteral("stroke-width")));
             if (!v.empty()) {
@@ -1538,6 +1583,10 @@ private:
         if (contours.empty() || !paint.visible) {
             return;
         }
+        // Markers (arrowheads, dots) go on its vertices, placed in its own space.
+        auto marked = [](const QString& v) { return !v.trimmed().isEmpty() && v.trimmed() != QStringLiteral("none"); };
+        const bool hasMarkers = marked(paint.markerStart) || marked(paint.markerMid) || marked(paint.markerEnd);
+        const std::vector<Contour> userContours = hasMarkers ? contours : std::vector<Contour>{};
         Shape shape;
         shape.layer = layer;
         // Gradients are placed by the shape's own outline (its box), before it's transformed.
@@ -1576,6 +1625,88 @@ private:
             m_layerOrder.push_back(layer);
         }
         m_out.shapes.push_back(std::move(shape));
+        if (hasMarkers) {
+            markers(userContours, m, paint, opacity, layer, depth);
+        }
+    }
+
+    // The markers on a shape's vertices: its first (marker-start), its last (marker-end), the rest
+    // (marker-mid). Each marker's contents drawn there, turned with the path (orient="auto") or
+    // as given, sized to the stroke (markerUnits), its viewBox fitted to its size, refX/refY on
+    // the vertex.
+    void markers(const std::vector<Contour>& contours, const Affine& m, const Paint& paint, double opacity,
+                 const std::string& layer, int depth)
+    {
+        struct Vertex
+        {
+            Vec2 p;
+            std::optional<Vec2> in, out;  // the path's direction coming in, going out
+        };
+        std::vector<Vertex> vertices;
+        for (const Contour& c : contours) {
+            if (c.segments.empty()) {
+                continue;
+            }
+            vertices.push_back({c.segments.front().start(), std::nullopt, startDirection(c.segments.front())});
+            for (size_t i = 0; i < c.segments.size(); ++i) {
+                Vertex v{c.segments[i].end(), endDirection(c.segments[i]), std::nullopt};
+                if (i + 1 < c.segments.size()) {
+                    v.out = startDirection(c.segments[i + 1]);
+                }
+                else if (c.closed) {
+                    v.out = startDirection(c.segments.front());  // (closed: round to the start again)
+                }
+                vertices.push_back(v);
+            }
+        }
+        if (vertices.empty()) {
+            return;
+        }
+        for (size_t i = 0; i < vertices.size(); ++i) {
+            const bool isStart = i == 0, isEnd = i + 1 == vertices.size();
+            const QString& which = isStart ? paint.markerStart : isEnd ? paint.markerEnd : paint.markerMid;
+            static const QRegularExpression ref(QStringLiteral("url\\(\\s*['\"]?#([^)'\"]+)"));
+            const auto match = ref.match(which);
+            const Node* marker = match.hasMatch() ? m_byId.value(match.captured(1)) : nullptr;
+            if (!marker || marker->tag != QStringLiteral("marker")) {
+                continue;
+            }
+            const Vertex& v = vertices[i];
+            // Its angle: along the path there (between its ways in and out), or as given.
+            const QString orient = marker->attrs.value(QStringLiteral("orient"), QStringLiteral("0")).trimmed();
+            double angle = 0.0;
+            if (orient.startsWith(QStringLiteral("auto"))) {
+                Vec2 d{0, 0};
+                for (const auto& part : {v.in, v.out}) {
+                    if (part && len(*part) > 0) {
+                        d = add(d, mul(*part, 1.0 / len(*part)));
+                    }
+                }
+                if (len(d) < 1e-12 && v.in) {
+                    d = *v.in;  // (turning straight back)
+                }
+                angle = std::atan2(d.y, d.x);
+                if (isStart && orient == QStringLiteral("auto-start-reverse")) {
+                    angle += kPi;
+                }
+            }
+            else {
+                angle = firstOr(numbers(orient), 0.0) * kPi / 180;
+            }
+            const double scale = marker->attrs.value(QStringLiteral("markerUnits")) == QStringLiteral("userSpaceOnUse") ? 1.0 : paint.strokeWidth;
+            const double w = size(*marker, "markerWidth") > 0 ? size(*marker, "markerWidth") : 3.0;
+            const double h = size(*marker, "markerHeight") > 0 ? size(*marker, "markerHeight") : 3.0;
+            const Affine fit = marker->attrs.contains(QStringLiteral("viewBox")) ? viewBoxMap(*marker, w, h) : Affine{};
+            const Vec2 refPoint = fit({number(*marker, "refX"), number(*marker, "refY")});
+            const Affine place = m * Affine::translate(v.p.x, v.p.y) * Affine::rotate(angle) * Affine::scale(scale, scale)
+                               * Affine::translate(-refPoint.x, -refPoint.y) * fit;
+            Paint markerPaint;  // (its contents' style comes from the marker, not the path)
+            inherit(markerPaint, ownStyle(*marker));
+            markerPaint.markerStart = markerPaint.markerMid = markerPaint.markerEnd = QString();
+            for (const Node& k : marker->kids) {
+                walk(k, place, markerPaint, opacity, layer, depth + 1);
+            }
+        }
     }
 
     std::vector<Contour> shapeContours(const Node& n) const
