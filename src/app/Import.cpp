@@ -735,7 +735,7 @@ private:
             QStringLiteral("visibility"),    QStringLiteral("color"),          QStringLiteral("clip-path"),
             QStringLiteral("mask"),          QStringLiteral("font-family"),    QStringLiteral("font-size"),
             QStringLiteral("font-weight"),   QStringLiteral("font-style"),     QStringLiteral("text-anchor"),
-            QStringLiteral("letter-spacing"),
+            QStringLiteral("letter-spacing"), QStringLiteral("font"),
         };
         for (const QString& name : names) {
             if (n.attrs.contains(name)) {
@@ -1151,9 +1151,65 @@ private:
         m_out.images.push_back(std::move(def));
     }
 
+    // A width or height in user units; 0 if it's missing or a percentage (then it isn't known here).
+    double size(const Node& n, const char* name) const
+    {
+        const QString text = n.attrs.value(QLatin1String(name)).trimmed();
+        return text.isEmpty() || text.endsWith(QLatin1Char('%')) ? 0.0 : fontLength(text, 16.0);
+    }
+
+    // A viewBox mapped into a w x h viewport (aligned and fitted in, or filling it, or stretched:
+    // preserveAspectRatio). Without a size, its own units (just moved to its corner).
+    Affine viewBoxMap(const Node& n, double w, double h) const
+    {
+        const std::vector<double> vb = numbers(n.attrs.value(QStringLiteral("viewBox")));
+        if (vb.size() != 4 || !(vb[2] > 0) || !(vb[3] > 0)) {
+            return {};
+        }
+        if (!(w > 0)) {
+            w = h > 0 ? h * vb[2] / vb[3] : vb[2];
+        }
+        if (!(h > 0)) {
+            h = w * vb[3] / vb[2];
+        }
+        double sx = w / vb[2], sy = h / vb[3], tx = 0, ty = 0;
+        const QStringList fit = n.attrs.value(QStringLiteral("preserveAspectRatio"), QStringLiteral("xMidYMid meet"))
+                                    .split(QLatin1Char(' '), Qt::SkipEmptyParts);
+        const QString align = fit.value(0, QStringLiteral("xMidYMid"));
+        if (align != QStringLiteral("none")) {
+            const double s = fit.value(1) == QStringLiteral("slice") ? std::max(sx, sy) : std::min(sx, sy);
+            const double ax = align.contains(QStringLiteral("xMin")) ? 0.0 : align.contains(QStringLiteral("xMax")) ? 1.0 : 0.5;
+            const double ay = align.contains(QStringLiteral("YMin")) ? 0.0 : align.contains(QStringLiteral("YMax")) ? 1.0 : 0.5;
+            sx = sy = s;
+            tx = (w - vb[2] * s) * ax;
+            ty = (h - vb[3] * s) * ay;
+        }
+        return Affine::translate(tx, ty) * Affine::scale(sx, sy) * Affine::translate(-vb[0], -vb[1]);
+    }
+
     // An element's own style over what it inherits (the properties that are inherited).
     void inherit(Paint& paint, const QHash<QString, QString>& own) const
     {
+        // The font shorthand first ("italic bold 12px/1.5 Georgia, serif"), the longhands over it.
+        if (own.contains(QStringLiteral("font"))) {
+            static const QRegularExpression shorthand(QStringLiteral(
+                "^\\s*((?:(?:italic|oblique|normal|bold|bolder|lighter|small-caps|[1-9]00)\\s+)*)"
+                "([\\d.]+(?:px|pt|mm|cm|in|em|%)?)(?:\\s*/\\s*\\S+)?\\s+(.+)$"));
+            const auto m = shorthand.match(own.value(QStringLiteral("font")));
+            if (m.hasMatch()) {
+                const QStringList words = m.captured(1).split(QLatin1Char(' '), Qt::SkipEmptyParts);
+                for (const QString& w : words) {
+                    if (w == QStringLiteral("italic") || w == QStringLiteral("oblique")) {
+                        paint.fontStyle = w;
+                    }
+                    else if (w == QStringLiteral("bold") || w == QStringLiteral("bolder") || w.endsWith(QStringLiteral("00"))) {
+                        paint.fontWeight = w;
+                    }
+                }
+                paint.fontSize = fontLength(m.captured(2), paint.fontSize);
+                paint.fontFamily = m.captured(3).trimmed();
+            }
+        }
         auto set = [&](const char* name, QString& field) {
             if (own.contains(QLatin1String(name)) && own.value(QLatin1String(name)) != QStringLiteral("inherit")) {
                 field = own.value(QLatin1String(name));
@@ -1225,16 +1281,27 @@ private:
             skip("texts along paths");
             return;
         }
-        struct Run
+        // A run: the words put at one place (the text's, or a placed tspan's: a line), in chunks
+        // of one style each.
+        struct Chunk
         {
             QString words;
-            Vec2 at;  // user units
             Paint paint;
-            bool styled = false;  // (its paint: that of its first words)
+        };
+        struct Run
+        {
+            std::vector<Chunk> chunks;
+            Vec2 at;  // user units
+            Paint paint;  // (the run's own: its text-anchor)
         };
         auto first = [&](const Node& k, const char* name) -> std::optional<double> {
             const std::vector<double> v = numbers(k.attrs.value(QLatin1String(name)));
             return v.empty() ? std::nullopt : std::optional<double>(v.front());
+        };
+        auto alike = [](const Paint& a, const Paint& b) {
+            return a.fill == b.fill && a.stroke == b.stroke && a.fillOpacity == b.fillOpacity && a.fontFamily == b.fontFamily
+                && a.fontSize == b.fontSize && a.fontWeight == b.fontWeight && a.fontStyle == b.fontStyle
+                && a.letterSpacing == b.letterSpacing && a.visible == b.visible;
         };
         std::vector<Run> runs{{{}, {first(n, "x").value_or(0.0) + first(n, "dx").value_or(0.0),
                                     first(n, "y").value_or(0.0) + first(n, "dy").value_or(0.0)},
@@ -1245,18 +1312,10 @@ private:
                     QString words = k.text;
                     words.replace(QLatin1Char('\n'), QLatin1Char(' ')).replace(QLatin1Char('\t'), QLatin1Char(' ')).replace(QLatin1Char('\r'), QLatin1Char(' '));
                     Run& run = runs.back();
-                    if (!run.styled && !words.trimmed().isEmpty()) {
-                        run.paint = p;
-                        run.styled = true;
+                    if (run.chunks.empty() || !alike(run.chunks.back().paint, p)) {
+                        run.chunks.push_back({{}, p});
                     }
-                    else if (!words.trimmed().isEmpty()) {
-                        const Paint& q = run.paint;  // (a text here has one style throughout)
-                        if (q.fill != p.fill || q.fontFamily != p.fontFamily || q.fontSize != p.fontSize
-                            || q.fontWeight != p.fontWeight || q.fontStyle != p.fontStyle) {
-                            note("words styled differently within a line took the line's style");
-                        }
-                    }
-                    run.words += words;
+                    run.chunks.back().words += words;
                     continue;
                 }
                 if ((k.tag != QStringLiteral("tspan") && k.tag != QStringLiteral("a")) || depth > 8) {
@@ -1279,56 +1338,125 @@ private:
         collect(n, paint, 0);
 
         for (Run& run : runs) {
-            const QString words = run.words.simplified();
-            if (words.isEmpty() || !run.paint.visible) {
+            // Spaces collapsed across the chunks (as SVG does), none at the line's ends.
+            bool space = true;  // (just after one, or at the start)
+            for (Chunk& c : run.chunks) {
+                QString out;
+                for (const QChar ch : c.words) {
+                    if (ch == QLatin1Char(' ')) {
+                        if (!space) {
+                            out += ch;
+                        }
+                        space = true;
+                    }
+                    else {
+                        out += ch;
+                        space = false;
+                    }
+                }
+                c.words = out;
+            }
+            if (!run.chunks.empty()) {
+                while (run.chunks.back().words.endsWith(QLatin1Char(' '))) {
+                    run.chunks.back().words.chop(1);
+                }
+            }
+            std::erase_if(run.chunks, [](const Chunk& c) { return c.words.isEmpty(); });
+            if (run.chunks.empty()) {
                 continue;
             }
-            const Paint& p = run.paint;
-            TextDef def;
-            core::Text& t = def.text;
-            t.text = words.toStdString();
-            bool substituted = false;
-            t.font = installedFamily(p.fontFamily.split(QLatin1Char(',')), substituted).toStdString();
-            if (substituted) {
-                note("fonts that aren't installed were replaced");
-            }
-            const int weight = p.fontWeight == QStringLiteral("bold") || p.fontWeight == QStringLiteral("bolder") ? 700
-                             : static_cast<int>(firstOr(numbers(p.fontWeight), 400));
-            t.bold = weight >= 600;
-            t.italic = p.fontStyle == QStringLiteral("italic") || p.fontStyle == QStringLiteral("oblique");
-            t.align = p.textAnchor == QStringLiteral("middle") ? core::TextAlign::Center
-                    : p.textAnchor == QStringLiteral("end")    ? core::TextAlign::Right
-                                                               : core::TextAlign::Left;
-            // Its size: capitals of the font at that size, scaled as the transform scales up.
-            const Vec2 right = m.linear({1, 0}), up = m.linear({0, -1});
-            if (std::abs(len(right) - len(up)) > 1e-6 * len(up) || std::abs(dot(right, up)) > 1e-6 * len(right) * len(up)) {
-                note("stretched or skewed texts came in unstretched");
-            }
-            t.height = p.fontSize * len(up) * capitalRatio(QString::fromStdString(t.font), t.bold, t.italic);
-            if (!(t.height > 1e-9)) {
+            const QString anchor = run.chunks.front().paint.textAnchor;
+            if (run.chunks.size() == 1) {
+                if (auto def = textDef(run.chunks.front().words, run.chunks.front().paint, anchor, m, run.at, opacity, layer)) {
+                    m_out.texts.push_back(std::move(*def));
+                }
                 continue;
             }
-            t.spacing = p.fontSize > 0 ? p.letterSpacing / p.fontSize * 100.0 : 0.0;
-            orientText(t, right, up);
-            // Filled in its colour (or, outlined only, its line's): that of plain geometry if none.
-            std::optional<Color> c = color(p.fill, p, p.fillOpacity * opacity);
-            if (!c) {
-                c = color(p.stroke, p, p.strokeOpacity * opacity);
+            // Words in different styles: a text for each, one after another along the line (the
+            // line placed by its anchor as a whole).
+            std::vector<double> widths;
+            double total = 0;
+            for (const Chunk& c : run.chunks) {
+                widths.push_back(advance(c.words, c.paint));
+                total += widths.back();
             }
-            if (!c) {
-                continue;  // (not painted at all)
+            double x = run.at.x - (anchor == QStringLiteral("middle") ? total / 2 : anchor == QStringLiteral("end") ? total : 0.0);
+            for (size_t i = 0; i < run.chunks.size(); ++i) {
+                const Chunk& c = run.chunks[i];
+                const qsizetype lead = c.words.size() - QString(c.words).remove(QRegularExpression(QStringLiteral("^ +"))).size();
+                const QString words = c.words.trimmed();
+                const double before = advance(c.words.left(lead), c.paint);
+                if (auto def = textDef(words, c.paint, QStringLiteral("start"), m, {x + before, run.at.y}, opacity, layer)) {
+                    m_out.texts.push_back(std::move(*def));
+                }
+                x += widths[i];
             }
-            t.hasColor = true;
-            t.color = *c;
-            def.at = m(run.at);
-            def.layer = layer;
-            if (!layer.empty() && std::ranges::find(m_layerOrder, layer) == m_layerOrder.end()) {
-                m_layerOrder.push_back(layer);
-            }
-            m_out.texts.push_back(std::move(def));
         }
     }
 
+    // How far words run in a style (user units).
+    double advance(const QString& words, const Paint& p)
+    {
+        bool substituted = false;
+        QFont font(installedFamily(p.fontFamily.split(QLatin1Char(',')), substituted));
+        font.setPixelSize(1000);
+        const int weight = p.fontWeight == QStringLiteral("bold") || p.fontWeight == QStringLiteral("bolder") ? 700
+                         : static_cast<int>(firstOr(numbers(p.fontWeight), 400));
+        font.setBold(weight >= 600);
+        font.setItalic(p.fontStyle == QStringLiteral("italic") || p.fontStyle == QStringLiteral("oblique"));
+        return QFontMetricsF(font).horizontalAdvance(words) / 1000.0 * p.fontSize + p.letterSpacing * double(words.size());
+    }
+
+    // A text of words in a style, anchored at `at` (user units) by `anchor` (start, middle, end).
+    std::optional<TextDef> textDef(const QString& words, const Paint& p, const QString& anchor, const Affine& m, Vec2 at,
+                                   double opacity, const std::string& layer)
+    {
+        if (words.isEmpty() || !p.visible) {
+            return std::nullopt;
+        }
+        TextDef def;
+        core::Text& t = def.text;
+        t.text = words.toStdString();
+        bool substituted = false;
+        t.font = installedFamily(p.fontFamily.split(QLatin1Char(',')), substituted).toStdString();
+        if (substituted) {
+            note("fonts that aren't installed were replaced");
+        }
+        const int weight = p.fontWeight == QStringLiteral("bold") || p.fontWeight == QStringLiteral("bolder") ? 700
+                         : static_cast<int>(firstOr(numbers(p.fontWeight), 400));
+        t.bold = weight >= 600;
+        t.italic = p.fontStyle == QStringLiteral("italic") || p.fontStyle == QStringLiteral("oblique");
+        t.align = anchor == QStringLiteral("middle") ? core::TextAlign::Center
+                : anchor == QStringLiteral("end")    ? core::TextAlign::Right
+                                                     : core::TextAlign::Left;
+        // Its size: capitals of the font at that size, scaled as the transform scales up.
+        const Vec2 right = m.linear({1, 0}), up = m.linear({0, -1});
+        if (std::abs(len(right) - len(up)) > 1e-6 * len(up) || std::abs(dot(right, up)) > 1e-6 * len(right) * len(up)) {
+            note("stretched or skewed texts came in unstretched");
+        }
+        t.height = p.fontSize * len(up) * capitalRatio(QString::fromStdString(t.font), t.bold, t.italic);
+        if (!(t.height > 1e-9)) {
+            return std::nullopt;
+        }
+        t.spacing = p.fontSize > 0 ? p.letterSpacing / p.fontSize * 100.0 : 0.0;
+        orientText(t, right, up);
+        // Filled in its colour (or, outlined only, its line's).
+        std::optional<Color> c = color(p.fill, p, p.fillOpacity * opacity);
+        if (!c) {
+            c = color(p.stroke, p, p.strokeOpacity * opacity);
+        }
+        if (!c) {
+            return std::nullopt;  // (not painted at all)
+        }
+        t.hasColor = true;
+        t.color = *c;
+        def.at = m(at);
+        def.layer = layer;
+        if (!layer.empty() && std::ranges::find(m_layerOrder, layer) == m_layerOrder.end()) {
+            m_layerOrder.push_back(layer);
+        }
+        return def;
+    }
     void walk(const Node& n, const Affine& parent, const Paint& inherited, double opacity, std::string layer, int depth,
               bool isRoot = false)
     {
@@ -1362,7 +1490,8 @@ private:
             }
             Affine inner = m;
             if (tag == QStringLiteral("svg") && !isRoot) {
-                inner = m * Affine::translate(number(n, "x"), number(n, "y"));
+                // Its viewBox fitted to its size, there.
+                inner = m * Affine::translate(number(n, "x"), number(n, "y")) * viewBoxMap(n, size(n, "width"), size(n, "height"));
             }
             for (const Node& k : n.kids) {
                 walk(k, inner, paint, opacity, layer, depth + 1);
@@ -1374,9 +1503,15 @@ private:
             const Node* target = href.startsWith(QLatin1Char('#')) ? m_byId.value(href.mid(1)) : nullptr;
             if (target) {
                 const Affine at = m * Affine::translate(number(n, "x"), number(n, "y"));
-                if (target->tag == QStringLiteral("symbol")) {
+                if (target->tag == QStringLiteral("symbol") || target->tag == QStringLiteral("svg")) {
+                    // Its viewBox fitted to the use's size (else its own).
+                    const double w = size(n, "width") > 0 ? size(n, "width") : size(*target, "width");
+                    const double h = size(n, "height") > 0 ? size(n, "height") : size(*target, "height");
+                    const Affine inner = at * viewBoxMap(*target, w, h);
+                    Paint symbolPaint = paint;
+                    inherit(symbolPaint, ownStyle(*target));
                     for (const Node& k : target->kids) {
-                        walk(k, at, paint, opacity, layer, depth + 1);
+                        walk(k, inner, symbolPaint, opacity, layer, depth + 1);
                     }
                 }
                 else {

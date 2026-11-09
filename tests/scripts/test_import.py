@@ -285,14 +285,16 @@ words = write("words.svg", """<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlin
 </svg>""")
 doc.new()
 rep = s.import_file(words)
-assert rep["texts"] == 5 and rep["skipped"] == {"texts along paths": 1}, rep
-assert "words styled differently within a line took the line's style" in rep["notes"], rep["notes"]
+assert rep["texts"] == 7 and rep["skipped"] == {"texts along paths": 1}, rep
 healthy()
 by_words = {t.text: t for t in s.texts}
-assert sorted(by_words) == ["Hello bold world", "Line one", "Line two", "mirror", "spaced out"], sorted(by_words)
-hello = by_words["Hello bold world"]  # (the tspan in it carries on the line; its style is the first words')
+assert sorted(by_words) == ["Hello", "Line one", "Line two", "bold", "mirror", "spaced out", "world"], sorted(by_words)
+# A word in its own style within a line: a text of its own, after the one before it.
+hello, bold, world = by_words["Hello"], by_words["bold"], by_words["world"]
 assert hello.font != "No Such Font" and not hello.bold and hello.color == "#123456", (hello.font, hello.color)
+assert bold.bold and not world.bold and world.color == "#123456"
 assert near(hello.anchor.pos, (10, 80)) and hello.align == "left" and hello.angle == 0
+assert hello.anchor.x < bold.anchor.x < world.anchor.x and bold.anchor.y == hello.anchor.y, (hello.anchor.pos, bold.anchor.pos)
 assert 5 < hello.height < 8.5, hello.height  # (10 px is the em; the height here is the capitals')
 one, two = by_words["Line one"], by_words["Line two"]
 assert one.align == "center" and isclose(one.angle, 90) and near(one.anchor.pos, (50, 50)), (one.angle, one.anchor.pos)
@@ -307,6 +309,23 @@ one.anchor.move_to(55, 52)
 healthy()
 assert near((two.anchor.pos[0] - one.anchor.pos[0], two.anchor.pos[1] - one.anchor.pos[1]), gap) or \
     isclose(hypot(two.anchor.pos[0] - one.anchor.pos[0], two.anchor.pos[1] - one.anchor.pos[1]), hypot(*gap))
+
+# The font shorthand; a nested svg's viewBox; a symbol used at a size (its viewBox fitted to it).
+fitted = write("fitted.svg", """<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="100mm" height="100mm" viewBox="0 0 100 100">
+  <defs><symbol id="sq" viewBox="0 0 10 10"><rect x="0" y="0" width="10" height="10" fill="red"/></symbol></defs>
+  <svg x="10" y="10" width="20" height="20" viewBox="0 0 10 10"><circle cx="5" cy="5" r="5" fill="blue"/></svg>
+  <use xlink:href="#sq" x="50" y="10" width="30" height="30"/>
+  <text x="10" y="90" style="font: italic bold 8px serif" fill="black">Short</text>
+</svg>""")
+doc.new()
+s.import_file(fitted)
+disc = s.circles[0]
+assert near(disc.center.pos, (20, 80)) and isclose(disc.radius, 10), (disc.center.pos, disc.radius)  # (scaled 2x)
+xs = sorted({round(p.x, 6) for p in s.points if p.y < 95 and p.x >= 45})
+assert xs[0] == 50 and xs[-1] == 80, xs  # (the symbol's 10 units: 30)
+short = s.texts[0]
+assert short.bold and short.italic and 5 < short.height < 7, (short.bold, short.italic, short.height)
 
 notes = write("notes.dxf", "\n".join(str(x) for x in [
     0, "SECTION", 2, "HEADER", 9, "$INSUNITS", 70, 4, 0, "ENDSEC",
