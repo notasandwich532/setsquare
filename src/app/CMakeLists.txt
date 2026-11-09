@@ -67,6 +67,7 @@ add_library(drawapp_lib STATIC
     tools/StyleTools.cpp
     tools/StyleTools.h
     tools/GradientTool.cpp
+    tools/HatchTool.cpp
     tools/GradientTool.h
     tools/ImageTool.cpp
     tools/ImageTool.h

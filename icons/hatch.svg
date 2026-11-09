@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" version="1.1"
+     width="24" height="24" viewBox="0 0 24 24">
+  <!-- Drawing App icon -->
+  <g id="fills" inkscape:groupmode="layer" inkscape:label="Fills">
+    <path d="M16.4704,21 L21,16.4704 M9.7352,21 L21,9.7352 M3,21 L21,3 M3,14.2648 L14.2648,3 M3,7.5296 L7.5296,3" fill="none" stroke="#f2b33d" stroke-width="1.3" stroke-linecap="round"/>
+  </g>
+  <g id="strokes" inkscape:groupmode="layer" inkscape:label="Strokes">
+    <line x1="3" y1="21" x2="21" y2="21" fill="none" stroke="#d5d9de" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="21" y1="21" x2="21" y2="3" fill="none" stroke="#d5d9de" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="21" y1="3" x2="3" y2="3" fill="none" stroke="#d5d9de" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="3" y1="3" x2="3" y2="21" fill="none" stroke="#d5d9de" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

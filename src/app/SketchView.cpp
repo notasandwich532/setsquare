@@ -14,6 +14,7 @@
 #include "tools/CurveTools.h"
 #include "tools/ProjectTool.h"
 #include "tools/GradientTool.h"
+#include "tools/HatchTool.h"
 #include "tools/ImageTool.h"
 #include "tools/StyleTools.h"
 #include "tools/TextTool.h"
@@ -142,7 +143,7 @@ void SketchView::setTool(ToolKind kind)
         m_tool.reset();  // before the new one starts (a command tidies up as it goes)
     }
     if (kind != ToolKind::Select && kind != ToolKind::StrokeBrush && kind != ToolKind::Fill && kind != ToolKind::Gradient
-        && kind != ToolKind::ResetFill && kind != ToolKind::Eyedropper) {
+        && kind != ToolKind::ResetFill && kind != ToolKind::Eyedropper && kind != ToolKind::Hatch) {
         setPresentation(false);  // editing geometry: see it (and its constraints) properly
     }
     showOptionsPanel(kind);
@@ -208,6 +209,7 @@ void SketchView::setTool(ToolKind kind)
         case ToolKind::Fill: m_tool = std::make_unique<FillTool>(*this); break;
         case ToolKind::Gradient: m_tool = std::make_unique<GradientTool>(*this); break;
         case ToolKind::ResetFill: m_tool = std::make_unique<ResetFillTool>(*this); break;
+        case ToolKind::Hatch: m_tool = std::make_unique<HatchTool>(*this); break;
         case ToolKind::Image: m_tool = std::make_unique<ImageTool>(*this); break;
         case ToolKind::Eyedropper: m_tool = std::make_unique<EyedropperTool>(*this); break;
         case ToolKind::Group: m_tool = std::make_unique<GroupTool>(*this); break;
@@ -326,6 +328,22 @@ void SketchView::editGradient(core::Id item)
     setTool(ToolKind::Gradient);
     gradientTool()->setTarget(target);
     gradientTool()->setCurrent(item);
+}
+
+void SketchView::editHatch(core::Id fill)
+{
+    setTool(ToolKind::Hatch);
+    static_cast<HatchTool*>(m_tool.get())->setCurrent(fill);
+}
+
+HatchTool* SketchView::hatchTool() const
+{
+    return m_toolKind == ToolKind::Hatch ? static_cast<HatchTool*>(m_tool.get()) : nullptr;
+}
+
+void SketchView::setHatch(const core::Hatch& hatch)
+{
+    m_hatch = hatch;
 }
 
 void SketchView::editImage(core::Id image)

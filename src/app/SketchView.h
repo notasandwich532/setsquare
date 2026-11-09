@@ -81,6 +81,8 @@ public:
     void editText(core::Id text);  // the Text tool, on it
     // The Gradient tool, editing an item's gradient (a fill, a curve's stroke or a text).
     void editGradient(core::Id item);
+    // The Hatch tool, editing a fill's hatch.
+    void editHatch(core::Id fill);
     // The Image tool, on a reference image.
     void editImage(core::Id image);
     // An image drawn in place of the one with its id (an edit in progress, e.g. while dragging it).
@@ -186,6 +188,10 @@ public:
     const core::Gradient& gradient() const { return m_gradient; }
     void setGradient(const core::Gradient& gradient);
     class GradientTool* gradientTool() const;  // the current tool, if it's the gradient tool
+    // The hatch tool's hatch (kept while switching tools; at first, ANSI31).
+    const core::Hatch& hatch() const { return m_hatch; }
+    void setHatch(const core::Hatch& hatch);
+    class HatchTool* hatchTool() const;  // the current tool, if it's the hatch tool
 
     // How a stroke style is drawn at the current zoom.
     QPen strokePen(const core::StrokeStyle& style) const;
@@ -273,6 +279,7 @@ private:
     bool m_presentation = false;
     Paint m_paint;
     core::Gradient m_gradient;
+    core::Hatch m_hatch = *core::hatch::builtin("ANSI31");
     mutable images::Cache m_imageCache;
     // Each layer's fill areas as last found, so a paint needn't find them again while its
     // geometry stays as it was (or only moves as a whole: then they're moved with it).

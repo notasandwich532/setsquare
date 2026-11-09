@@ -184,6 +184,7 @@ const std::pair<ToolKind, const char*> kToolNames[] = {
     {ToolKind::SplineControl, "spline_control"},
     {ToolKind::Gradient, "gradient"},
     {ToolKind::ResetFill, "reset_fill"},
+    {ToolKind::Hatch, "hatch"},
     {ToolKind::Image, "image"},
     {ToolKind::Eyedropper, "eyedropper"},
     {ToolKind::Group, "group"},
@@ -901,6 +902,7 @@ void MainWindow::createActions()
                                 {ToolKind::StrokeBrush, tr("Stroke Brush"), QKeySequence(Qt::Key_B)},
                                 {ToolKind::Fill, tr("Fill"), QKeySequence(Qt::Key_G)},
                                 {ToolKind::Gradient, tr("Gradient"), QKeySequence(Qt::SHIFT | Qt::Key_G)},
+                                {ToolKind::Hatch, tr("Hatch"), QKeySequence(Qt::SHIFT | Qt::Key_H)},
                                 {ToolKind::ResetFill, tr("Reset Fill"), {}},
                                 {ToolKind::Eyedropper, tr("Eyedropper"), QKeySequence(Qt::Key_I)},
                             });

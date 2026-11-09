@@ -80,6 +80,7 @@ enum class ToolKind
     Image,
     Eyedropper,
     Group,
+    Hatch,
 };
 
 struct ToolEvent
