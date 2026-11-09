@@ -571,21 +571,50 @@ Id Sketch::project(Id source)
         }
     }
     const Entity copy = src;  // (adding may move it)
+    // Its points: projected too, but the origin (and the axes' ends), in every layer, are shared.
+    auto point = [this](Id p) { return isReference(p) ? p : project(p); };
     Id id = kNoId;
     if (const auto* p = std::get_if<Point>(&copy.geom)) {
         id = addPoint(p->x, p->y);
     }
     else if (const auto* l = std::get_if<Line>(&copy.geom)) {
-        const Id a = project(l->p1);
-        id = addLine(a, project(l->p2));
+        const Id a = point(l->p1);
+        id = addLine(a, point(l->p2));
     }
     else if (const auto* c = std::get_if<Circle>(&copy.geom)) {
-        id = addCircle(project(c->center), c->radius);
+        id = addCircle(point(c->center), c->radius);
     }
     else if (const auto* a = std::get_if<Arc>(&copy.geom)) {
-        const Id centre = project(a->center);
-        const Id start = project(a->start);
-        id = addArc(centre, start, project(a->end));
+        const Id centre = point(a->center);
+        const Id start = point(a->start);
+        id = addArc(centre, start, point(a->end));
+    }
+    else if (const auto* el = std::get_if<Ellipse>(&copy.geom)) {
+        const Id centre = point(el->center);
+        const Id major = point(el->major);
+        id = addEllipse(centre, major, point(el->minor));
+    }
+    else if (const auto* ea = std::get_if<EllipseArc>(&copy.geom)) {
+        const Id centre = point(ea->center);
+        const Id major = point(ea->major);
+        const Id minor = point(ea->minor);
+        const Id start = point(ea->start);
+        id = addEllipseArc(centre, major, minor, start, point(ea->end));
+    }
+    else if (const auto* sp = std::get_if<Spline>(&copy.geom)) {
+        // Its points (and a piece's ends) projected: the same curve, following the original's.
+        Spline projected = *sp;
+        for (Id& p : projected.points) {
+            p = point(p);
+        }
+        if (projected.isPiece()) {
+            projected.start = point(sp->start);
+            projected.end = point(sp->end);
+        }
+        id = addSpline(projected);
+    }
+    if (id == kNoId) {
+        throw SketchError("that can't be projected");
     }
     Entity& e = m_entities.at(id);
     e.projectedFrom = source;

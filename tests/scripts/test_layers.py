@@ -107,3 +107,36 @@ for e in s.entities:
 d = s.distance(a.center, bc, value=5)
 d.value = 7
 assert isclose(math.dist(a.center.pos, bc.pos), 7)
+
+# Every kind of curve projects (ellipses, elliptical arcs, splines and pieces of them), and curves
+# on the origin share it (it's in every layer): a copy is the same curve, and follows the original.
+doc.new()
+base = s.layer
+oval = s.ellipse((60, 0), (75, 0), (60, 6))
+part = s.ellipse_arc((60, 30), (75, 30), (60, 36), (75, 30), (60, 36))
+wave = s.spline([(0, 40), (10, 50), (20, 40), (30, 50)])
+loop = s.spline([(40, 60), (50, 70), (60, 60)], kind="control", closed=True)
+cut = s.line((5, 30), (5, 60))  # crosses the wave: trimming leaves pieces of it
+s.trim(wave, near=(1, 42))
+on_origin = [s.circle(s.origin, 8), s.line(s.origin, (20, -10))]
+curves = [e for e in s.entities if e.layer == base and type(e).__name__ != "Point" and e not in (s.x_axis, s.y_axis)]
+up = s.add_layer("Up")
+copies = s.project(curves)
+assert [type(c).__name__ for c in copies] == [type(c).__name__ for c in curves], copies
+assert all(c.projected and c.linked and c.fixed and c.construction for c in copies)
+assert any(type(c).__name__ == "Spline" and c.start is not None for c in copies)  # (a piece stays a piece)
+assert copies[curves.index(on_origin[0])].center == s.origin and copies[curves.index(on_origin[1])].p1 == s.origin
+r = s.solve()
+assert r.ok and not r.redundant and not r.conflicting, (r.redundant, r.conflicting)
+# The original changed: the copies follow.
+s.layer = base
+oval.major.move_to(80, 0)
+piece = next(c for c in curves if type(c).__name__ == "Spline" and c.start is not None)  # (left by the trim)
+p = piece.points[2]
+p.move_to(p.x, p.y + 5)
+s.solve()
+s.layer = up
+moved = copies[curves.index(oval)]
+assert moved.major.pos == (80, 0), moved.major.pos
+spline_copies = [c for c in copies if type(c).__name__ == "Spline"]
+assert any(math.isclose(q.y, p.y) and math.isclose(q.x, p.x) for c in spline_copies for q in c.points), p.pos
