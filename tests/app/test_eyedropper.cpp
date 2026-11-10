@@ -1,5 +1,6 @@
-// The eyedropper: what it takes (true colours, not as shown faded), the Colour 1 / 2 choice, and
-// going back to the tool before. Also where a point is along a gradient (what it reads).
+// The eyedropper (left-click Colour 1, right-click Colour 2, as in Paint), what it takes (true colours,
+// not as shown faded) and going back to the tool before; Colour 1 and 2 selected for one click. Also
+// where a point is along a gradient (what it reads).
 
 #include "ColorBar.h"
 #include "Document.h"
@@ -35,73 +36,111 @@ struct Fixture
     SketchView view{doc};
     ColorBar bar{view};
     build::Rectangle rect;
-    std::optional<bool> answer = false;  // what the prompt answers
-    int asked = 0;
-    EyedropperTool::Chooser saved = EyedropperTool::chooser();
 
     Fixture()
     {
         view.resize(800, 600);
         view.show();
+        bar.show();
         view.resetView();
         doc.modify("rect", [&](Sketch& s) { rect = build::rectangle(s, s.addPoint(0, 0), s.addPoint(40, 20)); });
-        EyedropperTool::chooser() = [this](const EyedropperTool::Sample&, QPoint) {
-            ++asked;
-            return answer;
-        };
     }
-    ~Fixture()
-    {
-        EyedropperTool::chooser() = saved;
-        saveSnapshot(view);
-    }
-    void click(double x, double y)
+    ~Fixture() { saveSnapshot(view); }
+    void click(double x, double y, Qt::MouseButton button = Qt::LeftButton)
     {
         const QPoint at = view.toScreen({x, y}).toPoint();
         QTest::mouseMove(&view, at);
-        QTest::mouseClick(&view, Qt::LeftButton, {}, at);
+        QTest::mouseClick(&view, button, {}, at);
+        QCoreApplication::processEvents();  // (a selected colour is put back after the click)
+    }
+    QWidget* box(int which) const
+    {
+        auto* w = bar.findChild<QWidget*>(which == 1 ? QStringLiteral("colour1") : QStringLiteral("colour2"));
+        REQUIRE(w);
+        return w;
+    }
+    void choose(int which)  // click Colour 1 or 2
+    {
+        QTest::mouseClick(box(which), Qt::LeftButton);
+        QCoreApplication::processEvents();
     }
 };
 }  // namespace
 
-TEST_CASE("Eyedropper: a fill's own colour, as Colour 2, then back to the tool before", "[eyedropper]")
+TEST_CASE("Eyedropper: left-click takes Colour 1, right-click Colour 2, then back to the tool before", "[eyedropper]")
 {
     Fixture f;
     REQUIRE(f.view.tryEdit("fill", [&](Editor& ed) { ed.fill({10, 10}, hex("#ff7f27")); }));
-    f.view.setTool(ToolKind::Fill);
-    f.view.setTool(ToolKind::Eyedropper);
-    f.answer = true;
-    f.click(10, 10);  // shown faded while sketching, but it's #ff7f27
-    CHECK(f.asked == 1);
-    CHECK(f.view.paint().color2 == hex("#ff7f27"));
-    CHECK(f.view.toolKind() == ToolKind::Fill);
-}
-
-TEST_CASE("Eyedropper: a stroke, as Colour 1; cancelled or nothing there: no change", "[eyedropper]")
-{
-    Fixture f;
     REQUIRE(f.view.tryEdit("stroke", [&](Editor& ed) {
         core::StrokeStyle style;
         style.color = hex("#22b14c");
         style.width = 1.0;
         ed.setStroke({f.rect.sides[0]}, style);
     }));
+    f.view.setTool(ToolKind::Fill);
+    f.view.setTool(ToolKind::Eyedropper);
+    f.click(10, 10, Qt::RightButton);  // shown faded while sketching, but it's #ff7f27
+    CHECK(f.view.paint().color2 == hex("#ff7f27"));
+    CHECK(f.view.toolKind() == ToolKind::Fill);  // (back to the tool before)
+
     const Color before = f.view.paint().color1;
     f.view.setTool(ToolKind::Eyedropper);
-    f.click(60, 60);  // nothing
-    CHECK(f.asked == 0);
-    CHECK(f.view.toolKind() == ToolKind::Eyedropper);
-
-    f.answer = std::nullopt;  // the prompt closed
-    f.click(20, 0);
-    CHECK(f.asked == 1);
+    f.click(60, 60);  // nothing there: no change, still the eyedropper
     CHECK(f.view.paint().color1 == before);
     CHECK(f.view.toolKind() == ToolKind::Eyedropper);
-
-    f.answer = false;
     f.click(20, 0);
     CHECK(f.view.paint().color1 == hex("#22b14c"));
-    CHECK(f.view.toolKind() == ToolKind::Select);
+}
+
+TEST_CASE("Eyedropper: with Colour 2 selected, a left-click takes Colour 2 (once)", "[eyedropper]")
+{
+    Fixture f;
+    REQUIRE(f.view.tryEdit("fill", [&](Editor& ed) { ed.fill({10, 10}, hex("#ff7f27")); }));
+    const Color one = f.view.paint().color1;
+    f.view.setTool(ToolKind::Eyedropper);
+    f.choose(2);
+    CHECK(f.view.selectedColor() == 2);
+    f.click(10, 10);
+    CHECK(f.view.paint().color2 == hex("#ff7f27"));
+    CHECK(f.view.paint().color1 == one);
+    CHECK(f.view.selectedColor() == 0);  // (for that click only)
+}
+
+TEST_CASE("Colour 1 and 2: the palette goes to the selected one, for one click; any other click deselects", "[eyedropper]")
+{
+    Fixture f;
+    // Nothing selected: left-click Colour 1, right-click Colour 2.
+    f.bar.pickColor(hex("#ed1c24"));
+    CHECK(f.view.paint().color1 == hex("#ed1c24"));
+    // Colour 2 selected: the next palette click (left) goes to it, then it's deselected.
+    f.choose(2);
+    CHECK(f.view.selectedColor() == 2);
+    auto swatches = f.bar.findChildren<QWidget*>();
+    QWidget* yellow = nullptr;
+    for (QWidget* w : swatches) {
+        if (w->toolTip() == QStringLiteral("#fff200")) {
+            yellow = w;
+        }
+    }
+    REQUIRE(yellow);
+    QTest::mouseClick(yellow, Qt::LeftButton);
+    QCoreApplication::processEvents();
+    CHECK(f.view.paint().color2 == hex("#fff200"));
+    CHECK(f.view.paint().color1 == hex("#ed1c24"));
+    CHECK(f.view.selectedColor() == 0);
+    QTest::mouseClick(yellow, Qt::LeftButton);  // (now: Colour 1 again)
+    QCoreApplication::processEvents();
+    CHECK(f.view.paint().color1 == hex("#fff200"));
+
+    // Selected, then a click anywhere else (the canvas): deselected, nothing changed.
+    f.choose(1);
+    CHECK(f.view.selectedColor() == 1);
+    f.click(60, 60);
+    CHECK(f.view.selectedColor() == 0);
+    // Clicking the other box moves the selection to it.
+    f.choose(1);
+    f.choose(2);
+    CHECK(f.view.selectedColor() == 2);
 }
 
 TEST_CASE("Eyedropper: a gradient's colour where it's clicked", "[eyedropper]")
@@ -115,9 +154,7 @@ TEST_CASE("Eyedropper: a gradient's colour where it's clicked", "[eyedropper]")
     g.end = forward ? bottom.p2 : bottom.p1;
     REQUIRE(f.view.tryEdit("fill", [&](Editor& ed) { ed.fill({10, 10}, hex("#ff0000"), g); }));
     f.view.setTool(ToolKind::Eyedropper);
-
-    f.answer = true;
-    f.click(10, 10);  // a quarter of the way along
+    f.click(10, 10, Qt::RightButton);  // a quarter of the way along
     const Color c = f.view.paint().color2;
     CHECK(int(c.r) == Approx(64).margin(3));
     CHECK(c.r == c.g);
@@ -143,14 +180,12 @@ TEST_CASE("Eyedropper: a reference image's own pixel", "[eyedropper]")
     im.opacity = 0.3;  // (faint on screen; its own colour is what's taken)
     REQUIRE(f.view.tryEdit("image", [&](Editor& ed) { ed.addImage(im); }));
     f.view.setTool(ToolKind::Eyedropper);
-    f.answer = false;
     f.click(90, 3);
     CHECK(f.view.paint().color1 == hex("#ed1c24"));
     f.view.setTool(ToolKind::Eyedropper);
     f.click(110, -3);
     CHECK(f.view.paint().color1 == hex("#3f48cc"));
 }
-
 TEST_CASE("Where a point is along a gradient: linear, radial with a focal point, and spread", "[eyedropper]")
 {
     gradient::Placed lin;

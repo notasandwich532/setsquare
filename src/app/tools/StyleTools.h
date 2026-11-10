@@ -90,10 +90,11 @@ private:
     core::Id m_hover = core::kNoId;
 };
 
-// Eyedropper: click anything to take its colour, then choose whether it becomes Colour 1
-// (strokes) or Colour 2 (fills). It takes the colour things really are, not as the canvas shows
-// them faded while sketching: a stroke's, a text's, a fill's (a gradient's where you click), or a
-// reference image's own pixel. Hover to see it first. Afterwards it goes back to the tool before.
+// Eyedropper, as in Paint: left-click anything to take its colour as Colour 1 (strokes), or as
+// Colour 2 if that's selected in the colour bar; right-click to take it as Colour 2 (fills). It
+// takes the colour things really are, not as the canvas shows them faded while sketching: a
+// stroke's, a text's, a fill's (a gradient's where you click), or a reference image's own pixel.
+// Hover to see it first. Afterwards it goes back to the tool before.
 class EyedropperTool : public Tool
 {
 public:
@@ -109,11 +110,8 @@ public:
     // Makes it Colour 1 (or 2), and goes back to the tool before.
     void use(const core::Color& color, bool second);
 
-    // How the choice is asked (tests replace it): Colour 1 (false), 2 (true), or none (cancelled).
-    using Chooser = std::function<std::optional<bool>(const Sample& sample, QPoint globalPos)>;
-    static Chooser& chooser();
-
     QString hint() const override;
+    bool takesRightClicks() const override { return true; }
     void press(const ToolEvent& e) override;
     void move(const ToolEvent& e) override;
     void paintOverlay(QPainter& painter) override;

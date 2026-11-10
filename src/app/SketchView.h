@@ -182,6 +182,10 @@ public:
     };
     const Paint& paint() const { return m_paint; }
     void setPaint(const Paint& paint);
+    // Which of Colour 1 and 2 is selected in the colour bar (0: neither), as in Paint: the next
+    // palette colour or eyedropped one goes to it. It lasts for one click (see ColorBar).
+    int selectedColor() const { return m_selectedColor; }
+    void setSelectedColor(int which);
     // A colour picked in the colour bar: true if the current tool took it (see Tool::takeColor).
     bool offerColor(const core::Color& color, bool second);
     // The gradient tool's gradient (kept while switching tools).
@@ -220,6 +224,7 @@ signals:
     void recentToolsRequested(QPoint globalPos);  // right-click with nothing to cancel
     void presentationChanged(bool on);
     void paintChanged();
+    void selectedColorChanged();
     void gradientChanged();
     void colorSampled(const core::Color& color);  // taken with the eyedropper
 
@@ -278,6 +283,7 @@ private:
     core::Sketch m_pasteFragment;
     bool m_presentation = false;
     Paint m_paint;
+    int m_selectedColor = 0;
     core::Gradient m_gradient;
     core::Hatch m_hatch = *core::hatch::builtin("ANSI31");
     mutable images::Cache m_imageCache;

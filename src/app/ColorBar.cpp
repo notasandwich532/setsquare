@@ -12,6 +12,7 @@
 #include <QLineEdit>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QTimer>
 #include <QToolButton>
 
 #include <algorithm>
@@ -110,48 +111,72 @@ private:
     bool m_empty = true;
 };
 
-// Colour 1 in front of Colour 2, as in Paint. Clicking either edits it.
-class CurrentColors : public QWidget
+// One of Paint's two current-colour boxes: its colour over its name, outlined while selected. A
+// click selects it (the next palette colour goes to it); a double-click edits it.
+class ColorBox : public QWidget
 {
 public:
-    explicit CurrentColors(QWidget* parent)
+    ColorBox(int which, QWidget* parent)
         : QWidget(parent)
+        , m_which(which)
     {
-        setFixedSize(34, 30);
-        setToolTip(QObject::tr("Colour 1 (strokes) and Colour 2 (fills): click to edit"));
+        setFixedSize(52, 40);
         setCursor(Qt::PointingHandCursor);
+        setToolTip(which == 1 ? QObject::tr("Colour 1 (strokes): click to choose it for the next colour; double-click to edit")
+                              : QObject::tr("Colour 2 (fills): click to choose it for the next colour; double-click to edit"));
     }
-    void setColors(const core::Color& c1, const core::Color& c2)
+    void setColor(const core::Color& c)
     {
-        m_c1 = c1;
-        m_c2 = c2;
+        m_color = c;
         update();
     }
-    std::function<void(bool second)> onEdit;
+    void setSelected(bool on)
+    {
+        m_selected = on;
+        update();
+    }
+    bool isSelected() const { return m_selected; }
+    std::function<void()> onClick, onDoubleClick;
 
 protected:
     void paintEvent(QPaintEvent*) override
     {
         QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing);
+        if (m_selected) {
+            p.setPen(QPen(QColor(0x4d, 0xa3, 0xff), 1.5));
+            p.setBrush(QColor(0x4d, 0xa3, 0xff, 50));
+            p.drawRoundedRect(QRectF(rect()).adjusted(0.75, 0.75, -0.75, -0.75), 3, 3);
+        }
+        const QRectF swatch((width() - 20) / 2.0, 3, 20, 20);
         p.setPen(QColor(0x8a, 0x92, 0x9c));
-        p.setBrush(toQt(m_c2));
-        p.drawRect(back());
-        p.setBrush(toQt(m_c1));
-        p.drawRect(front());
+        p.setBrush(toQt(m_color));
+        p.drawRect(swatch);
+        QFont f = font();
+        f.setPointSizeF(std::max(6.5, f.pointSizeF() - 1.5));
+        p.setFont(f);
+        p.setPen(palette().color(QPalette::WindowText));
+        p.drawText(QRectF(0, 24, width(), height() - 24), Qt::AlignHCenter | Qt::AlignTop,
+                   QObject::tr("Colour %1").arg(m_which));
     }
     void mousePressEvent(QMouseEvent* e) override
     {
-        if (onEdit) {
-            onEdit(!front().contains(e->position().toPoint()));
+        if (e->button() == Qt::LeftButton && onClick) {
+            onClick();
+        }
+    }
+    void mouseDoubleClickEvent(QMouseEvent* e) override
+    {
+        if (e->button() == Qt::LeftButton && onDoubleClick) {
+            onDoubleClick();
         }
     }
 
 private:
-    static QRect front() { return {1, 1, 20, 18}; }
-    static QRect back() { return {12, 10, 20, 18}; }
-    core::Color m_c1, m_c2;
+    int m_which;
+    core::Color m_color;
+    bool m_selected = false;
 };
-
 // ---------------------------------------------------------------------------------------------
 
 ColorBar::ColorBar(SketchView& view, QWidget* parent)
@@ -163,10 +188,18 @@ ColorBar::ColorBar(SketchView& view, QWidget* parent)
     row->setContentsMargins(4, 0, 4, 0);
     row->setSpacing(6);
 
-    m_current = new CurrentColors(this);
-    m_current->setObjectName(QStringLiteral("currentColors"));
-    m_current->onEdit = [this](bool second) { editColor(second); };
-    row->addWidget(m_current);
+    // Colour 1 and Colour 2: click one to send the next colour to it (for one click), as in Paint.
+    for (int which : {1, 2}) {
+        auto* box = new ColorBox(which, this);
+        box->setObjectName(which == 1 ? QStringLiteral("colour1") : QStringLiteral("colour2"));
+        box->onClick = [this, which] { m_view.setSelectedColor(which); };
+        box->onDoubleClick = [this, which] {
+            editColor(which == 2);
+            m_view.setSelectedColor(0);
+        };
+        row->addWidget(box);
+        (which == 1 ? m_box1 : m_box2) = box;
+    }
 
     // Palette (two rows) and custom colours (one row) in one grid.
     auto* grid = new QGridLayout;
@@ -177,26 +210,28 @@ ColorBar::ColorBar(SketchView& view, QWidget* parent)
             core::Color color;
             core::Color::fromHex(kPalette[r][c], color);
             swatch->setColor(color);
-            swatch->onClick = [this, color](Qt::MouseButton b) { pickColor(color, b == Qt::RightButton); };
+            swatch->onClick = [this, color](Qt::MouseButton b) { pickColor(color, secondFor(b)); };
             grid->addWidget(swatch, r, c);
         }
     }
     for (int c = 0; c < 10; ++c) {
         auto* swatch = new Swatch(this, 10);
         swatch->setToolTip(tr("Custom colours appear here"));
-        swatch->onClick = [this, swatch](Qt::MouseButton b) { pickColor(swatch->color(), b == Qt::RightButton); };
+        swatch->onClick = [this, swatch](Qt::MouseButton b) { pickColor(swatch->color(), secondFor(b)); };
         grid->addWidget(swatch, 2, c, Qt::AlignCenter);
         m_custom.push_back(swatch);
     }
     row->addLayout(grid);
 
-    auto* edit = new QToolButton(this);
-    edit->setObjectName(QStringLiteral("editColors"));
-    edit->setText(tr("Edit colours"));
-    edit->setToolTip(tr("Pick any colour for Colour 1 (Shift: Colour 2)"));
-    connect(edit, &QToolButton::clicked, this,
-            [this] { editColor(QGuiApplication::keyboardModifiers() & Qt::ShiftModifier); });
-    row->addWidget(edit);
+    m_edit = new QToolButton(this);
+    m_edit->setObjectName(QStringLiteral("editColors"));
+    m_edit->setText(tr("Edit colours"));
+    m_edit->setToolTip(tr("Pick any colour for the selected colour (Colour 1 if neither is; Shift: Colour 2)"));
+    connect(m_edit, &QToolButton::clicked, this, [this] {
+        editColor(m_view.selectedColor() == 2 || (QGuiApplication::keyboardModifiers() & Qt::ShiftModifier));
+        m_view.setSelectedColor(0);
+    });
+    row->addWidget(m_edit);
 
     m_width = new QComboBox(this);
     m_width->setObjectName(QStringLiteral("strokeWidth"));
@@ -262,14 +297,39 @@ ColorBar::ColorBar(SketchView& view, QWidget* parent)
     connect(&m_view, &SketchView::paintChanged, this, &ColorBar::syncFromView);
     connect(&m_view, &SketchView::selectionChanged, this, &ColorBar::syncFromSelection);
     connect(&m_view, &SketchView::colorSampled, this, &ColorBar::addCustom);  // (eyedropped: kept to hand)
+    connect(&m_view, &SketchView::selectedColorChanged, this, [this] {
+        m_box1->setSelected(m_view.selectedColor() == 1);
+        m_box2->setSelected(m_view.selectedColor() == 2);
+    });
+    // A selected colour lasts for one click: any click elsewhere (once it's been handled: a
+    // palette colour, the canvas with the eyedropper) puts it back to neither.
+    qApp->installEventFilter(this);
     syncFromView();
+}
+
+bool ColorBar::eventFilter(QObject* watched, QEvent* event)
+{
+    if (event->type() == QEvent::MouseButtonPress && m_view.selectedColor() != 0) {
+        const auto* w = qobject_cast<QWidget*>(watched);
+        const bool own = w && (w == m_box1 || w == m_box2 || w == m_edit || m_edit->isAncestorOf(w));
+        if (w && !own) {
+            QTimer::singleShot(0, this, [this] { m_view.setSelectedColor(0); });
+        }
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
+bool ColorBar::secondFor(Qt::MouseButton button) const
+{
+    return button == Qt::RightButton || m_view.selectedColor() == 2;
 }
 
 void ColorBar::syncFromView()
 {
     const SketchView::Paint& p = m_view.paint();
     m_syncing = true;
-    m_current->setColors(p.color1, p.color2);
+    m_box1->setColor(p.color1);
+    m_box2->setColor(p.color2);
     const int w = m_width->findData(p.width);
     if (w >= 0) {
         m_width->setCurrentIndex(w);

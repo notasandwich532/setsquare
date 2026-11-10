@@ -8,9 +8,7 @@
 
 #include <core/Gradient.h>
 
-#include <QClipboard>
 #include <QGuiApplication>
-#include <QMenu>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPolygonF>
@@ -379,45 +377,11 @@ void StrokeBrushTool::paintOverlay(QPainter& painter)
 // Eyedropper
 // =============================================================================================
 
-namespace
-{
-QIcon swatchIcon(const core::Color& c)
-{
-    QPixmap pm(16, 16);
-    pm.fill(QColor(c.r, c.g, c.b));
-    return QIcon(pm);
-}
-}  // namespace
-
-EyedropperTool::Chooser& EyedropperTool::chooser()
-{
-    static Chooser ask = [](const Sample& s, QPoint at) -> std::optional<bool> {
-        QMenu menu;
-        menu.setObjectName(QStringLiteral("eyedropperMenu"));
-        const QString hex = QString::fromStdString(s.color.hex());
-        QAction* title = menu.addAction(swatchIcon(s.color), QStringLiteral("%1  (%2)").arg(hex, s.what));
-        title->setEnabled(false);
-        menu.addSeparator();
-        QAction* one = menu.addAction(QObject::tr("Set as Colour &1 (strokes)"));
-        QAction* two = menu.addAction(QObject::tr("Set as Colour &2 (fills)"));
-        menu.addSeparator();
-        QAction* copy = menu.addAction(QObject::tr("&Copy %1").arg(hex));
-        QAction* chosen = menu.exec(at);
-        if (chosen == copy) {
-            QGuiApplication::clipboard()->setText(hex);
-        }
-        if (chosen == one || chosen == two) {
-            return chosen == two;
-        }
-        return std::nullopt;
-    };
-    return ask;
-}
-
 QString EyedropperTool::hint() const
 {
     return QObject::tr("Eyedropper: click anything coloured (a stroke, fill, text or reference image) to take its "
-                       "colour, then choose Colour 1 or Colour 2");
+                       "colour as Colour %1; right-click for Colour 2")
+        .arg(view().selectedColor() == 2 ? 2 : 1);
 }
 
 std::optional<EyedropperTool::Sample> EyedropperTool::sample(QPointF screen, core::Vec2 world)
@@ -527,7 +491,7 @@ void EyedropperTool::move(const ToolEvent& e)
 
 void EyedropperTool::press(const ToolEvent& e)
 {
-    if (e.button != Qt::LeftButton) {
+    if (e.button != Qt::LeftButton && e.button != Qt::RightButton) {
         return;
     }
     const std::optional<Sample> picked = sample(e.screen, e.world);
@@ -535,10 +499,9 @@ void EyedropperTool::press(const ToolEvent& e)
         emit view().message(QObject::tr("Nothing coloured there"));
         return;
     }
-    const std::optional<bool> second = chooser()(*picked, view().mapToGlobal(e.screen.toPoint()));
-    if (second) {
-        use(picked->color, *second);  // (this tool is gone after this)
-    }
+    // Right: Colour 2; left: the selected one (Colour 1 unless Colour 2 is).
+    const bool second = e.button == Qt::RightButton || view().selectedColor() == 2;
+    use(picked->color, second);  // (this tool is gone after this)
 }
 
 void EyedropperTool::paintOverlay(QPainter& painter)

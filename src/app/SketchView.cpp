@@ -304,6 +304,16 @@ void SketchView::setPaint(const Paint& paint)
     emit paintChanged();
 }
 
+void SketchView::setSelectedColor(int which)
+{
+    which = which == 1 || which == 2 ? which : 0;
+    if (which != m_selectedColor) {
+        m_selectedColor = which;
+        refreshTool();  // (e.g. the eyedropper's hint)
+        emit selectedColorChanged();
+    }
+}
+
 bool SketchView::offerColor(const core::Color& color, bool second)
 {
     return m_tool && m_tool->takeColor(color, second);
@@ -1882,7 +1892,7 @@ void SketchView::mousePressEvent(QMouseEvent* event)
         event->accept();
         return;
     }
-    if (event->button() == Qt::RightButton) {
+    if (event->button() == Qt::RightButton && !m_tool->takesRightClicks()) {
         // Right-click backs out of whatever the tool is in the middle of; with nothing to back
         // out of, it offers the recently used tools at the cursor.
         if (!m_tool->cancel()) {

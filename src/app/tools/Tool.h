@@ -115,6 +115,9 @@ public:
     // Esc. Return true when the tool consumed it (e.g. abandoned a shape in progress);
     // otherwise the view falls back to the select tool.
     virtual bool cancel() { return false; }
+    // Whether right-clicks on the canvas come to press() (else they back out of what's going on, or
+    // offer the recent tools).
+    virtual bool takesRightClicks() const { return false; }
 
     // Other keys go to the tool first; return true if it used the key.
     virtual bool keyPress(int /*key*/, const QString& /*text*/) { return false; }
