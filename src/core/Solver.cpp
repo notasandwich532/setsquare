@@ -477,6 +477,30 @@ struct Solver::Impl
     };
     std::vector<DragTarget> dragTargets;
 
+    // Takes out the constraints the diagnosis finds implied by the others (e.g. a point on a
+    // vertical line that's also the end of a vertical line through that line's end). They say
+    // nothing new, but they leave the system degenerate, so that anything has to move (a drag, a
+    // new dimension value), DogLeg can't step and fails. Returns whether any were taken out.
+    bool dropRedundant()
+    {
+        bool any = false;
+        for (int pass = 0; pass < 8; ++pass) {
+            sys.invalidatedDiagnosis();
+            sys.initSolution(GCS::DogLeg);
+            GCS::VEC_I tags;
+            sys.getRedundant(tags);
+            std::erase_if(tags, [](int t) { return t <= 0; });
+            if (tags.empty()) {
+                break;
+            }
+            for (int t : tags) {
+                sys.clearByTag(t);
+            }
+            any = true;
+        }
+        return any;
+    }
+
     GCS::Circle& round(Id id)
     {
         if (auto it = circles.find(id); it != circles.end()) {
@@ -521,6 +545,27 @@ struct Solver::Impl
             for (Id q : ends(b)) {
                 if (p == q) {
                     return p;
+                }
+            }
+        }
+        // Not shared, but tied: an end of one kept on the other (as a trim leaves a cut end on
+        // what cut it) or on an end of the other. Tangent curves have just the one point in
+        // common, so that's where they touch, and the same goes as for a shared end.
+        auto coincident = [&](Id p, Id other) {
+            return std::ranges::any_of(s.constraintsOn(p), [&](Id k) {
+                const Constraint& c = s.constraint(k);
+                return c.type == ConstraintType::Coincident && std::ranges::find(c.refs, other) != c.refs.end();
+            });
+        };
+        for (auto [one, other] : {std::pair{a, b}, std::pair{b, a}}) {
+            for (Id p : ends(one)) {
+                if (coincident(p, other)) {
+                    return p;
+                }
+                for (Id q : ends(other)) {
+                    if (coincident(p, q)) {
+                        return p;
+                    }
                 }
             }
         }
@@ -1937,7 +1982,7 @@ SolveResult Solver::solve()
         sys.undoSolution();
     }
 
-    result.dof = sys.dofsNumber();
+    // (As the diagnosis found them, before any redundant ones are taken out below.)
     GCS::VEC_I tags;
     auto toIds = [](const GCS::VEC_I& in) {
         std::vector<Id> out;
@@ -1954,6 +1999,26 @@ SolveResult Solver::solve()
     result.redundant = toIds(tags);
     sys.getPartiallyRedundant(tags);
     result.partiallyRedundant = toIds(tags);
+    const int dofs = sys.dofsNumber();
+
+    if (status != GCS::SolveStatus::Success && !result.redundant.empty() && result.conflicting.empty()) {
+        // Redundant constraints can leave the system too degenerate to move; without them
+        // (they're implied by the rest) it often solves.
+        if (d->dropRedundant()) {
+            status = sys.solve(GCS::DogLeg);
+            if (status != GCS::SolveStatus::Success) {
+                sys.undoSolution();
+                status = sys.solve(GCS::LevenbergMarquardt);
+            }
+            if (status == GCS::SolveStatus::Success) {
+                sys.applySolution();
+            }
+            else {
+                sys.undoSolution();
+            }
+        }
+    }
+    result.dof = dofs;
     // When everything is pinned down, PlaneGCS reports "over-constrained by n" as negative DOF.
     // If none of the extra equations is the user's (e.g. an arc slot's five arcs, where any four
     // of their radius rules imply the fifth), the sketch is just fully constrained.
@@ -2049,6 +2114,7 @@ void Solver::writeBack(Sketch& sketch) const
 void Solver::beginDrag(const std::vector<Id>& pointIds)
 {
     endDrag();
+    d->dropRedundant();
     for (Id id : pointIds) {
         d->activate(id);  // (a group point placed from its anchors: dragged, it's solved for)
     }
@@ -2078,6 +2144,7 @@ void Solver::beginDragEdge(Id id, double x, double y)
         return;
     }
     GCS::Circle& c = d->round(id);
+    d->dropRedundant();
 
     // If the radius can still change, hold the centre so the drag resizes the circle (as in
     // Fusion). Otherwise the rim pull moves the whole circle.

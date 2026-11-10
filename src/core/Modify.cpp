@@ -211,8 +211,9 @@ std::vector<Vec2> rawIntersect(const Geo& g1, const Geo& g2)
 bool isCutter(const Sketch& s, Id id, Id except)
 {
     const Entity& e = s.entity(id);
-    // (only curves in the same layer: other layers' geometry can't be referred to)
-    return id != except && e.kind() != EntityKind::Point && !e.construction && !s.isReference(id)
+    // (only curves in the same layer: other layers' geometry can't be referred to; construction
+    // curves too, as in Fusion: a circle in a construction box trims to the box)
+    return id != except && e.kind() != EntityKind::Point && !s.isReference(id)
         && (except == kNoId || s.layerOf(id) == s.layerOf(except));
 }
 

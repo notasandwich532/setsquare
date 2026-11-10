@@ -574,6 +574,32 @@ TEST_CASE("Divide: changing the spacing moves the points; a new count makes new 
     CHECK(at(s, s.constraint(again).refs[3]).x == Approx(9.0));
 }
 
+TEST_CASE("Divide: a curve drawn through its points, deleted, leaves them (and the divide) be", "[features][divide]")
+{
+    Sketch s;
+    const Id l = s.addLine(0, 0, 40, 0);
+    const Id k = feature::divide(s, l, feature::evenly(3));
+    const std::vector<Id> pts(s.constraint(k).refs.begin() + 1, s.constraint(k).refs.end());
+    Spline sp;
+    sp.points = {s.addPoint(0, 10), pts[0], pts[1], pts[2], s.addPoint(40, 10)};
+    const Id spline = s.addSpline(sp);
+    const Id through = s.addLine(pts[1], s.addPoint(20, -10));
+    s.remove(spline);
+    s.remove(through);
+    REQUIRE(s.hasConstraint(k));
+    for (Id p : pts) {
+        CHECK(s.hasEntity(p));
+    }
+    CHECK_FALSE(s.hasEntity(sp.points.front()));  // its own points go as before
+    // The line divided going takes them all, but those a curve is drawn through.
+    const Id kept = s.addLine(pts[2], s.addPoint(30, -10));
+    s.remove(l);
+    CHECK_FALSE(s.hasConstraint(k));
+    CHECK_FALSE(s.hasEntity(pts[1]));
+    CHECK(s.hasEntity(pts[2]));
+    CHECK(s.hasEntity(kept));
+}
+
 TEST_CASE("Divide: saved and loaded; deleting a point deletes the divide", "[features][divide]")
 {
     Sketch s;

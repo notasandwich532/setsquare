@@ -1405,8 +1405,15 @@ void Sketch::remove(Id id)
         }
     }
 
-    // Points of deleted curves that no surviving curve uses.
-    std::set<Id> candidates;
+    // Points of deleted curves that no surviving curve uses, and that aren't a surviving divide's
+    // own points (a curve drawn through them doesn't take them, nor the divide, with it).
+    // A deleted line's divide points go with it (unless a surviving curve is drawn through them).
+    std::set<Id> divided, candidates;
+    for (const auto& [cid, c] : m_constraints) {
+        if (c.type == ConstraintType::Divide && !c.refs.empty()) {
+            (doomed.contains(c.refs.front()) ? candidates : divided).insert(c.refs.begin() + 1, c.refs.end());
+        }
+    }
     for (Id d : doomed) {
         if (kindOf(d) != EntityKind::Point) {
             for (Id p : definingPoints(d)) {
@@ -1415,7 +1422,7 @@ void Sketch::remove(Id id)
         }
     }
     for (Id p : candidates) {
-        if (isReference(p)) {
+        if (isReference(p) || divided.contains(p)) {
             continue;  // curves ending on the origin don't take it with them
         }
         const bool used = std::ranges::any_of(m_entities, [&](const auto& kv) {
