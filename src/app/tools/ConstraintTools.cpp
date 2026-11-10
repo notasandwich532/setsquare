@@ -166,7 +166,10 @@ ConstraintTool::Outcome ConstraintTool::tryApply(const std::vector<Id>& refs)
         QMetaObject::invokeMethod(&view(), [v = &view(), made] { v->editDimension(made); }, Qt::QueuedConnection);
     }
     if (doc().sketch().constraint(made).type != type) {
-        emit view().message(QObject::tr("The point was already halfway along: it's now kept on the line"));
+        emit view().message(type == ConstraintType::Collinear
+                                ? QObject::tr("The lines were already parallel: an end of one is now kept on the other, "
+                                              "which puts them in line")
+                                : QObject::tr("The point was already halfway along: it's now kept on the line"));
     }
     return Outcome::Applied;
 }

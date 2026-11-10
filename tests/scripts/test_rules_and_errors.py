@@ -42,3 +42,17 @@ raises(ValueError, getattr, c, "radius")
 assert not app.has_ui
 raises(RuntimeError, app.fit)
 print("rules ok")
+
+# Collinear with lines already kept parallel (a text box's side and a rectangle's, both level): it
+# would say that twice, so an end of one is kept on the other instead, which puts them in line.
+doc.new()
+a = s.point(0, 0); b = s.point(40, 20)
+s.text("Box", box=(a, b), height=3)
+box = [l for l in s.lines if l.construction]
+bottom = min(box, key=lambda l: l.p1.y + l.p2.y)
+s.rectangle((50, -10), (90, 10))
+level = min([l for l in s.lines if not l.construction], key=lambda l: l.p1.y + l.p2.y)
+k = s.collinear(bottom, level)
+r = s.solve()
+assert r.ok and not r.redundant, r.redundant
+assert abs(bottom.p1.y - level.p1.y) < 1e-9 and abs(bottom.p2.y - level.p2.y) < 1e-9, (bottom.p1.y, level.p1.y)

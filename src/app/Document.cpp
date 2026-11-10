@@ -94,10 +94,62 @@ core::Id Document::addConstraint(core::ConstraintType type, std::vector<core::Id
         if (type == core::ConstraintType::Midpoint) {
             return midpointOnLine(asked, error);
         }
+        if (type == core::ConstraintType::Collinear) {
+            return collinearByPoint(asked, error);
+        }
         return core::kNoId;
     }
     record(Editor::constraintCall(m_sketch, id));
     return id;
+}
+
+core::Id Document::collinearByPoint(const std::vector<core::Id>& refs, QString* error)
+{
+    // Two lines already kept parallel (both horizontal, say: a rectangle's side and a text box's)
+    // would have that said twice by collinear. Then an end of one kept on the other is enough to
+    // put them in line; check they do end up so.
+    if (refs.size() != 2 || m_sketch.entity(refs[0]).kind() != core::EntityKind::Line
+        || m_sketch.entity(refs[1]).kind() != core::EntityKind::Line) {
+        return core::kNoId;
+    }
+    for (int k = 0; k < 4; ++k) {
+        const core::Id line = refs[k / 2], other = refs[1 - k / 2];
+        const core::Id end = k % 2 == 0 ? m_sketch.line(line).p1 : m_sketch.line(line).p2;
+        core::Sketch probe = m_sketch;
+        core::Id id = core::kNoId;
+        try {
+            id = probe.addConstraint(core::ConstraintType::Coincident, {end, other});
+        }
+        catch (const core::SketchError&) {
+            continue;
+        }
+        core::Sketch solved = probe;
+        if (!core::solve(solved).ok) {
+            continue;
+        }
+        auto off = [&](core::Id p) {  // from the other line, carried on
+            const core::Line& l = solved.line(other);
+            const core::Point& a = solved.point(l.p1);
+            const core::Point& b = solved.point(l.p2);
+            const core::Point& q = solved.point(p);
+            const double len = std::max(std::hypot(b.x - a.x, b.y - a.y), 1e-12);
+            return std::abs((b.x - a.x) * (q.y - a.y) - (b.y - a.y) * (q.x - a.x)) / len;
+        };
+        const core::Line& mine = solved.line(line);
+        if (off(mine.p1) > 1e-6 || off(mine.p2) > 1e-6) {
+            continue;  // not in line after all
+        }
+        QString unused;
+        if (!commitChecked(std::move(probe), &unused)) {
+            continue;
+        }
+        if (error) {
+            error->clear();
+        }
+        record(Editor::constraintCall(m_sketch, id));
+        return id;
+    }
+    return core::kNoId;  // (the original refusal stands)
 }
 
 core::Id Document::midpointOnLine(const std::vector<core::Id>& refs, QString* error)

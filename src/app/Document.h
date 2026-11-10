@@ -152,6 +152,7 @@ private:
     static std::vector<core::Id> blockersOf(const core::Sketch& s, const std::vector<core::Id>& constraints);
     static QString describeItem(const core::Sketch& s, core::Id id);
     core::Id midpointOnLine(const std::vector<core::Id>& refs, QString* error);
+    core::Id collinearByPoint(const std::vector<core::Id>& refs, QString* error);
     // Writes an export (made by `make`, which may throw SketchError) to `path`.
     bool writeExport(const QString& path, const std::function<std::string()>& make, QString* error);
     void resolve();
