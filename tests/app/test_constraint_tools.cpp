@@ -1,4 +1,4 @@
-// End-to-end tests of constraint tools, the dimension tool, inference while drawing, and
+﻿// End-to-end tests of constraint tools, the dimension tool, inference while drawing, and
 // over-constraint rejection.
 
 #include "Document.h"
@@ -582,4 +582,104 @@ TEST_CASE("Number inputs take sums: the dimension box, panels and counts", "[con
     QTest::keyClicks(points, "12/4");
     QTest::keyClick(points, Qt::Key_Return);
     CHECK(points->value() == 3);
+}
+TEST_CASE("Drawing snaps where two curves cross: the new point is kept on both", "[constraints][snap]")
+{
+    Fixture f;
+    const Id a = f.line(-20, -20, 20, 20);
+    Id c = kNoId;
+    f.doc.modify("circle", [&](Sketch& s) {
+        c = s.addCircle(0, 0, 10);
+        s.entity(c).construction = true;  // (construction crosses too)
+    });
+    const double k = 10 / std::sqrt(2.0);
+    const Snap snap = f.view.snap(f.view.toScreen({k + 0.3, k - 0.2}));
+    REQUIRE(snap.onCurve2 != kNoId);
+    CHECK(snap.pos.x == Approx(k).margin(1e-6));
+    CHECK(snap.pos.y == Approx(k).margin(1e-6));
+
+    f.view.setTool(ToolKind::Point);
+    f.click(k + 0.3, k - 0.2);
+    const auto on = f.constraintsOfType(CT::Coincident);
+    REQUIRE(on.size() == 2);
+    std::set<Id> curves;
+    for (Id k2 : on) {
+        curves.insert(f.sketch().constraint(k2).refs[1]);
+    }
+    CHECK(curves == std::set<Id>{a, c});
+    CHECK(f.doc.solveResult().redundant.empty());
+}
+
+TEST_CASE("Coincident: a point, then where two curves cross, puts it on both", "[constraints][snap]")
+{
+    Fixture f;
+    const Id a = f.line(-20, 0, 20, 10);  // (crossing at (5, 6.25), neither one's middle)
+    const Id b = f.line(-10, 10, 30, 0);
+    Id p = kNoId;
+    f.doc.modify("point", [&](Sketch& s) { p = s.addPoint(-15, -15); });
+    f.view.setTool(ToolKind::Coincident);
+    f.click(-15, -15);
+    f.click(5.3, 6.0);
+    REQUIRE(f.constraintsOfType(CT::Coincident).size() == 2);
+    // (the lines are free, so they meet it part way: it's on both)
+    const Point& q = f.sketch().point(p);
+    auto offLine = [&](Id line) {  // (from the line through it: on it is as a constraint has it)
+        const Point& u = f.sketch().point(f.sketch().line(line).p1);
+        const Point& v = f.sketch().point(f.sketch().line(line).p2);
+        return std::abs((v.x - u.x) * (q.y - u.y) - (v.y - u.y) * (q.x - u.x)) / std::hypot(v.x - u.x, v.y - u.y);
+    };
+    CHECK(offLine(a) < 1e-6);
+    CHECK(offLine(b) < 1e-6);
+}
+
+TEST_CASE("The page's edges are fixed construction to snap to and constrain, in every layer", "[constraints][page]")
+{
+    Fixture f;
+    Page page;
+    page.size = "custom";
+    page.width = 100;
+    page.height = 60;
+    f.doc.modify("page", [&](Sketch& s) { s.setPage(page); });
+    const auto edges = f.sketch().pageEdges();
+    REQUIRE(edges[0] != kNoId);
+    CHECK(f.sketch().isReference(edges[0]));
+    CHECK(f.sketch().entity(edges[0]).construction);
+    // The bottom edge's middle snaps.
+    const Snap mid = f.view.snap(f.view.toScreen({50.5, 0.2}));
+    CHECK(mid.midpointOf == edges[0]);
+    // Can't be deleted; goes with the page, and what's tied to it too.
+    CHECK_THROWS(f.doc.modify("delete", [&](Sketch& s) { s.remove(edges[0]); }));
+    f.doc.modify("new layer", [&](Sketch& s) { s.setActiveLayer(s.addLayer("Two", "Sublayer 1")); });
+    Id p = kNoId;
+    f.doc.modify("point", [&](Sketch& s) { p = s.addPoint(30, 2); });
+    REQUIRE(f.doc.addConstraint(CT::Coincident, {p, edges[0]}) != kNoId);  // (another layer: still there)
+    CHECK(f.sketch().point(p).y == Approx(0).margin(1e-9));
+    page.width = 200;
+    f.doc.modify("bigger", [&](Sketch& s) { s.setPage(page); });
+    CHECK(f.sketch().point(f.sketch().pageCorners()[1]).x == Approx(200));
+    f.doc.modify("no page", [&](Sketch& s) { s.setPage(std::nullopt); });
+    CHECK(f.sketch().pageEdges()[0] == kNoId);
+    CHECK_FALSE(f.sketch().hasEntity(edges[0]));
+    CHECK(f.constraintsOfType(CT::Coincident).empty());
+}
+
+TEST_CASE("Dimension: two concentric circles, the gap between them", "[constraints][dimension]")
+{
+    Fixture f;
+    Id outer = kNoId, inner = kNoId;
+    f.doc.modify("circles", [&](Sketch& s) {
+        outer = s.addCircle(0, 0, 20);
+        inner = s.addCircle(s.circle(outer).center, 12);
+    });
+    f.view.setTool(ToolKind::Dimension);
+    f.click(0, 12);
+    f.click(0, 20);
+    f.click(5, 25);
+    const auto dims = f.constraintsOfType(CT::Distance);
+    REQUIRE(dims.size() == 1);
+    const Constraint& d = f.sketch().constraint(dims[0]);
+    CHECK(d.refs == std::vector<Id>{outer, inner});
+    CHECK(d.value == Approx(8));
+    f.typeIntoEditor("5");
+    CHECK(f.sketch().circle(outer).radius - f.sketch().circle(inner).radius == Approx(5).margin(1e-7));
 }
