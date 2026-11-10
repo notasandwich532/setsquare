@@ -13,6 +13,7 @@ struct Snap
     core::Id point = core::kNoId;       // reuse this existing point
     core::Id midpointOf = core::kNoId;  // new point, constrained to this line's midpoint
     core::Id onCurve = core::kNoId;     // new point, constrained onto this curve
+    core::Id onCurve2 = core::kNoId;    // ...and onto this one too (where the two cross)
 
     bool isFree() const { return point == core::kNoId && midpointOf == core::kNoId && onCurve == core::kNoId; }
 };

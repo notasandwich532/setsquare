@@ -1377,6 +1377,27 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
         .def_property_readonly("x_axis", [](const SketchH&) { return wrap(sketch().xAxis()); },
                                "The fixed X axis (a line), for constraints and dimensions.")
         .def_property_readonly("y_axis", [](const SketchH&) { return wrap(sketch().yAxis()); })
+        .def_property_readonly("page_edges", [](const SketchH&) {
+                py::list out;
+                if (sketch().pageEdges()[0] != kNoId) {
+                    for (Id id : sketch().pageEdges()) {
+                        out.append(wrap(id));
+                    }
+                }
+                return out;
+            },
+            "The page's edges (bottom, right, top, left): fixed construction lines, in every layer, for "
+            "constraints and dimensions. Empty without a page.")
+        .def_property_readonly("page_corners", [](const SketchH&) {
+                py::list out;
+                if (sketch().pageCorners()[0] != kNoId) {
+                    for (Id id : sketch().pageCorners()) {
+                        out.append(wrap(id));
+                    }
+                }
+                return out;
+            },
+            "The page's corners (bottom left, bottom right, top right, top left). Empty without a page.")
         .def("__getitem__", [](const SketchH&, Id id) {
             if (!sketch().hasEntity(id) && !sketch().hasConstraint(id) && !sketch().hasFill(id) && !sketch().hasText(id)
                 && !sketch().hasImage(id)) {

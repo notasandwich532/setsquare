@@ -682,7 +682,7 @@ bool Sketch::syncProjections(Id layerId)
 
 bool Sketch::isReference(Id id) const
 {
-    return isOrigin(id) || isAxis(id) || isHiddenReference(id);
+    return isOrigin(id) || isAxis(id) || isHiddenReference(id) || isPageFrame(id);
 }
 
 void Sketch::setAxes(Id xAxis, Id yAxis)
@@ -1039,6 +1039,15 @@ void Sketch::normalize(ConstraintType type, std::vector<Id>& refs) const
             break;
         default: break;
     }
+    // The gap between two circles' radii: the bigger one first (it's that one less the other).
+    if (type == ConstraintType::Distance && refs.size() == 2 && isRound(refs[0]) && isRound(refs[1])) {
+        auto radius = [&](Id id) {
+            return kindOf(id) == EntityKind::Circle ? circle(id).radius : arcRadius(id);
+        };
+        if (radius(refs[0]) < radius(refs[1])) {
+            std::swap(refs[0], refs[1]);
+        }
+    }
 }
 
 void Sketch::setConstraintValue(Id id, double value)
@@ -1142,7 +1151,9 @@ void Sketch::validate(ConstraintType type, const std::vector<Id>& refs, double v
             break;
         case ConstraintType::Distance:
             if (!(kinds({K::Point, K::Point}) || kinds({K::Point, K::Line}) || kinds({K::Line}))) {
-                fail("expects (point, point), (point, line) or (line)");
+                if (!roundPair()) {
+                    fail("expects (point, point), (point, line), (line) or two circles/arcs (the gap between their radii)");
+                }
             }
             if (!(value > 0.0)) {
                 fail("value must be positive");
@@ -1392,7 +1403,9 @@ void Sketch::remove(Id id)
         throw SketchError("unknown id " + std::to_string(id));
     }
     if (isReference(id)) {
-        throw SketchError(isOrigin(id) ? "the origin can't be deleted" : "the axes can't be deleted");
+        throw SketchError(isOrigin(id)      ? "the origin can't be deleted"
+                          : isPageFrame(id) ? "the page's edges can't be deleted (they go with the page)"
+                                            : "the axes can't be deleted");
     }
 
     std::set<Id> doomed{id};
@@ -1707,6 +1720,73 @@ void Sketch::setPage(std::optional<Page> page)
         throw SketchError("a page's width and height must be more than 0");
     }
     m_page = std::move(page);
+    syncPageFrame();
+}
+
+void Sketch::syncPageFrame()
+{
+    const bool have = m_pageCorners[0] != kNoId && hasEntity(m_pageCorners[0]);
+    if (!m_page) {
+        if (!have) {
+            m_pageCorners = m_pageEdges = {kNoId, kNoId, kNoId, kNoId};
+            return;
+        }
+        // Gone with the page, and what's tied to it (constraints onto its edges).
+        std::set<Id> doomed(m_pageCorners.begin(), m_pageCorners.end());
+        doomed.insert(m_pageEdges.begin(), m_pageEdges.end());
+        for (Id d : doomed) {
+            m_entities.erase(d);
+        }
+        std::erase_if(m_constraints, [&](const auto& kv) {
+            return std::ranges::any_of(kv.second.refs, [&](Id r) { return doomed.contains(r); });
+        });
+        m_pageCorners = m_pageEdges = {kNoId, kNoId, kNoId, kNoId};
+        return;
+    }
+    const std::array<double, 4> r = m_page->rect();
+    const std::array<Point, 4> at{Point{r[0], r[1]}, Point{r[2], r[1]}, Point{r[2], r[3]}, Point{r[0], r[3]}};
+    if (!have) {
+        for (int i = 0; i < 4; ++i) {
+            m_pageCorners[i] = addPoint(at[i].x, at[i].y);
+            Entity& c = m_entities.at(m_pageCorners[i]);
+            c.fixed = true;
+            c.sublayer = kNoId;  // (in every layer)
+        }
+        for (int i = 0; i < 4; ++i) {
+            m_pageEdges[i] = addLine(m_pageCorners[i], m_pageCorners[(i + 1) % 4]);
+            Entity& e = m_entities.at(m_pageEdges[i]);
+            e.fixed = true;
+            e.construction = true;
+            e.sublayer = kNoId;
+        }
+        return;
+    }
+    for (int i = 0; i < 4; ++i) {
+        m_entities.at(m_pageCorners[i]).geom = at[i];
+    }
+}
+
+void Sketch::setPageFrame(const std::array<Id, 4>& corners, const std::array<Id, 4>& edges)
+{
+    for (int i = 0; i < 4; ++i) {
+        if (kindOf(corners[i]) != EntityKind::Point || kindOf(edges[i]) != EntityKind::Line) {
+            throw SketchError("the page's frame must be four points and four lines");
+        }
+        const Line& l = line(edges[i]);
+        if (l.p1 != corners[i] || l.p2 != corners[(i + 1) % 4]) {
+            throw SketchError("the page's edges must join its corners in turn");
+        }
+    }
+    m_pageCorners = corners;
+    m_pageEdges = edges;
+    for (int i = 0; i < 4; ++i) {
+        for (Id id : {corners[i], edges[i]}) {
+            Entity& e = m_entities.at(id);
+            e.fixed = true;
+            e.sublayer = kNoId;
+        }
+        m_entities.at(edges[i]).construction = true;
+    }
 }
 
 const char* toString(TextOutline outline)
@@ -2029,6 +2109,7 @@ void Sketch::clear()
     m_origin = kNoId;
     m_axes = {kNoId, kNoId};
     m_axisEnds = {kNoId, kNoId};
+    m_pageCorners = m_pageEdges = {kNoId, kNoId, kNoId, kNoId};
 }
 
 // ---------------------------------------------------------------------------------------------

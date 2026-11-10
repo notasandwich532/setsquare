@@ -10,7 +10,8 @@
 // can't apply. Operations take a `near` position (where the user clicked) to choose which part
 // of a curve is meant; replaying with the same positions gives the same result.
 //
-// Only solid (non-construction) geometry acts as a cutting edge, and never the origin/axes.
+// Any geometry in the curve's layer (construction too, as in Fusion) acts as a cutting edge,
+// but never the origin/axes or the page's edges.
 
 namespace core::modify
 {

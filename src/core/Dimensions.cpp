@@ -151,6 +151,9 @@ double measure(const Sketch& s, ConstraintType type, const std::vector<Id>& refs
 {
     switch (type) {
         case ConstraintType::Distance: {
+            if (refs.size() == 2 && s.isRound(refs[0]) && s.isRound(refs[1])) {
+                return std::abs(roundRadius(s, refs[0]) - roundRadius(s, refs[1]));  // the gap between them
+            }
             if (refs.size() == 2 && s.entity(refs[1]).kind() == EntityKind::Line) {
                 Vec2 a, b;
                 lineEnds(s, refs[1], a, b);
@@ -202,6 +205,19 @@ DimensionLayout layoutDimension(const Sketch& s, const Constraint& c)
         case ConstraintType::HorizontalDistance:
         case ConstraintType::VerticalDistance: {
             L.style = DimensionLayout::Style::Linear;
+            if (c.type == ConstraintType::Distance && c.refs.size() == 2 && s.isRound(c.refs[0]) && s.isRound(c.refs[1])) {
+                // The gap between two circles' radii: across it, along the way out from the (first
+                // one's) centre to the label; the label as placed, from that centre.
+                const Vec2 centre = roundCenter(s, c.refs[0]);
+                L.anchor = centre;
+                L.label = defaultLabel ? add(centre, mul(Vec2{std::sqrt(0.5), std::sqrt(0.5)}, roundRadius(s, c.refs[0]) + 4.0))
+                                       : add(centre, offset);
+                L.dir = unit(sub(L.label, centre), Vec2{std::sqrt(0.5), std::sqrt(0.5)});
+                L.a = add(roundCenter(s, c.refs[1]), mul(L.dir, roundRadius(s, c.refs[1])));
+                L.b = add(centre, mul(L.dir, roundRadius(s, c.refs[0])));
+                L.valid = true;
+                break;
+            }
             if (c.type == ConstraintType::Distance && c.refs.size() == 2
                 && s.entity(c.refs[1]).kind() == EntityKind::Line) {
                 Vec2 la, lb;

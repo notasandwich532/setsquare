@@ -300,6 +300,32 @@ void ConstraintTool::press(const ToolEvent& e)
         cancel();
         return;
     }
+    // Coincident, a point picked, then where two curves cross: the point goes onto both.
+    if (m_kind == ToolKind::Coincident && m_picks.size() == 1 && doc().sketch().hasEntity(m_picks[0])
+        && kindOf(doc().sketch(), m_picks[0]) == EntityKind::Point) {
+        // (not the axes: a curve clicked where it happens to cross one means just the curve)
+        const Snap crossing = view().snap(e.screen);
+        const Sketch& s = doc().sketch();
+        if (crossing.onCurve2 != kNoId && crossing.point == kNoId && !s.isAxis(crossing.onCurve)
+            && !s.isAxis(crossing.onCurve2)) {
+            const Id p = m_picks[0];
+            QString error;
+            doc().beginTransaction();
+            const bool first = doc().addConstraint(ConstraintType::Coincident, {p, crossing.onCurve}, 0.0, &error) != kNoId;
+            const bool both = first && doc().addConstraint(ConstraintType::Coincident, {p, crossing.onCurve2}, 0.0, &error) != kNoId;
+            doc().endTransaction();
+            if (!both) {
+                if (first) {
+                    doc().undo();  // (all or nothing)
+                }
+                emit view().message(error);
+            }
+            m_picks.clear();
+            view().setSelection({});
+            refresh();
+            return;
+        }
+    }
     const Id hit = view().pickAt(e.screen, false);
     if (hit == kNoId) {
         m_picks.clear();
@@ -412,6 +438,15 @@ std::optional<DimensionTool::Candidate> DimensionTool::candidateFor(const Sketch
         }
         if (kindOf(s, a) == EntityKind::Point && kindOf(s, b) == EntityKind::Line) {
             return Candidate{ConstraintType::Distance, {a, b}};
+        }
+        if (s.isRound(a) && s.isRound(b)) {
+            // Concentric circles/arcs: the gap between their radii.
+            const core::Point& ca = s.point(kindOf(s, a) == EntityKind::Circle ? s.circle(a).center : s.arc(a).center);
+            const core::Point& cb = s.point(kindOf(s, b) == EntityKind::Circle ? s.circle(b).center : s.arc(b).center);
+            if (std::hypot(ca.x - cb.x, ca.y - cb.y) < 1e-6) {
+                return Candidate{ConstraintType::Distance, {a, b}};
+            }
+            return std::nullopt;
         }
         if (ka == EntityKind::Line && kb == EntityKind::Line) {
             const core::Line& l1 = s.line(a);

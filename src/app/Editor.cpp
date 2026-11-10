@@ -35,6 +35,14 @@ QString Editor::name(const core::Sketch& s, Id id)
     if (id == s.yAxis()) {
         return QStringLiteral("s.y_axis");
     }
+    for (int i = 0; i < 4; ++i) {
+        if (id == s.pageEdges()[i]) {
+            return QStringLiteral("s.page_edges[%1]").arg(i);
+        }
+        if (id == s.pageCorners()[i]) {
+            return QStringLiteral("s.page_corners[%1]").arg(i);
+        }
+    }
     if (s.hasConstraint(id)) {
         return (core::isDimension(s.constraint(id).type) ? QStringLiteral("d") : QStringLiteral("k"))
             + QString::number(id);

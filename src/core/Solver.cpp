@@ -1392,6 +1392,10 @@ void Solver::Impl::addConstraint(const Sketch& sketch, const Constraint& c)
             else if (kind(1) == EntityKind::Point) {
                 sys.addConstraintP2PDistance(pt(r[0]), pt(r[1]), alloc(c.value), tag);
             }
+            else if (kind(0) != EntityKind::Point && kind(1) != EntityKind::Line) {
+                // Two circles/arcs: the first's radius is the second's and the gap.
+                sys.addConstraintDifference(radiusOf(r[1]), radiusOf(r[0]), alloc(c.value), tag);
+            }
             else {
                 GCS::Line& l = ln(r[1]);
                 sys.addConstraintP2LDistance(pt(r[0]), l, alloc(c.value), isLeftOf(pt(r[0]), l), tag);

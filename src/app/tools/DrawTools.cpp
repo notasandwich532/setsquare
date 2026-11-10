@@ -49,6 +49,9 @@ Id resolveSnap(Editor& ed, const Snap& snap)
     }
     else if (snap.onCurve != kNoId && s.hasEntity(snap.onCurve)) {
         ed.constrain(core::ConstraintType::Coincident, {p, snap.onCurve});
+        if (snap.onCurve2 != kNoId && s.hasEntity(snap.onCurve2)) {
+            ed.constrain(core::ConstraintType::Coincident, {p, snap.onCurve2});  // (where they cross)
+        }
     }
     return p;
 }

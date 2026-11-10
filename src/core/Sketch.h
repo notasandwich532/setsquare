@@ -2,6 +2,7 @@
 
 #include "Style.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -557,7 +558,21 @@ public:
     Id yAxis() const { return m_axes[1]; }
     bool isOrigin(Id id) const { return id != kNoId && id == m_origin; }
     bool isAxis(Id id) const { return id != kNoId && (id == m_axes[0] || id == m_axes[1]); }
-    // Origin, axes and the axes' hidden end points: permanent, not user geometry.
+    // The page's frame (with a page): its corners (bottom left, bottom right, top right, top left)
+    // and edges (bottom, right, top, left), fixed construction geometry in every layer, so points
+    // can be put on the edges, at their middles, and so on. Made, moved and taken away with the
+    // page.
+    const std::array<Id, 4>& pageCorners() const { return m_pageCorners; }
+    const std::array<Id, 4>& pageEdges() const { return m_pageEdges; }
+    bool isPageFrame(Id id) const
+    {
+        return id != kNoId && (std::ranges::find(m_pageCorners, id) != m_pageCorners.end()
+                               || std::ranges::find(m_pageEdges, id) != m_pageEdges.end());
+    }
+    // (loading: the frame as saved, before the page is set, which moves it there)
+    void setPageFrame(const std::array<Id, 4>& corners, const std::array<Id, 4>& edges);
+    // Origin, axes and the axes' hidden end points, and the page's frame: permanent, not user
+    // geometry.
     bool isReference(Id id) const;
     // The axes' hidden end points: never shown or picked.
     bool isHiddenReference(Id id) const { return id != kNoId && (id == m_axisEnds[0] || id == m_axisEnds[1]); }
@@ -605,12 +620,12 @@ public:
 
     // Arc helpers (derived from its points).
     double arcRadius(Id arc) const;
+    bool isRound(Id id) const;  // circle or arc
 
 private:
     Id nextId() { return m_nextId++; }
     EntityKind kindOf(Id id) const;
     bool isCurve(Id id) const;
-    bool isRound(Id id) const;  // circle or arc
     void normalize(ConstraintType type, std::vector<Id>& refs) const;
     void validate(ConstraintType type, const std::vector<Id>& refs, double value,
                   const std::vector<double>& params = {}) const;
@@ -636,6 +651,9 @@ private:
     Id m_origin = kNoId;
     std::array<Id, 2> m_axes{kNoId, kNoId};
     std::array<Id, 2> m_axisEnds{kNoId, kNoId};
+    std::array<Id, 4> m_pageCorners{kNoId, kNoId, kNoId, kNoId};
+    std::array<Id, 4> m_pageEdges{kNoId, kNoId, kNoId, kNoId};
+    void syncPageFrame();  // made, moved to the page, or taken away with it
 };
 
 }  // namespace core

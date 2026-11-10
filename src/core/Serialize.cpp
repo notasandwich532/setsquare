@@ -448,6 +448,9 @@ std::string toJson(const Sketch& sketch, bool compact, const std::vector<std::st
     if (sketch.xAxis() != kNoId) {
         doc["axes"] = {sketch.xAxis(), sketch.yAxis()};
     }
+    if (sketch.pageCorners()[0] != kNoId) {
+        doc["page_frame"] = {{"corners", sketch.pageCorners()}, {"edges", sketch.pageEdges()}};
+    }
     doc["entities"] = std::move(entities);
     doc["constraints"] = std::move(constraints);
     if (!sketch.strokes().empty()) {
@@ -642,6 +645,7 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
             im.data = std::make_shared<const std::string>(fromBase64(j.value("data", std::string())));
             sketch.insertImage(im);
         }
+        std::optional<Page> loadedPage;
         if (doc.contains("page")) {
             const json& j = doc.at("page");
             Page page;
@@ -654,7 +658,7 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
             if (j.contains("color")) {
                 page.hasColor = Color::fromHex(j.at("color").get<std::string>(), page.color);
             }
-            sketch.setPage(page);
+            loadedPage = page;  // (set once the geometry's in: its frame is some of it)
         }
         // Points first, so curves can refer to them regardless of order in the file.
         std::vector<Entity> curves;
@@ -676,6 +680,10 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
                 const auto& axes = doc.at("axes");
                 sketch.setAxes(axes.at(0).get<Id>(), axes.at(1).get<Id>());
             }
+        }
+        if (doc.contains("page_frame")) {
+            const json& f = doc.at("page_frame");
+            sketch.setPageFrame(f.at("corners").get<std::array<Id, 4>>(), f.at("edges").get<std::array<Id, 4>>());
         }
         for (const json& j : doc.at("constraints")) {
             sketch.insertConstraint(constraintFromJson(j));
@@ -801,6 +809,8 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
         for (Id id : homeless) {
             sketch.setSublayerOf(id, first);
         }
+        // Last, so a frame made for a page from before frames takes ids nothing else has.
+        sketch.setPage(loadedPage);
         if (history) {
             *history = doc.value("history", std::vector<std::string>{});
         }

@@ -2,6 +2,7 @@
 
 #include <core/Curves.h>
 #include <core/Features.h>
+#include <core/Modify.h>
 
 #include "CommandPanel.h"
 #include "Document.h"
@@ -853,7 +854,8 @@ Snap SketchView::snap(QPointF screen) const
     // Line midpoints.
     for (const auto& [id, e] : sketch.entities()) {
         if (const auto* l = std::get_if<core::Line>(&e.geom);
-            l && !sketch.isAxis(id) && sketch.isShown(id) && sketch.layerOf(id) == sketch.activeLayer()) {
+            l && !sketch.isAxis(id) && sketch.isShown(id)
+            && (sketch.layerOf(id) == sketch.activeLayer() || sketch.isPageFrame(id))) {
             const core::Point& a = sketch.point(l->p1);
             const core::Point& b = sketch.point(l->p2);
             const core::Vec2 m{(a.x + b.x) / 2, (a.y + b.y) / 2};
@@ -862,6 +864,51 @@ Snap SketchView::snap(QPointF screen) const
                 s.midpointOf = id;
                 return s;
             }
+        }
+    }
+
+    // Where two curves cross (construction and the axes too), the nearest crossing within reach.
+    {
+        const double reach = kSnapPixels / m_zoom;
+        std::vector<core::Id> near;
+        for (const auto& [id, e] : sketch.entities()) {
+            const core::Id layer = sketch.layerOf(id);  // (the axes and the page's edges: every layer's)
+            if (e.kind() != core::EntityKind::Point && sketch.isShown(id) && !sketch.isHiddenReference(id)
+                && (layer == sketch.activeLayer() || layer == core::kNoId) && core::distanceTo(sketch, id, world) <= reach) {
+                near.push_back(id);
+            }
+        }
+        double best = reach;
+        Snap found{world};
+        for (size_t i = 0; i < near.size(); ++i) {
+            for (size_t j = i + 1; j < near.size(); ++j) {
+                if (sketch.isAxis(near[i]) && sketch.isAxis(near[j])) {
+                    continue;  // (the origin: a point already)
+                }
+                // (an axis is infinite, though kept as a line from the origin a unit long)
+                auto path = [&](core::Id id) {
+                    if (sketch.isAxis(id)) {
+                        return id == sketch.xAxis() ? core::curve::Path::line({-1e7, 0}, {1e7, 0})
+                                                    : core::curve::Path::line({0, -1e7}, {0, 1e7});
+                    }
+                    return core::curve::pathOf(sketch, id);
+                };
+                const std::vector<core::Vec2> crossings = sketch.isAxis(near[i]) || sketch.isAxis(near[j])
+                    ? core::curve::intersections(path(near[i]), path(near[j]))
+                    : core::modify::intersections(sketch, near[i], near[j]);
+                for (const core::Vec2& x : crossings) {
+                    const double d = std::hypot(x.x - world.x, x.y - world.y);
+                    if (d <= best) {
+                        best = d;
+                        found = Snap{x};
+                        found.onCurve = near[i];
+                        found.onCurve2 = near[j];
+                    }
+                }
+            }
+        }
+        if (found.onCurve2 != core::kNoId) {
+            return found;
         }
     }
 
@@ -1602,6 +1649,9 @@ void SketchView::drawSketch(QPainter& painter, core::Id only) const
         if (m_presentation && e.construction) {
             continue;  // reference geometry isn't part of the drawing
         }
+        if (sketch.isPageFrame(id) && !m_selection.contains(id) && id != m_hovered && !constrained.contains(id)) {
+            continue;  // (the page's edge shows already: it only lights up)
+        }
         if (m_presentation && decorated.contains(id)) {
             if (!m_selection.contains(id) && id != m_hovered && !constrained.contains(id)) {
                 continue;  // its stroke is what shows
@@ -1670,6 +1720,9 @@ void SketchView::drawSketch(QPainter& painter, core::Id only) const
         }
         const QColor color = styleFor(e).color();
         const bool highlighted = m_selection.contains(id) || id == m_hovered || constrained.contains(id);
+        if (sketch.isPageFrame(id) && !highlighted) {
+            continue;  // (the page's corners: only lit up)
+        }
         const bool marked = sketch.isOrigin(id) || (e.fixed && e.projectedFrom == core::kNoId);
         if (!highlighted && !marked) {
             // Dense (zoomed out): one dot to a few pixels' square is all that can be told apart.
@@ -1833,6 +1886,11 @@ void SketchView::drawSnapMarker(QPainter& painter, const Snap& snap) const
     else if (snap.midpointOf != core::kNoId) {
         const QPolygonF triangle{p + QPointF(0, -7), p + QPointF(6, 5), p + QPointF(-6, 5), p + QPointF(0, -7)};
         painter.drawPolyline(triangle);  // midpoint
+    }
+    else if (snap.onCurve2 != core::kNoId) {
+        painter.drawRect(QRectF(p - QPointF(5, 5), QSizeF(10, 10)));  // where two curves cross
+        painter.drawLine(p + QPointF(-5, -5), p + QPointF(5, 5));
+        painter.drawLine(p + QPointF(-5, 5), p + QPointF(5, -5));
     }
     else if (snap.onCurve != core::kNoId) {
         painter.drawLine(p + QPointF(-5, -5), p + QPointF(5, 5));  // on the curve
