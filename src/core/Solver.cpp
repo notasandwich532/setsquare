@@ -725,14 +725,24 @@ void Solver::Impl::build(const Sketch& sketch)
                 continue;
             }
             const group::Members m = group::members(sketch, g);
+            // (a curve outside this group, built on its points: just for this group, or every
+            // other group's curves would count against it too, and with a few groups, as an
+            // imported drawing has, nearly every point would be solved for)
+            std::set<Id> builtOn;
+            const std::set<Id> own(m.points.begin(), m.points.end());
             for (const auto& [eid, e] : sketch.entities()) {
-                if (e.kind() != EntityKind::Point && !group::covers(sketch, m, eid)) {
-                    touch(eid);  // (a curve outside the group, built on its points)
+                if (e.kind() == EntityKind::Point || group::covers(sketch, m, eid)) {
+                    continue;
+                }
+                for (Id p : sketch.definingPoints(eid)) {
+                    if (own.contains(p)) {
+                        builtOn.insert(p);
+                    }
                 }
             }
             for (size_t i = 2; i < m.points.size(); ++i) {
                 const Id p = m.points[i];
-                if (!touched.contains(p) && !fixedPoints.contains(p)) {
+                if (!touched.contains(p) && !builtOn.contains(p) && !fixedPoints.contains(p)) {
                     passive[p] = {m.points[0], m.points[1], g.params[1 + 2 * (i - 2)], g.params[2 + 2 * (i - 2)], gid};
                 }
             }

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <numbers>
 #include <set>
 #include <string>
@@ -1810,6 +1811,72 @@ Point textToWorld(const Point& anchor, double angleDeg, const Point& local)
     const double a = angleDeg * std::numbers::pi / 180.0;
     const double c = std::cos(a), s = std::sin(a);
     return {anchor.x + c * local.x - s * local.y, anchor.y + s * local.x + c * local.y};
+}
+
+bool quadraticOf(const Point& from, const Point& c1, const Point& c2, const Point& to, Point& control)
+{
+    // A quadratic's cubic has its control points two thirds of the way to the quadratic's one,
+    // from each end.
+    const Point a{(3 * c1.x - from.x) / 2, (3 * c1.y - from.y) / 2};
+    const Point b{(3 * c2.x - to.x) / 2, (3 * c2.y - to.y) / 2};
+    const double scale = std::max({1.0, std::abs(from.x), std::abs(from.y), std::abs(to.x), std::abs(to.y)});
+    if (std::hypot(a.x - b.x, a.y - b.y) > 1e-9 * scale) {
+        return false;
+    }
+    control = {(a.x + b.x) / 2, (a.y + b.y) / 2};
+    return true;
+}
+
+double letterTolerance(double height)
+{
+    return std::max(1e-5, height * 5e-4);
+}
+
+std::vector<std::vector<Point>> flattenLetters(const std::vector<TextContour>& letters, double tolerance)
+{
+    std::vector<std::vector<Point>> out;
+    // A cubic, split in halves until each is flat to within the tolerance (its control points
+    // that close to the line between its ends).
+    std::function<void(Point, Point, Point, Point, int, std::vector<Point>&)> cubic =
+        [&](Point a, Point b, Point c, Point d, int depth, std::vector<Point>& to) {
+            auto off = [&](Point p) {
+                const double dx = d.x - a.x, dy = d.y - a.y, len = std::hypot(dx, dy);
+                return len > 1e-12 ? std::abs(dx * (p.y - a.y) - dy * (p.x - a.x)) / len : std::hypot(p.x - a.x, p.y - a.y);
+            };
+            if (depth >= 12 || std::max(off(b), off(c)) <= tolerance) {
+                to.push_back(d);
+                return;
+            }
+            auto mid = [](Point p, Point q) { return Point{(p.x + q.x) / 2, (p.y + q.y) / 2}; };
+            const Point ab = mid(a, b), bc = mid(b, c), cd = mid(c, d), abc = mid(ab, bc), bcd = mid(bc, cd);
+            const Point m = mid(abc, bcd);
+            cubic(a, ab, abc, m, depth + 1, to);
+            cubic(m, bcd, cd, d, depth + 1, to);
+        };
+    for (const TextContour& c : letters) {
+        if (c.points.empty()) {
+            continue;
+        }
+        std::vector<Point> poly{c.points.front()};
+        size_t i = 1;
+        for (char op : c.ops) {
+            if (op == 'C' && i + 2 < c.points.size()) {
+                cubic(poly.back(), c.points[i], c.points[i + 1], c.points[i + 2], 0, poly);
+                i += 3;
+            }
+            else if (op == 'L' && i < c.points.size()) {
+                poly.push_back(c.points[i]);
+                i += 1;
+            }
+        }
+        if (poly.size() > 2 && std::hypot(poly.front().x - poly.back().x, poly.front().y - poly.back().y) < 1e-9) {
+            poly.pop_back();  // (closed anyway)
+        }
+        if (poly.size() >= 3) {
+            out.push_back(std::move(poly));
+        }
+    }
+    return out;
 }
 
 namespace

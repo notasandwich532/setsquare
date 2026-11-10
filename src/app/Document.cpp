@@ -14,6 +14,7 @@
 #include <map>
 #include <set>
 #include <QFile>
+#include <QFontDatabase>
 #include <QSaveFile>
 
 namespace
@@ -725,6 +726,18 @@ bool Document::open(const QString& path, QString* error)
             *error = tr("Couldn't read %1: %2").arg(path, errorText(e));
         }
         return false;
+    }
+    // The letters' outlines are kept in the file for where the font isn't installed; where it is,
+    // they're made afresh (files from before outlines were thinned out shrink on their next save).
+    std::vector<core::Text> remade;
+    for (const auto& [id, t] : loaded.texts()) {
+        if (QFontDatabase::hasFamily(QString::fromStdString(t.font))) {
+            remade.push_back(t);
+        }
+    }
+    for (core::Text& t : remade) {
+        textshapes::update(t, &loaded);
+        loaded.setText(t);
     }
     reset(std::move(loaded));
     for (const std::string& entry : history) {

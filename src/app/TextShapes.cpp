@@ -959,6 +959,11 @@ std::size_t curveKey(const core::Sketch& s, core::Id curve)
 
 std::vector<std::vector<core::Point>> make(const core::Text& t, const core::Sketch* sketch)
 {
+    return core::flattenLetters(makeLetters(t, sketch), core::letterTolerance(t.height));
+}
+
+std::vector<core::TextContour> makeLetters(const core::Text& t, const core::Sketch* sketch)
+{
     if (t.text.empty()) {
         return {};
     }
@@ -989,22 +994,47 @@ std::vector<std::vector<core::Point>> make(const core::Text& t, const core::Sket
         path = thicken(path.simplified(), t.minThickness / mmPerPixel);
     }
 
-    std::vector<std::vector<core::Point>> out;
-    for (const QPolygonF& polygon : path.toSubpathPolygons()) {
-        std::vector<core::Point> contour;
-        for (const QPointF& p : polygon) {
-            const core::Point q{p.x() * mmPerPixel, -p.y() * mmPerPixel};  // to mm, y up
-            if (contour.empty() || std::hypot(q.x - contour.back().x, q.y - contour.back().y) > 1e-9) {
-                contour.push_back(q);
-            }
+    // The path's own lines and curves (the font's, as designed; joined-up or thickened outlines
+    // are lines already), to mm with y up.
+    std::vector<core::TextContour> out;
+    core::TextContour contour;
+    auto toMm = [&](double x, double y) { return core::Point{x * mmPerPixel, -y * mmPerPixel}; };
+    auto same = [](core::Point a, core::Point b) { return std::hypot(a.x - b.x, a.y - b.y) < 1e-9; };
+    auto finish = [&] {
+        // (the line back to the start that closes it is implied)
+        if (!contour.ops.empty() && contour.ops.back() == 'L' && same(contour.points.back(), contour.points.front())) {
+            contour.ops.pop_back();
+            contour.points.pop_back();
         }
-        if (contour.size() > 2 && std::hypot(contour.front().x - contour.back().x, contour.front().y - contour.back().y) < 1e-9) {
-            contour.pop_back();  // closed already: don't repeat the start
-        }
-        if (contour.size() >= 3) {
+        const bool area = contour.ops.find('C') != std::string::npos || contour.ops.size() >= 2;
+        if (area) {
             out.push_back(std::move(contour));
         }
+        contour = {};
+    };
+    for (int i = 0; i < path.elementCount(); ++i) {
+        const QPainterPath::Element e = path.elementAt(i);
+        if (e.isMoveTo()) {
+            finish();
+            contour.points.push_back(toMm(e.x, e.y));
+        }
+        else if (e.isLineTo()) {
+            const core::Point p = toMm(e.x, e.y);
+            if (!contour.points.empty() && !same(p, contour.points.back())) {
+                contour.points.push_back(p);
+                contour.ops += 'L';
+            }
+        }
+        else if (e.isCurveTo() && i + 2 < path.elementCount()) {
+            const QPainterPath::Element c2 = path.elementAt(i + 1), to = path.elementAt(i + 2);
+            contour.points.push_back(toMm(e.x, e.y));
+            contour.points.push_back(toMm(c2.x, c2.y));
+            contour.points.push_back(toMm(to.x, to.y));
+            contour.ops += 'C';
+            i += 2;
+        }
     }
+    finish();
     return out;
 }
 
@@ -1043,7 +1073,8 @@ void update(core::Text& text, const core::Sketch* sketch)
     if (text.inBox() && sketch) {
         text.angle = boxOf(*sketch, text).angle;  // turned with its box
     }
-    text.shape = make(text, sketch);
+    text.letters = makeLetters(text, sketch);
+    text.shape = core::flattenLetters(text.letters, core::letterTolerance(text.height));
     text.layoutKey = sketch ? linkKey(*sketch, text) : 0;
 }
 

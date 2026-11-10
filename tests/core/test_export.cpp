@@ -197,3 +197,40 @@ TEST_CASE("DXF strokes keep a colour and line style; construction is a switched-
     CHECK(std::ranges::count(plain, std::pair<int, std::string>{0, "LINE"}) == 1);
     CHECK(dxfEntity(plain, "LINE").at(8) == "GEOMETRY");
 }
+
+TEST_CASE("SVG fills are outlined by the curves they're in, exactly; a gradient used twice is written once", "[export][svg]")
+{
+    Sketch s;
+    // A disc with a square hole, and a slot-like area of lines and arcs.
+    const Id disc = s.addCircle(0, 0, 10);
+    build::Rectangle hole = build::rectangle(s, s.addPoint(-3, -3), s.addPoint(3, 3));
+    Fill f;
+    f.color = {255, 0, 0, 255};
+    f.seed = {7, 0};
+    Gradient g;
+    g.kind = GradientKind::Linear;
+    g.start = s.addPoint(-10, 0);
+    g.end = s.addPoint(10, 0);
+    g.stops = {{0, {255, 0, 0, 255}}, {1, {0, 0, 255, 255}}};
+    f.gradient = g;
+    s.addFill(f);
+    StrokeStyle st;
+    st.width = 0.5;
+    st.gradient = g;
+    s.setStroke(disc, st);
+    regions::refreshFills(s);
+
+    const std::string svg = exporter::toSvg(s, {});
+    const size_t fills = svg.find("id=\"fills\"");
+    REQUIRE(fills != std::string::npos);
+    const size_t d = svg.find(" d=\"", fills);
+    const std::string path = svg.substr(d, svg.find('"', d + 4) - d);
+    auto count = [&](char c) { return std::count(path.begin(), path.end(), c); };
+    CHECK(count('A') == 3);  // the circle, in thirds
+    CHECK(count('L') == 4);  // the square's sides
+    CHECK(count('Z') == 2);
+    (void)hole;
+    // The gradient (the fill's and the outline's): one definition.
+    CHECK(svg.find("<linearGradient") != std::string::npos);
+    CHECK(svg.find("<linearGradient", svg.find("<linearGradient") + 1) == std::string::npos);
+}

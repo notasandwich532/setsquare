@@ -302,6 +302,21 @@ const char* toString(TextVAlign align);
 bool textAlignFromString(const std::string& name, TextAlign& out);
 bool textVAlignFromString(const std::string& name, TextVAlign& out);
 
+// One closed outline of the letters, as the font draws it: from points[0], each of `ops` a line
+// to the next point ('L') or a cubic Bezier curve through the next three ('C').
+struct TextContour
+{
+    std::vector<Point> points;
+    std::string ops;
+};
+// Whether a cubic is really a quadratic (as TrueType letters' curves are), and its one control
+// point if so: written as that, it takes a point less.
+bool quadraticOf(const Point& from, const Point& c1, const Point& c2, const Point& to, Point& control);
+// The contours as closed polylines, within `tolerance` of the curves.
+std::vector<std::vector<Point>> flattenLetters(const std::vector<TextContour>& letters, double tolerance);
+// The tolerance a text's letters are flattened to for drawing (finer than can be seen).
+double letterTolerance(double height);
+
 struct Text
 {
     Id id = kNoId;
@@ -339,7 +354,10 @@ struct Text
     Gradient gradient;  // when active (hasColor too): filled with this rather than `color`
 
     // The letters: closed contours in text space (mm; x along the baseline from the anchor, y
-    // up), filled by the non-zero winding rule. Made by the app from the settings above.
+    // up), filled by the non-zero winding rule. Made by the app from the settings above, as the
+    // font's curves (`letters`: saved, and exported as curves) and those flattened (`shape`: for
+    // drawing and picking; made from `letters` again when loaded).
+    std::vector<TextContour> letters;
     std::vector<std::vector<Point>> shape;
 };
 

@@ -1,6 +1,7 @@
 #include "Serialize.h"
 
 #include <algorithm>
+#include <charconv>
 #include <nlohmann/json.hpp>
 
 #include <string>
@@ -114,6 +115,134 @@ Gradient gradientFromJson(const json& j)
     g.shape = id("shape");
     g.focal = id("focal");
     return g;
+}
+
+// A text's letters as SVG-like path data: "M x y L x y Q x y x y C x y x y x y Z M ...", in mm to
+// a micron (they look the same, in a small part of the file points would take); a curve that's a
+// quadratic (as TrueType letters' are) as one, a point shorter.
+std::string lettersToPath(const Text& t)
+{
+    std::string out;
+    auto num = [&](double v) {
+        char buf[64];
+        const auto end = std::to_chars(buf, buf + sizeof buf, v, std::chars_format::fixed, 3).ptr;  // (any locale)
+        std::string s(buf, end);
+        while (s.back() == '0') {
+            s.pop_back();
+        }
+        if (s.back() == '.') {
+            s.pop_back();
+        }
+        if (s == "-0") {
+            s = "0";
+        }
+        out += s;
+    };
+    auto point = [&](const Point& p) {
+        num(p.x);
+        out += ' ';
+        num(p.y);
+    };
+    auto contour = [&](const TextContour& c) {
+        if (c.points.empty()) {
+            return;
+        }
+        if (!out.empty()) {
+            out += ' ';
+        }
+        out += "M ";
+        point(c.points.front());
+        size_t i = 1;
+        for (char op : c.ops) {
+            const size_t n = op == 'C' ? 3 : 1;
+            if (i + n > c.points.size()) {
+                break;
+            }
+            Point control;
+            if (op == 'C' && quadraticOf(c.points[i - 1], c.points[i], c.points[i + 1], c.points[i + 2], control)) {
+                out += " Q ";
+                point(control);
+                out += ' ';
+                point(c.points[i + 2]);
+                i += n;
+                continue;
+            }
+            out += ' ';
+            out += op;
+            for (size_t k = 0; k < n; ++k) {
+                out += ' ';
+                point(c.points[i + k]);
+            }
+            i += n;
+        }
+        out += " Z";
+    };
+    if (!t.letters.empty()) {
+        for (const TextContour& c : t.letters) {
+            contour(c);
+        }
+    }
+    else {
+        for (const auto& poly : t.shape) {  // (made without the curves)
+            TextContour c{poly, std::string(poly.empty() ? 0 : poly.size() - 1, 'L')};
+            contour(c);
+        }
+    }
+    return out;
+}
+
+std::vector<TextContour> lettersFromPath(const std::string& d)
+{
+    std::vector<TextContour> out;
+    size_t at = 0;
+    auto next = [&](std::string& word) {
+        while (at < d.size() && d[at] == ' ') {
+            ++at;
+        }
+        const size_t from = at;
+        while (at < d.size() && d[at] != ' ') {
+            ++at;
+        }
+        word.assign(d, from, at - from);
+        return !word.empty();
+    };
+    std::string word;
+    auto number = [&]() {
+        double v = 0;
+        if (!next(word) || std::from_chars(word.data(), word.data() + word.size(), v).ec != std::errc{}) {
+            throw SketchError("text letters: expected a number");
+        }
+        return v;
+    };
+    while (next(word)) {
+        if (word == "M") {
+            out.push_back({});
+            const double x = number();
+            out.back().points.push_back({x, number()});
+        }
+        else if ((word == "L" || word == "C") && !out.empty()) {
+            const char op = word[0];
+            const int n = op == 'C' ? 3 : 1;
+            for (int k = 0; k < n; ++k) {
+                const double x = number();
+                out.back().points.push_back({x, number()});
+            }
+            out.back().ops += op;
+        }
+        else if (word == "Q" && !out.empty()) {
+            // (kept as the cubic it is: control points two thirds of the way to its one, from each end)
+            const Point from = out.back().points.back();
+            const double qx = number(), qy = number(), x = number(), y = number();
+            out.back().points.push_back({from.x + 2.0 / 3 * (qx - from.x), from.y + 2.0 / 3 * (qy - from.y)});
+            out.back().points.push_back({x + 2.0 / 3 * (qx - x), y + 2.0 / 3 * (qy - y)});
+            out.back().points.push_back({x, y});
+            out.back().ops += 'C';
+        }
+        else if (word != "Z") {
+            throw SketchError("text letters: unexpected '" + word + "'");
+        }
+    }
+    return out;
 }
 
 // A hatch: its pattern (each family as [angle, x, y, dx, dy, [dashes]]), turned and scaled.
@@ -354,17 +483,8 @@ std::string toJson(const Sketch& sketch, bool compact, const std::vector<std::st
     if (!sketch.texts().empty()) {
         json texts = json::array();
         for (const auto& [id, t] : sketch.texts()) {
-            json shape = json::array();
-            for (const auto& contour : t.shape) {
-                json points = json::array();
-                for (const Point& p : contour) {
-                    points.push_back(p.x);
-                    points.push_back(p.y);
-                }
-                shape.push_back(std::move(points));  // flat [x0, y0, x1, y1, ...]
-            }
             json j{{"id", id}, {"anchor", t.anchor}, {"text", t.text}, {"font", t.font}, {"height", t.height},
-                   {"angle", t.angle}, {"outline", toString(t.outline)}, {"shape", std::move(shape)}};
+                   {"angle", t.angle}, {"outline", toString(t.outline)}, {"letters", lettersToPath(t)}};
             if (t.bold) {
                 j["bold"] = true;
             }
@@ -640,14 +760,24 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
             if (t.hasColor && j.contains("gradient")) {
                 t.gradient = gradientFromJson(j.at("gradient"));
             }
-            for (const json& contour : j.value("shape", json::array())) {
-                const std::vector<double> flat = contour.get<std::vector<double>>();
-                std::vector<Point> points;
-                for (size_t i = 0; i + 1 < flat.size(); i += 2) {
-                    points.push_back({flat[i], flat[i + 1]});
-                }
-                t.shape.push_back(std::move(points));
+            if (j.contains("letters")) {
+                t.letters = lettersFromPath(j.at("letters").get<std::string>());
             }
+            else {
+                // (files from before: the letters as points, a flat [x0, y0, x1, y1, ...] each)
+                for (const json& contour : j.value("shape", json::array())) {
+                    const std::vector<double> flat = contour.get<std::vector<double>>();
+                    TextContour c;
+                    for (size_t i = 0; i + 1 < flat.size(); i += 2) {
+                        c.points.push_back({flat[i], flat[i + 1]});
+                        if (i > 0) {
+                            c.ops += 'L';
+                        }
+                    }
+                    t.letters.push_back(std::move(c));
+                }
+            }
+            t.shape = flattenLetters(t.letters, letterTolerance(t.height));
             sketch.insertText(t);
         }
         // Items from before sublayers (or in one that's gone) go in the first one.

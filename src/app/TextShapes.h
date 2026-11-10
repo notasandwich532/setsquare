@@ -12,6 +12,8 @@ namespace textshapes
 // thickness), in text space: mm, x along the baseline from the anchor, y up.
 // Text along a path needs the sketch (for its curve); without one it's laid out in lines.
 std::vector<std::vector<core::Point>> make(const core::Text& text, const core::Sketch* sketch = nullptr);
+// The same as the font's lines and curves (core::Text::letters).
+std::vector<core::TextContour> makeLetters(const core::Text& text, const core::Sketch* sketch = nullptr);
 
 // Makes the shape afresh into `text`.
 void update(core::Text& text, const core::Sketch* sketch = nullptr);

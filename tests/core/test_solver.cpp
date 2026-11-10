@@ -2,6 +2,7 @@
 // fully-constrained entities) and interactive dragging.
 
 #include <core/Dimensions.h>
+#include <core/Groups.h>
 #include <core/Serialize.h>
 #include <core/Sketch.h>
 #include <core/Solver.h>
@@ -9,6 +10,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
 #include <cmath>
 #include <numbers>
 
@@ -391,4 +393,23 @@ TEST_CASE("Ratio: one line k times another's length, or one radius k times anoth
     CHECK_THROWS_AS(s.addConstraint(ConstraintType::Ratio, {a, big}, 2.0), SketchError);
     CHECK_THROWS_AS(s.addConstraint(ConstraintType::Ratio, {a, b}, 0.0), SketchError);
     CHECK_THROWS_AS(s.setConstraintValue(k, -1.0), SketchError);
+}
+TEST_CASE("Several big groups (an imported drawing's layers) are each just their anchors to the solver", "[solver][group]")
+{
+    // Each group's points are placed from its anchors, not solved for; other groups' curves
+    // don't count as built on them. (They once did: a few thousand points in a few groups were all
+    // solved for, and the solver's diagnosis ran out of memory.)
+    Sketch s;
+    for (int g = 0; g < 4; ++g) {
+        std::vector<Id> items;
+        for (int i = 0; i < 1500; ++i) {
+            items.push_back(s.addLine(g * 100.0 + i * 0.05, 0, g * 100.0 + i * 0.05, 5));
+        }
+        group::create(s, items);
+    }
+    const auto t0 = std::chrono::steady_clock::now();
+    const SolveResult r = solve(s);
+    const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    CHECK(r.ok);
+    CHECK(seconds < 10.0);
 }

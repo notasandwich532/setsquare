@@ -10,6 +10,8 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <functional>
+#include <iterator>
 #include <map>
 #include <numbers>
 #include <sstream>
@@ -76,6 +78,214 @@ struct Item
     StrokeStyle style;
 };
 
+// A curve a fill's outline may run along, for writing the outline exactly.
+struct Along
+{
+    curve::Path path;
+    std::array<double, 4> box;  // x0, y0, x1, y1
+};
+
+// The solid curves of a layer (what fills are bounded by).
+std::vector<Along> curvesAlong(const Sketch& s, Id layer)
+{
+    std::vector<Along> out;
+    for (const auto& [id, e] : s.entities()) {
+        if (e.kind() != EntityKind::Point && !e.construction && !s.isReference(id) && s.layerOf(id) == layer) {
+            out.push_back({curve::pathOf(s, id), curve::box(s, id)});
+        }
+    }
+    return out;
+}
+
+double wrapPi(double a)  // into (-pi, pi]
+{
+    while (a > kPi) {
+        a -= 2 * kPi;
+    }
+    while (a <= -kPi) {
+        a += 2 * kPi;
+    }
+    return a;
+}
+
+// One closed outline (sampled points round it) as exact SVG path commands: each stretch of it
+// along one curve written as that curve, a line as L, a circle's or ellipse's part as A, a
+// spline's as C, found by which curves its points lie on. Empty if it can't be (a point on none
+// of them): then it's written as the points.
+std::string exactLoop(const std::vector<Vec2>& pts, const std::vector<Along>& curves,
+                      const std::function<std::string(Vec2)>& xy)
+{
+    constexpr double kOn = 1e-6;
+    const size_t n = pts.size();
+    if (n < 2) {
+        return {};
+    }
+    double bx0 = 1e300, by0 = 1e300, bx1 = -1e300, by1 = -1e300;
+    for (const Vec2& p : pts) {
+        bx0 = std::min(bx0, p.x);
+        by0 = std::min(by0, p.y);
+        bx1 = std::max(bx1, p.x);
+        by1 = std::max(by1, p.y);
+    }
+    std::vector<const curve::Path*> near;
+    for (const Along& c : curves) {
+        if (c.box[0] <= bx1 + kOn && c.box[2] >= bx0 - kOn && c.box[1] <= by1 + kOn && c.box[3] >= by0 - kOn) {
+            near.push_back(&c.path);
+        }
+    }
+    // Which of them each point is on.
+    std::vector<std::vector<size_t>> on(n);
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t c = 0; c < near.size(); ++c) {
+            if (near[c]->distance(pts[i]) < kOn) {
+                on[i].push_back(c);
+            }
+        }
+        if (on[i].empty()) {
+            return {};
+        }
+    }
+    auto common = [](const std::vector<size_t>& a, const std::vector<size_t>& b) {
+        std::vector<size_t> out;
+        std::ranges::set_intersection(a, b, std::back_inserter(out));
+        return out;
+    };
+
+    std::string d;
+    // A stretch along curve `c` through points idx (in order).
+    auto write = [&](const std::vector<size_t>& idx, size_t c) {
+        const curve::Path& p = *near[c];
+        const Vec2 from = pts[idx.front()], to = pts[idx.back()];
+        switch (p.kind()) {
+            case curve::Path::Kind::Line: d += " L" + xy(to); return;
+            case curve::Path::Kind::Circle:
+            case curve::Path::Kind::Arc:
+            case curve::Path::Kind::Ellipse:
+            case curve::Path::Kind::EllipseArc: {
+                const bool round = p.kind() == curve::Path::Kind::Circle || p.kind() == curve::Path::Kind::Arc;
+                auto angle = [&](Vec2 q) {
+                    return round ? std::atan2(q.y - p.c.y, q.x - p.c.x) : p.ellipseShape.param(q);
+                };
+                double sweep = 0;
+                for (size_t k = 1; k < idx.size(); ++k) {
+                    sweep += wrapPi(angle(pts[idx[k]]) - angle(pts[idx[k - 1]]));
+                }
+                // In halves where it's more than half way round (SVG's arcs are ambiguous there).
+                const int parts = std::abs(sweep) > kPi * 0.999 ? 2 : 1;
+                const double a0 = angle(from);
+                const std::string radii = round ? num(p.r) + ',' + num(p.r) + " 0"
+                                                : num(p.ellipseShape.a) + ',' + num(p.ellipseShape.b) + ' '
+                        + num(-std::atan2(p.ellipseShape.u.y, p.ellipseShape.u.x) * 180 / kPi);
+                for (int k = 1; k <= parts; ++k) {
+                    const double a = a0 + sweep * k / parts;
+                    const Vec2 q = k == parts ? to
+                        : round                ? Vec2{p.c.x + p.r * std::cos(a), p.c.y + p.r * std::sin(a)}
+                                               : p.ellipseShape.at(a);
+                    // Counter-clockwise with y up is clockwise with y down: sweep-flag 0.
+                    d += " A" + radii + " 0," + (sweep > 0 ? "0 " : "1 ") + xy(q);
+                }
+                return;
+            }
+            case curve::Path::Kind::Spline: {
+                // Along the whole curve's parameter (one unit per piece), from its start.
+                const double size = static_cast<double>(p.pieces.size());
+                auto param = [&](Vec2 q) { return p.start + p.param(q); };
+                double span = 0;
+                for (size_t k = 1; k < idx.size(); ++k) {
+                    double step = param(pts[idx[k]]) - param(pts[idx[k - 1]]);
+                    if (p.closedSpline) {
+                        step = std::remainder(step, size);
+                    }
+                    span += step;
+                }
+                const double lo = span >= 0 ? param(from) : param(from) + span;
+                std::vector<curve::Bezier> pieces = curve::Path::spline(p.pieces, p.closedSpline, lo, std::abs(span)).beziers();
+                if (span < 0) {
+                    std::ranges::reverse(pieces);
+                    for (curve::Bezier& b : pieces) {
+                        std::ranges::reverse(b.p);
+                    }
+                }
+                for (size_t k = 0; k < pieces.size(); ++k) {
+                    const auto& q = pieces[k].p;
+                    d += " C" + xy(q[1]) + ' ' + xy(q[2]) + ' ' + xy(k + 1 == pieces.size() ? to : q[3]);
+                }
+                if (pieces.empty()) {
+                    d += " L" + xy(to);
+                }
+                return;
+            }
+        }
+    };
+
+    // Start where it goes from one curve to another (else it's all one closed curve).
+    size_t first = n;
+    for (size_t i = 0; i < n; ++i) {
+        if (on[i].size() >= 2 && common(on[(i + n - 1) % n], on[(i + 1) % n]).empty()) {
+            first = i;
+            break;
+        }
+    }
+    if (first == n) {
+        std::vector<size_t> all = on[0];
+        for (size_t i = 1; i < n && !all.empty(); ++i) {
+            all = common(all, on[i]);
+        }
+        if (all.empty()) {
+            return {};
+        }
+        // Round it in thirds (back to the start): each well short of half way round.
+        d = "M" + xy(pts[0]);
+        for (size_t k = 0; k < 3; ++k) {
+            std::vector<size_t> third;
+            for (size_t i = n * k / 3; i <= n * (k + 1) / 3; ++i) {
+                third.push_back(i % n);
+            }
+            write(third, all.front());
+        }
+        return d + " Z";
+    }
+    d = "M" + xy(pts[first]);
+    std::vector<size_t> run{first};
+    std::vector<size_t> along = on[first];
+    for (size_t k = 1; k <= n; ++k) {
+        const size_t j = (first + k) % n;
+        std::vector<size_t> both = common(along, on[j]);
+        if (!both.empty()) {
+            along = std::move(both);
+            run.push_back(j);
+            continue;
+        }
+        write(run, along.front());
+        const size_t last = run.back();
+        along = common(on[last], on[j]);
+        if (along.empty()) {
+            return {};  // a jump from one curve to another with nothing in common
+        }
+        run = {last, j};
+    }
+    write(run, along.front());
+    return d + " Z";
+}
+
+// A Bezier piece as points after its start (which `to` has already), within `tolerance`: halved
+// until its control points are that close to the line between its ends.
+void flattenBezier(const curve::Bezier& b, double tolerance, std::vector<Vec2>& to, int depth = 0)
+{
+    const auto& p = b.p;
+    auto off = [&](Vec2 q) {
+        const double dx = p[3].x - p[0].x, dy = p[3].y - p[0].y, len = std::hypot(dx, dy);
+        const double qx = q.x - p[0].x, qy = q.y - p[0].y;
+        return len > 1e-12 ? std::abs(dx * qy - dy * qx) / len : std::hypot(qx, qy);
+    };
+    if (depth >= 12 || std::max(off(p[1]), off(p[2])) <= tolerance) {
+        to.push_back(p[3]);
+        return;
+    }
+    flattenBezier(b.part(0, 0.5), tolerance, to, depth + 1);
+    flattenBezier(b.part(0.5, 1), tolerance, to, depth + 1);
+}
+
 // Dash patterns in multiples of the line width, as the canvas draws them.
 std::vector<double> dashPattern(Dash dash)
 {
@@ -104,7 +314,7 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
     {
         Color color;
         Gradient gradient;
-        std::vector<std::vector<Vec2>> contours;
+        std::vector<TextContour> contours;  // in world coordinates (lines and curves)
     };
     struct Group
     {
@@ -160,13 +370,17 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
                 continue;
             }
             TextArea area{t.hasColor ? t.color : o.plain.color, t.hasColor ? t.gradient : Gradient{}, {}};
-            for (const auto& contour : t.shape) {
-                std::vector<Vec2> pts;
-                for (const Point& p : contour) {
-                    const Point w = textToWorld(s.point(t.anchor), t.angle, p);
-                    pts.push_back({w.x, w.y});
+            std::vector<TextContour> letters = t.letters;
+            if (letters.empty()) {  // (made without the curves: its points)
+                for (const auto& poly : t.shape) {
+                    letters.push_back({poly, std::string(poly.empty() ? 0 : poly.size() - 1, 'L')});
                 }
-                area.contours.push_back(std::move(pts));
+            }
+            for (TextContour& c : letters) {
+                for (Point& p : c.points) {
+                    p = textToWorld(s.point(t.anchor), t.angle, p);  // (turning and moving keeps curves exact)
+                }
+                area.contours.push_back(std::move(c));
             }
             g.texts.push_back(std::move(area));
         }
@@ -204,8 +418,8 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
         }
         for (const TextArea& t : g.texts) {
             for (const auto& contour : t.contours) {
-                for (const Vec2& p : contour) {
-                    include(p, 0.0);
+                for (const Point& p : contour.points) {
+                    include({p.x, p.y}, 0.0);  // (control points too: a little generous at worst)
                 }
             }
         }
@@ -231,6 +445,15 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
     // Sketch y points up, SVG's down.
     auto X = [&](double x) { return num(x - x0 + m); };
     auto Y = [&](double y) { return num(y1 - y + m); };
+    const std::function<std::string(Vec2)> xy = [&](Vec2 p) { return X(p.x) + ',' + Y(p.y); };
+    std::map<Id, std::vector<Along>> alongByLayer;
+    auto curvesOf = [&](Id layer) -> const std::vector<Along>& {
+        auto it = alongByLayer.find(layer);
+        if (it == alongByLayer.end()) {
+            it = alongByLayer.emplace(layer, curvesAlong(s, layer)).first;
+        }
+        return it->second;
+    };
 
     std::ostringstream out;
     const std::string unit = o.canvas ? "" : "mm";
@@ -254,10 +477,12 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
     }
     std::string defs;
     int gradients = 0;
+    std::map<std::string, std::string> written;  // a definition (without its id) -> its id
     // A gradient's definition, in drawing units (userSpaceOnUse: it doesn't depend on how SVG
-    // would measure the shape's box); returns the paint that refers to it.
+    // would measure the shape's box); returns the paint that refers to it. The same gradient
+    // used again (a fill and its outline's strokes) is written once.
     auto gradientPaint = [&](const gradient::Placed& p) {
-        const std::string id = "gradient" + std::to_string(++gradients);
+        const std::string id = "gradient" + std::to_string(gradients + 1);
         std::string d;
         if (p.kind == GradientKind::Linear) {
             d = "    <linearGradient id=\"" + id + "\" gradientUnits=\"userSpaceOnUse\" x1=\"" + X(p.start.x) + "\" y1=\""
@@ -292,6 +517,13 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
             d += "/>\n";
         }
         d += p.kind == GradientKind::Linear ? "    </linearGradient>\n" : "    </radialGradient>\n";
+        std::string key = d;
+        key.replace(key.find(id), id.size(), "");
+        if (auto it = written.find(key); it != written.end()) {
+            return "url(#" + it->second + ")";
+        }
+        ++gradients;
+        written.emplace(std::move(key), id);
         defs += d;
         return "url(#" + id + ")";
     };
@@ -420,7 +652,12 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
                     continue;
                 }
                 std::string d;
+                const std::vector<Along>& along = curvesOf(g.layer->id);
                 auto loop = [&](const std::vector<Vec2>& pts) {
+                    if (const std::string exact = exactLoop(pts, along, xy); !exact.empty()) {
+                        d += exact + ' ';
+                        return;
+                    }
                     for (size_t i = 0; i < pts.size(); ++i) {
                         d += (i == 0 ? "M" : "L") + X(pts[i].x) + ',' + Y(pts[i].y) + ' ';
                     }
@@ -443,10 +680,27 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
             for (const TextArea& t : g.texts) {
                 std::string d;
                 for (const auto& contour : t.contours) {
-                    for (size_t i = 0; i < contour.size(); ++i) {
-                        d += (i == 0 ? "M" : "L") + X(contour[i].x) + ',' + Y(contour[i].y) + ' ';
+                    if (contour.points.empty()) {
+                        continue;
                     }
-                    d += "Z ";
+                    auto at = [&](size_t i) { return X(contour.points[i].x) + ',' + Y(contour.points[i].y); };
+                    d += "M" + at(0);
+                    size_t i = 1;
+                    for (char op : contour.ops) {
+                        const size_t n = op == 'C' ? 3 : 1;
+                        if (i + n > contour.points.size()) {
+                            break;
+                        }
+                        Point q;
+                        if (op == 'C' && quadraticOf(contour.points[i - 1], contour.points[i], contour.points[i + 1], contour.points[i + 2], q)) {
+                            d += " Q" + X(q.x) + ',' + Y(q.y) + ' ' + at(i + 2);  // (a point shorter)
+                        }
+                        else {
+                            d += op == 'C' ? " C" + at(i) + ' ' + at(i + 1) + ' ' + at(i + 2) : " L" + at(i);
+                        }
+                        i += n;
+                    }
+                    d += " Z ";
                 }
                 if (d.empty()) {
                     continue;
@@ -650,7 +904,9 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
             continue;
         }
         const int color = t.hasColor && o.styles ? nearestAci(t.gradient.active() ? t.gradient.average() : t.color) : 256;
-        for (const auto& contour : t.shape) {
+        // (R12 has no curves: the letters' as polylines, to within 5 microns, plenty for CAM)
+        const auto polys = t.letters.empty() ? t.shape : flattenLetters(t.letters, std::max(0.005, letterTolerance(t.height)));
+        for (const auto& contour : polys) {
             TextOutline out{color, {}};
             for (const Point& p : contour) {
                 out.points.push_back(textToWorld(s.point(t.anchor), t.angle, p));
@@ -807,8 +1063,20 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
             w.real(31, 0.0);
         }
         else if (s.isElliptic(item.curve) || e.kind() == EntityKind::Spline) {
-            // R12 has no ellipses or splines: a fine polyline (a tenth of a degree's worth).
-            const std::vector<Vec2> pts = curve::pathOf(s, item.curve).polyline(90);
+            // R12 has no ellipses or splines: a polyline within 2 microns of the curve (a spline's
+            // pieces split as finely as their bends need, not all alike).
+            const curve::Path path = curve::pathOf(s, item.curve);
+            std::vector<Vec2> pts;
+            if (path.kind() == curve::Path::Kind::Spline) {
+                const std::vector<curve::Bezier> pieces = path.beziers();
+                pts.push_back(pieces.empty() ? path.at(0) : pieces.front().p[0]);
+                for (const curve::Bezier& b : pieces) {
+                    flattenBezier(b, 0.002, pts);
+                }
+            }
+            else {
+                pts = path.polyline(90);
+            }
             common("POLYLINE");
             w.pair(66, 1);  // vertices follow
             w.real(10, 0.0);

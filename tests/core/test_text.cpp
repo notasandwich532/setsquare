@@ -107,3 +107,55 @@ TEST_CASE("Texts are saved with their shape, and exported as filled outlines", "
     CHECK(dxf.find("POLYLINE") != std::string::npos);
     CHECK(dxf.find("TEXT") != std::string::npos);
 }
+
+TEST_CASE("Letters are kept, saved and exported as the font's curves; quadratics take a point less", "[text][export]")
+{
+    Sketch s;
+    const Id p = s.addPoint(0, 0);
+    Text t = square(p);
+    // A bowl: a line, then a cubic that's really a quadratic (control at (5, 8)) to (0, 0.5)
+    // (a line back to the start closes it); and a true cubic.
+    TextContour c;
+    c.points = {{0, 0}, {10, 0}, {10 + 2.0 / 3 * (5 - 10), 2.0 / 3 * 8}, {2.0 / 3 * 5, 0.5 + 2.0 / 3 * (8 - 0.5)}, {0, 0.5}};
+    c.ops = "LC";
+    TextContour wavy;
+    wavy.points = {{20, 0}, {21, 3}, {24, -3}, {25, 0}, {22, 4}};
+    wavy.ops = "CL";
+    t.letters = {c, wavy};
+    t.shape = flattenLetters(t.letters, letterTolerance(t.height));
+    REQUIRE(t.shape.size() == 2);
+    CHECK(t.shape[0].size() > 6);  // the curve, flattened
+    const Id id = s.addText(t);
+
+    const std::string json = toJson(s);
+    CHECK(json.find(" Q ") != std::string::npos);
+    CHECK(json.find(" C ") != std::string::npos);
+    CHECK(json.find("\"shape\"") == std::string::npos);  // (just the curves are saved)
+    const Sketch back = fromJson(json);
+    const Text& r = back.text(id);
+    REQUIRE(r.letters.size() == 2);
+    CHECK(r.letters[0].ops == "LC");
+    CHECK(r.letters[1].ops == "CL");
+    for (size_t k = 0; k < 2; ++k) {
+        REQUIRE(r.letters[k].points.size() == t.letters[k].points.size());
+        for (size_t i = 0; i < r.letters[k].points.size(); ++i) {
+            CHECK(r.letters[k].points[i].x == Approx(t.letters[k].points[i].x).margin(1e-3));
+            CHECK(r.letters[k].points[i].y == Approx(t.letters[k].points[i].y).margin(1e-3));
+        }
+    }
+    CHECK(r.shape.size() == 2);  // (flattened again on loading)
+
+    const std::string svg = exporter::toSvg(s, {});
+    CHECK(svg.find(" Q") != std::string::npos);
+    CHECK(svg.find(" C") != std::string::npos);
+
+    // Files from before keep their letters (as points, joined by lines).
+    std::string old = json;
+    const size_t at = old.find("\"letters\"");
+    const size_t end = old.find('"', old.find('"', at + 10) + 1);
+    old.replace(at, end - at + 1, "\"shape\":[[0,0,2,0,2,10,0,10]]");
+    const Sketch before = fromJson(old);
+    REQUIRE(before.text(id).letters.size() == 1);
+    CHECK(before.text(id).letters[0].ops == "LLL");
+    CHECK(before.text(id).shape[0].size() == 4);
+}
