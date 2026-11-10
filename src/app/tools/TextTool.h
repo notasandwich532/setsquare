@@ -66,6 +66,8 @@ private:
     QComboBox* m_valign = nullptr;
     QCheckBox* m_flipH = nullptr;
     QCheckBox* m_flipV = nullptr;
+    QCheckBox* m_wrap = nullptr;      // (a box: lines broken to fit its width)
+    QComboBox* m_boxHeight = nullptr; // (wrapping: fixed, or grows to fit)
     QComboBox* m_outline = nullptr;
     QDoubleSpinBox* m_thickness = nullptr;
 

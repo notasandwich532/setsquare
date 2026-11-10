@@ -1,6 +1,7 @@
 #include "TextShapes.h"
 
 #include <core/Geometry.h>
+#include <core/Solver.h>
 
 #include <QDir>
 #include <QFileInfo>
@@ -712,12 +713,48 @@ QPainterPath thicken(const QPainterPath& shape, double width)
 
 namespace
 {
+// The text's lines: as typed, or (`width` > 0, font pixels) each broken between words to fit that
+// wide (a word wider than that on its own broken between letters).
+QStringList linesOf(const core::Text& t, const QFontMetricsF& fm, double width)
+{
+    const QStringList paragraphs = QString::fromStdString(t.text).split(QLatin1Char('\n'));
+    if (!(width > 0)) {
+        return paragraphs;
+    }
+    QStringList out;
+    for (const QString& paragraph : paragraphs) {
+        QString line;
+        for (const QString& word : paragraph.split(QLatin1Char(' '))) {
+            const QString joined = line.isEmpty() ? word : line + QLatin1Char(' ') + word;
+            if (fm.horizontalAdvance(joined) <= width || (line.isEmpty() && word.isEmpty())) {
+                line = joined;
+                continue;
+            }
+            if (!line.isEmpty()) {
+                out << line;
+            }
+            // The word on a line of its own (in pieces, if it's too wide even so).
+            line.clear();
+            for (const QChar c : word) {
+                if (!line.isEmpty() && fm.horizontalAdvance(line + c) > width) {
+                    out << line;
+                    line.clear();
+                }
+                line += c;
+            }
+        }
+        out << line;
+    }
+    return out;
+}
+
 // The letters laid out in lines (font pixels, y down, the anchor at 0, 0): each line aligned on
-// its own, the block placed vertically on the anchor, then mirrored in place if asked.
-QPainterPath layoutLines(const core::Text& t, const QFont& font, double capHeight)
+// its own, the block placed vertically on the anchor, then mirrored in place if asked. Wrapped to
+// `wrapWidth` (font pixels) if that's more than 0.
+QPainterPath layoutLines(const core::Text& t, const QFont& font, double capHeight, double wrapWidth = 0)
 {
     const QFontMetricsF fm(font);
-    const QStringList lines = QString::fromStdString(t.text).split(QLatin1Char('\n'));
+    const QStringList lines = linesOf(t, fm, wrapWidth);
     QPainterPath path;
     path.setFillRule(Qt::WindingFill);
     double left = 0, right = 0;
@@ -932,7 +969,7 @@ QPainterPath layoutInBox(const core::Text& t, const core::Sketch& s, const QFont
     if (placed.valign == core::TextVAlign::Baseline) {
         placed.valign = core::TextVAlign::Bottom;
     }
-    QPainterPath path = layoutLines(placed, font, capHeight);
+    QPainterPath path = layoutLines(placed, font, capHeight, t.wrap ? box.width / mmPerPixel : 0.0);
     const double x = t.align == core::TextAlign::Left ? 0.0 : t.align == core::TextAlign::Center ? box.width / 2 : box.width;
     const double y = placed.valign == core::TextVAlign::Top ? box.height
         : placed.valign == core::TextVAlign::Middle         ? box.height / 2
@@ -962,25 +999,53 @@ std::vector<std::vector<core::Point>> make(const core::Text& t, const core::Sket
     return core::flattenLetters(makeLetters(t, sketch), core::letterTolerance(t.height));
 }
 
+namespace
+{
+// A text's font at the size letters are made at, its capitals' height there, and the scale to mm.
+struct FontSetup
+{
+    QFont font;
+    double capHeight = 0;
+    double mmPerPixel = 0;
+};
+FontSetup fontFor(const core::Text& t)
+{
+    FontSetup f;
+    f.font = QFont(QString::fromStdString(t.font));
+    f.font.setPixelSize(static_cast<int>(kPixelSize));
+    f.font.setBold(t.bold);
+    f.font.setItalic(t.italic);
+    f.font.setKerning(true);
+    if (t.spacing != 0.0) {
+        f.font.setLetterSpacing(QFont::AbsoluteSpacing, t.spacing / 100.0 * kPixelSize);
+    }
+    f.capHeight = QFontMetricsF(f.font).capHeight();
+    if (!(f.capHeight > 0)) {
+        f.capHeight = QFontMetricsF(f.font).ascent() * 0.7;
+    }
+    f.mmPerPixel = t.height / f.capHeight;
+    return f;
+}
+}  // namespace
+
+double wrappedHeight(const core::Text& t, double width)
+{
+    // From the top of the first line's capitals to the bottom of the last line's descenders.
+    const FontSetup f = fontFor(t);
+    const QFontMetricsF fm(f.font);
+    const QStringList lines = linesOf(t, fm, t.wrap ? width / f.mmPerPixel : 0.0);
+    return (f.capHeight + double(lines.size() - 1) * fm.lineSpacing() + fm.descent()) * f.mmPerPixel;
+}
+
 std::vector<core::TextContour> makeLetters(const core::Text& t, const core::Sketch* sketch)
 {
     if (t.text.empty()) {
         return {};
     }
-    QFont font(QString::fromStdString(t.font));
-    font.setPixelSize(static_cast<int>(kPixelSize));
-    font.setBold(t.bold);
-    font.setItalic(t.italic);
-    font.setKerning(true);
-    if (t.spacing != 0.0) {
-        font.setLetterSpacing(QFont::AbsoluteSpacing, t.spacing / 100.0 * kPixelSize);
-    }
-
-    double capHeight = QFontMetricsF(font).capHeight();
-    if (!(capHeight > 0)) {
-        capHeight = QFontMetricsF(font).ascent() * 0.7;
-    }
-    const double mmPerPixel = t.height / capHeight;
+    const FontSetup setup = fontFor(t);
+    const QFont& font = setup.font;
+    const double capHeight = setup.capHeight;
+    const double mmPerPixel = setup.mmPerPixel;
 
     QPainterPath path = t.path != core::kNoId && sketch ? layoutAlongPath(t, *sketch, font, capHeight, mmPerPixel)
         : t.inBox() && sketch                           ? layoutInBox(t, *sketch, font, capHeight, mmPerPixel)
@@ -1076,6 +1141,76 @@ void update(core::Text& text, const core::Sketch* sketch)
     text.letters = makeLetters(text, sketch);
     text.shape = core::flattenLetters(text.letters, core::letterTolerance(text.height));
     text.layoutKey = sketch ? linkKey(*sketch, text) : 0;
+}
+
+bool fitBox(core::Sketch& sketch, core::Id id, std::string* why)
+{
+    if (!sketch.hasText(id)) {
+        return true;
+    }
+    const core::Text& t = sketch.text(id);
+    if (!t.inBox() || !t.wrap || !t.grow) {
+        return true;
+    }
+    const Box box = boxOf(sketch, t);
+    const double need = wrappedHeight(t, box.width);
+    const double change = need - box.height;
+    if (std::abs(change) < 1e-7) {
+        return true;
+    }
+    // Which side moves: away from where the text's aligned (both halfway for the middle).
+    const bool top = t.valign == core::TextVAlign::Top;
+    const bool middle = t.valign == core::TextVAlign::Middle;
+    const double a = box.angle * std::numbers::pi / 180.0;
+    const core::Vec2 up{-std::sin(a), std::cos(a)};
+    const double bottomBy = top ? -change : middle ? -change / 2 : 0.0;
+    const double topBy = top ? 0.0 : middle ? change / 2 : change;
+    const core::Point anchor = sketch.point(t.anchor);
+    const std::vector<core::Id> corners = core::textPoints(sketch, t);  // (the anchor and the box's corners)
+
+    core::Sketch moved = sketch;
+    bool ok = false;
+    {
+        core::Solver solver(moved, moved.layerOf(t.anchor));
+        solver.beginDrag(corners);  // (all of them: those not to move, held where they are)
+        ok = solver.dragMap([&](core::Vec2 p) {
+            const double height = (p.x - anchor.x) * up.x + (p.y - anchor.y) * up.y;
+            const double by = height < box.height / 2 ? bottomBy : topBy;
+            return core::Vec2{p.x + up.x * by, p.y + up.y * by};
+        });
+        if (ok) {
+            solver.writeBack(moved);
+        }
+    }
+    ok = ok && std::abs(boxOf(moved, moved.text(id)).height - need) < 1e-6;
+    if (!ok) {
+        if (why) {
+            const char* side = top ? "bottom side" : middle ? "top and bottom sides" : "top side";
+            *why = std::string("the text box's ") + side
+                + " can't move to fit the text: something holds it (a dimension, a fixed point, ...)";
+        }
+        return false;
+    }
+    sketch = std::move(moved);
+    return true;
+}
+
+bool fitBoxes(core::Sketch& sketch)
+{
+    std::vector<core::Id> ids;
+    for (const auto& [id, t] : sketch.texts()) {
+        if (t.inBox() && t.wrap && t.grow) {
+            ids.push_back(id);
+        }
+    }
+    bool changed = false;
+    for (core::Id id : ids) {
+        const Box before = boxOf(sketch, sketch.text(id));
+        if (fitBox(sketch, id) && std::abs(boxOf(sketch, sketch.text(id)).height - before.height) > 1e-9) {
+            changed = true;
+        }
+    }
+    return changed;
 }
 
 void refreshPathTexts(core::Sketch& sketch)

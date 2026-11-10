@@ -1,4 +1,4 @@
-#include "TextTool.h"
+﻿#include "TextTool.h"
 
 #include "../CommandPanel.h"
 #include "../Document.h"
@@ -102,7 +102,7 @@ void TextTool::buildPanel()
     m_height->setToolTip(QObject::tr("How tall the capital letters are"));
     m_spacing = panel()->addNumber(QObject::tr("Character spacing"), "spacing", t.spacing, -100, 1000, QStringLiteral(" %"));
     m_spacing->setToolTip(QObject::tr("Extra space between letters, as a share of the font size"));
-    m_angle = panel()->addNumber(QObject::tr("Angle"), "angle", t.angle, -360, 360, QStringLiteral(" °"));
+    m_angle = panel()->addNumber(QObject::tr("Angle"), "angle", t.angle, -360, 360, QStringLiteral(" Â°"));
     m_align = panel()->addChoice(QObject::tr("Alignment"), "align",
                                  {QObject::tr("Left"), QObject::tr("Centre"), QObject::tr("Right")},
                                  static_cast<int>(t.align));
@@ -110,6 +110,12 @@ void TextTool::buildPanel()
     fillVertical(m_valign, kind() == Kind::Box, t.valign);
     m_flipH = panel()->addCheck(QObject::tr("Flip horizontally"), "flipH", t.flipH);
     m_flipV = panel()->addCheck(QObject::tr("Flip vertically"), "flipV", t.flipV);
+    m_wrap = panel()->addCheck(QObject::tr("Wrap text"), "wrap", t.wrap);
+    m_wrap->setToolTip(QObject::tr("Break lines between words to fit the box's width"));
+    m_boxHeight = panel()->addChoice(QObject::tr("Box height"), "boxHeight",
+                                     {QObject::tr("Fixed"), QObject::tr("Fits the text")}, t.grow ? 1 : 0);
+    m_boxHeight->setToolTip(QObject::tr("Fits the text: the box is made as tall as the wrapped text (growing or shrinking), its side away from "
+                                        "where the text is aligned moving (refused if that side can't move)"));
     m_outline = panel()->addChoice(QObject::tr("Outline"), "outline",
                                    {QObject::tr("As designed"), QObject::tr("Merged (no overlaps)"),
                                     QObject::tr("Silhouette (outside only)")},
@@ -168,6 +174,8 @@ core::Text TextTool::settings() const
     t.valign = static_cast<core::TextVAlign>(m_valign->currentData().toInt());
     t.flipH = m_flipH->isChecked();
     t.flipV = m_flipV->isChecked();
+    t.wrap = kind() == Kind::Box && m_wrap->isChecked();
+    t.grow = t.wrap && m_boxHeight->currentIndex() == 1;
     t.outline = static_cast<core::TextOutline>(m_outline->currentIndex());
     t.minThickness = m_thickness->value();
     if (kind() == Kind::Path) {
@@ -291,6 +299,9 @@ void TextTool::changed()
     panel()->setRowVisible(pickButton(m_path)->parentWidget(), k == Kind::Path);
     panel()->setRowVisible(pickButton(m_position)->parentWidget(), k == Kind::Point);
     panel()->setRowVisible(m_angle, k == Kind::Point);
+    panel()->setRowVisible(m_wrap, k == Kind::Box);
+    panel()->setRowVisible(m_boxHeight, k == Kind::Box);
+    m_boxHeight->setEnabled(m_wrap->isChecked());
     // The vertical choices for the kind (a box has no baseline to sit on).
     const bool boxChoices = m_valign->findData(int(core::TextVAlign::Baseline)) < 0;
     if (boxChoices != (k == Kind::Box)) {
@@ -366,7 +377,7 @@ void TextTool::paintPreview(QPainter& painter)
     key += t.text + '\n' + t.font + '\n' + std::to_string(t.height) + (t.bold ? "b" : "") + (t.italic ? "i" : "")
         + std::to_string(static_cast<int>(t.outline)) + ':' + std::to_string(t.minThickness) + ':'
         + std::to_string(t.spacing) + ':' + std::to_string(static_cast<int>(t.align))
-        + std::to_string(static_cast<int>(t.valign)) + (t.flipH ? "h" : "") + (t.flipV ? "v" : "") + ':'
+        + std::to_string(static_cast<int>(t.valign)) + (t.flipH ? "h" : "") + (t.flipV ? "v" : "") + (t.wrap ? "w" : "") + ':'
         + std::to_string(t.path) + ':' + std::to_string(t.pathMore.size()) + ':' + std::to_string(static_cast<int>(kind()));
     if (key != m_shapeKey) {
         m_shapeKey = key;

@@ -347,6 +347,11 @@ struct Text
     // it changes.
     Id boxSide = kNoId;
     Id boxCorner = kNoId;
+    // In a box: lines broken between words to fit its width (`wrap`), and with that, the box made
+    // as tall as the text (`grow`: the side away from where it's aligned moves; both halfway for
+    // the middle).
+    bool wrap = false;
+    bool grow = false;
     Id sublayer = kNoId;
     bool inBox() const { return boxSide != kNoId && boxCorner != kNoId; }
     std::size_t layoutKey = 0;  // (not saved) what the shape was last made from, to skip remaking

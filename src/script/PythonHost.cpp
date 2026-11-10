@@ -1271,6 +1271,10 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
         .def_property_readonly("valign", [textOf](const TextH& t) { return std::string(core::toString(textOf(t.id).valign)); })
         .def_property_readonly("flip_h", [textOf](const TextH& t) { return textOf(t.id).flipH; })
         .def_property_readonly("flip_v", [textOf](const TextH& t) { return textOf(t.id).flipV; })
+        .def_property_readonly("wrap", [textOf](const TextH& t) { return textOf(t.id).wrap; },
+                               "In a box: lines broken between words to fit its width.")
+        .def_property_readonly("grow", [textOf](const TextH& t) { return textOf(t.id).grow; },
+                               "In a box, wrapping: the box as tall as the text.")
         .def_property_readonly("box", [textOf](const TextH& t) -> py::object {
             const core::Text& text = textOf(t.id);
             if (!text.inBox()) {
@@ -1827,11 +1831,19 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
         .def("text", [](const SketchH&, const std::string& text, py::object at, double height, py::object font,
                         double angle, bool bold, bool italic, const std::string& outline, double minThickness,
                         py::object color, double spacing, const std::string& align, py::object valign,
-                        bool flipH, bool flipV, py::object path, py::object box) {
+                        bool flipH, bool flipV, py::object path, py::object box, bool wrapLines, bool grow) {
             core::Text t;
             t.spacing = spacing;
             t.flipH = flipH;
             t.flipV = flipV;
+            if ((wrapLines || grow) && box.is_none()) {
+                throw py::value_error("wrap= and grow= are for text in a box (box=)");
+            }
+            if (grow && !wrapLines) {
+                throw py::value_error("grow=True needs wrap=True (the box grows to fit the wrapped lines)");
+            }
+            t.wrap = wrapLines;
+            t.grow = grow;
             const std::string vertical = !valign.is_none() ? valign.cast<std::string>() : box.is_none() ? "baseline" : "top";
             if (!core::textAlignFromString(align, t.align) || !core::textVAlignFromString(vertical, t.valign)) {
                 throw py::value_error("align: 'left', 'center' or 'right'; valign: 'baseline', 'top', 'middle' or 'bottom'");
@@ -1903,7 +1915,7 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
            py::arg("outline") = "as_designed", py::arg("min_thickness") = 0.0, py::arg("color") = py::none(),
            py::arg("spacing") = 0.0, py::arg("align") = "left", py::arg("valign") = py::none(),
            py::arg("flip_h") = false, py::arg("flip_v") = false, py::arg("path") = py::none(),
-           py::arg("box") = py::none(),
+           py::arg("box") = py::none(), py::arg("wrap") = false, py::arg("grow") = false,
            "Text with its baseline starting at `at` (a point, or (x, y) for a new one). height: capital letters, "
            "mm. outline: 'as_designed', 'merged' (overlaps joined) or 'silhouette' (outside edge only). "
            "min_thickness: thicken any part narrower than this (mm). color: fill it in the drawing. Lines split "
@@ -1912,11 +1924,14 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
            "align: against its left/centre/right, valign: top (the default)/middle/bottom). path=curve: set along a "
            "curve instead (any: line, arc, circle, ellipse, spline), or path=[curves] along a chain of them joined "
            "end to end (align: start/middle/end of it; valign: standing on it, centred, or hanging below; flip_h: "
-           "the other way round).")
+           "the other way round). In a box: wrap=True breaks lines between words to fit its width; grow=True (with "
+           "wrap) makes the box as tall as the text, moving the side away from where it's aligned (ValueError if "
+           "that side can't move).")
         .def("edit_text", [](const SketchH&, py::handle text, py::object str, py::object height, py::object font,
                              py::object angle, py::object bold, py::object italic, py::object outline,
                              py::object minThickness, py::object color, py::object spacing, py::object align,
-                             py::object valign, py::object flipH, py::object flipV) {
+                             py::object valign, py::object flipH, py::object flipV, py::object wrapLines,
+                             py::object grow) {
             const Id id = idOf(text);
             if (!sketch().hasText(id)) {
                 throw py::value_error("not a text");
@@ -1951,6 +1966,21 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
             if (!flipV.is_none()) {
                 t.flipV = flipV.cast<bool>();
             }
+            if (!wrapLines.is_none()) {
+                t.wrap = wrapLines.cast<bool>();
+                if (!t.wrap) {
+                    t.grow = false;  // (it grows with the wrapped lines)
+                }
+            }
+            if (!grow.is_none()) {
+                t.grow = grow.cast<bool>();
+            }
+            if ((t.wrap || t.grow) && !t.inBox()) {
+                throw py::value_error("wrap= and grow= are for text in a box");
+            }
+            if (t.grow && !t.wrap) {
+                throw py::value_error("grow=True needs wrap=True (the box grows to fit the wrapped lines)");
+            }
             editReturningId("Text", [&](Editor& ed) {
                 ed.setText(t);
                 return id;
@@ -1960,6 +1990,7 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
            py::arg("italic") = py::none(), py::arg("outline") = py::none(), py::arg("min_thickness") = py::none(),
            py::arg("color") = py::none(), py::arg("spacing") = py::none(), py::arg("align") = py::none(),
            py::arg("valign") = py::none(), py::arg("flip_h") = py::none(), py::arg("flip_v") = py::none(),
+           py::arg("wrap") = py::none(), py::arg("grow") = py::none(),
            "Change a text's settings (any of them); its letters are remade.")
         .def("import_file", [](const SketchH&, const std::string& path, const std::string& into, bool keepLayers,
                                const std::string& placement, py::object at, const std::string& curves, double pxPerInch,

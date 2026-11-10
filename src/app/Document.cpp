@@ -441,6 +441,10 @@ bool Document::commitChecked(core::Sketch working, QString* error, const std::ve
         return false;
     }
     textshapes::refreshPathTexts(working);
+    if (textshapes::fitBoxes(working)) {
+        result = core::solve(working);
+        textshapes::refreshPathTexts(working);
+    }
     core::regions::refreshFills(working);
     commit(std::move(working));
     m_result = std::move(result);
@@ -712,6 +716,10 @@ void Document::resolve()
 {
     m_result = core::solve(m_sketch);
     textshapes::refreshPathTexts(m_sketch);  // text along a curve follows it
+    if (textshapes::fitBoxes(m_sketch)) {    // boxes that grow with their text (a new width: new lines)
+        m_result = core::solve(m_sketch);
+        textshapes::refreshPathTexts(m_sketch);
+    }
     core::regions::refreshFills(m_sketch);   // fills keep track of their areas as edits go on
 }
 

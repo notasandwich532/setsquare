@@ -655,6 +655,12 @@ QString textArgs(const core::Sketch& sketch, const core::Text& t)
     if (t.flipV) {
         args << QStringLiteral("flip_v=True");
     }
+    if (t.inBox()) {  // (said either way: edit_text keeps what isn't given)
+        args << (t.wrap ? QStringLiteral("wrap=True") : QStringLiteral("wrap=False"));
+        if (t.wrap) {
+            args << (t.grow ? QStringLiteral("grow=True") : QStringLiteral("grow=False"));
+        }
+    }
     return args.join(QStringLiteral(", "));
 }
 }  // namespace
@@ -706,8 +712,22 @@ Id Editor::textBox(core::Text t, Id corner, Id opposite)
     settleGradient(t.gradient, t.color, m_sketch.activeLayer());
     textshapes::update(t, &m_sketch);
     const Id id = m_sketch.addText(t);
+    fitBox(id);
     log(QStringLiteral("%1 = s.text(%2, box=(%3, %4), %5)").arg(name(m_sketch, id), pyString(t.text), a, b, textArgs(m_sketch, t)));
     return id;
+}
+
+void Editor::fitBox(Id text)
+{
+    // A box that grows with its text: made tall enough now, or the edit's refused.
+    if (!m_sketch.hasText(text) || !m_sketch.text(text).wrap || !m_sketch.text(text).grow) {
+        return;
+    }
+    std::string why;
+    if (!textshapes::fitBox(m_sketch, text, &why)) {
+        throw core::SketchError(why);
+    }
+    textshapes::refreshPathTexts(m_sketch);  // (laid out in the box as it is now)
 }
 
 void Editor::setText(core::Text t)
@@ -715,6 +735,7 @@ void Editor::setText(core::Text t)
     settleGradient(t.gradient, t.color, m_sketch.layerOf(t.id));
     textshapes::update(t, &m_sketch);
     m_sketch.setText(t);
+    fitBox(t.id);
     log(QStringLiteral("s.edit_text(%1, text=%2, %3)").arg(name(m_sketch, t.id), pyString(t.text), textArgs(m_sketch, t)));
 }
 

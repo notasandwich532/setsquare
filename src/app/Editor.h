@@ -151,6 +151,9 @@ public:
     // Text in a box: a construction rectangle between two corner points, made here.
     core::Id textBox(core::Text t, core::Id corner, core::Id opposite);
     void setText(core::Text t);  // by t.id: new settings (and shape)
+    // A box text that wraps and grows: its box made tall enough; throws SketchError (so the edit
+    // is refused) if the side that'd move can't.
+    void fitBox(core::Id text);
 
     // Unchecked (inference while drawing); Document::addConstraint is the checked version.
     core::Id constrain(core::ConstraintType type, std::vector<core::Id> refs, double value = 0.0);

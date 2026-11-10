@@ -512,6 +512,12 @@ std::string toJson(const Sketch& sketch, bool compact, const std::vector<std::st
             if (t.flipV) {
                 j["flip_v"] = true;
             }
+            if (t.wrap) {
+                j["wrap"] = true;
+            }
+            if (t.grow) {
+                j["grow"] = true;
+            }
             if (t.path != kNoId) {
                 j["path"] = t.path;
                 if (!t.pathMore.empty()) {
@@ -748,6 +754,8 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
             t.spacing = j.value("spacing", 0.0);
             t.flipH = j.value("flip_h", false);
             t.flipV = j.value("flip_v", false);
+            t.wrap = j.value("wrap", false);
+            t.grow = j.value("grow", false);
             t.path = j.value("path", Id{kNoId});
             t.pathMore = j.value("pathMore", std::vector<Id>{});
             t.sublayer = j.value("sublayer", Id{kNoId});

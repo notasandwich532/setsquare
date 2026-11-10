@@ -15,6 +15,17 @@ std::vector<std::vector<core::Point>> make(const core::Text& text, const core::S
 // The same as the font's lines and curves (core::Text::letters).
 std::vector<core::TextContour> makeLetters(const core::Text& text, const core::Sketch* sketch = nullptr);
 
+// How tall a text is in a box `width` wide (mm): from its first line's capitals to its last
+// line's descenders, its lines wrapped if it wraps.
+double wrappedHeight(const core::Text& text, double width);
+
+// A box text that wraps and grows: its box made as tall as the text, the side away from where
+// it's aligned moved (both halfway for the middle). False (and why) if that side can't move
+// there; the sketch is then as it was.
+bool fitBox(core::Sketch& sketch, core::Id text, std::string* why = nullptr);
+// Every such text's box fitted where it can be; true if any changed.
+bool fitBoxes(core::Sketch& sketch);
+
 // Makes the shape afresh into `text`.
 void update(core::Text& text, const core::Sketch* sketch = nullptr);
 
