@@ -106,6 +106,18 @@ set_target_properties(drawapp PROPERTIES
     MACOSX_BUNDLE ON
 )
 
+# Copies Qt's DLLs and plugins next to drawapp.exe after each build, so it starts on a
+# double-click (and the drawapp-cli next to it can use them too).
+if(WIN32)
+    find_program(WINDEPLOYQT windeployqt HINTS "${QT6_INSTALL_PREFIX}/bin" "$ENV{QT_ROOT_DIR}/bin")
+    if(WINDEPLOYQT)
+        add_custom_command(TARGET drawapp POST_BUILD
+            COMMAND "${WINDEPLOYQT}" --no-translations --no-compiler-runtime --verbose 0 "$<TARGET_FILE:drawapp>"
+            COMMENT "Deploying Qt next to drawapp.exe"
+            VERBATIM)
+    endif()
+endif()
+
 # Remakes icons/app/drawapp.ico from icons/app/drawapp.svg (not built by default):
 #   cmake --build --preset windows-msvc --target make_app_icon
 #   make_app_icon icons/app/drawapp.svg icons/app/drawapp.ico [preview.png]
