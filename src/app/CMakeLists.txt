@@ -107,12 +107,14 @@ set_target_properties(drawapp PROPERTIES
 )
 
 # Copies Qt's DLLs and plugins next to drawapp.exe after each build, so it starts on a
-# double-click (and the drawapp-cli next to it can use them too).
+# double-click. The test programs and drawapp-cli in the same folder then load Qt from there too,
+# so the "offscreen" platform they run headless on is deployed as well.
 if(WIN32)
     find_program(WINDEPLOYQT windeployqt HINTS "${QT6_INSTALL_PREFIX}/bin" "$ENV{QT_ROOT_DIR}/bin")
     if(WINDEPLOYQT)
         add_custom_command(TARGET drawapp POST_BUILD
-            COMMAND "${WINDEPLOYQT}" --no-translations --no-compiler-runtime --verbose 0 "$<TARGET_FILE:drawapp>"
+            COMMAND "${WINDEPLOYQT}" --no-translations --no-compiler-runtime --verbose 0
+                    --include-plugins qoffscreen "$<TARGET_FILE:drawapp>"
             COMMENT "Deploying Qt next to drawapp.exe"
             VERBATIM)
     endif()
