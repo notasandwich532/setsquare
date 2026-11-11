@@ -36,6 +36,14 @@ struct DimensionLayout
     Vec2 label;
 
     Vec2 a, b, dir;  // Linear
+    // Linear, from a point to a line: b is the foot on the (infinite) line; this is the line's
+    // own extent, so its extension line only reaches past the line's end, not along it.
+    bool bOnLine = false;
+    Vec2 lineA, lineB;
+    // Likewise a, when the point is the end of a line parallel to that one (say a corner of an
+    // outline measured to a side of a box inside it).
+    bool aOnLine = false;
+    Vec2 aLineA, aLineB;
 
     Vec2 center;  // Radius, Diameter, Angle
     double radius = 0.0;

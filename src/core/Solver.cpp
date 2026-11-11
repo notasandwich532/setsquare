@@ -444,6 +444,15 @@ struct Solver::Impl
     // (`joint`), their directions there agree; otherwise at a contact point found with them.
     void addTangentCurves(const Sketch& sketch, Id a, Id b, Id joint, int tag);
 
+    // a and b mirror images in `axis`: two points, two lines (ends paired as they lie), two
+    // circles (centres, and equal radii) or two arcs (centres and ends; an arc's ends swap in a
+    // mirror). Each pair of points: their midpoint on the axis, and, as an optional part (tag +
+    // OptionalTagBase: dropped quietly when the rest already says it, e.g. a rectangle's corners
+    // about a vertical line), the two square to it. A point paired with itself is on the axis
+    // (optional likewise).
+    void addSymmetric(const Sketch& sketch, Id a, Id b, Id axis, int tag);
+    void addSymmetricPoints(Id p, Id q, Id axis, int tag);
+
     // A constraint the arcs say already (left out, so it isn't reported as redundant; it still
     // applies once they don't, e.g. when the arc joining them is deleted).
     bool impliedByArcs(const Sketch& sketch, const Constraint& c);
@@ -474,8 +483,21 @@ struct Solver::Impl
         double startX, startY;
         double* x;
         double* y;
+        double* px = nullptr;  // (a dragged point: its own coordinates)
+        double* py = nullptr;
     };
     std::vector<DragTarget> dragTargets;
+    // Some dragged point can still move, as the diagnosis sees it (see dragMap's fallback).
+    bool dragFree = false;
+    // ...but it can't: see Solver::dragLocked.
+    bool dragLocked = false;
+
+    // A drag that the low-priority pull didn't move at all, though the dragged points are free:
+    // at a singular arrangement (say a point that can only be at an ellipse's tip, which pins
+    // it to first order while the ellipse can still grow), the solver's step sees no way to move.
+    // Solving again with the points held where they're dragged to finds the way. Returns whether
+    // it did.
+    bool dragHeld();
 
     // Takes out the constraints the diagnosis finds implied by the others (e.g. a point on a
     // vertical line that's also the end of a vertical line through that line's end). They say
@@ -1257,6 +1279,69 @@ bool Solver::Impl::impliedByArcs(const Sketch& sketch, const Constraint& c)
     return false;
 }
 
+void Solver::Impl::addSymmetricPoints(Id p, Id q, Id axis, int tag)
+{
+    GCS::Line& l = lines.at(axis);
+    if (p == q) {
+        // (optional too: such a point, say a V's apex, is often on the axis already)
+        sys.addConstraintPointOnLine(points.at(p), l, tag + GCS::OptionalTagBase);
+        return;
+    }
+    sys.addConstraintMidpointOnLine(points.at(p), points.at(q), l.p1, l.p2, tag);
+    sys.addConstraintPerpendicular(points.at(p), points.at(q), l, tag + GCS::OptionalTagBase);
+}
+
+void Solver::Impl::addSymmetric(const Sketch& sketch, Id a, Id b, Id axis, int tag)
+{
+    switch (sketch.entity(a).kind()) {
+        case EntityKind::Point: addSymmetricPoints(a, b, axis, tag); break;
+        case EntityKind::Line: {
+            // Pair the ends as they lie: a's first end with whichever of b's is nearer its image.
+            const Line& la = sketch.line(a);
+            const Line& lb = sketch.line(b);
+            const GCS::Line& m = lines.at(axis);
+            auto at = [&](Id id) { return Vec2{*points.at(id).x, *points.at(id).y}; };
+            const Vec2 m1{*m.p1.x, *m.p1.y}, m2{*m.p2.x, *m.p2.y};
+            auto image = [&](Vec2 v) {
+                const Vec2 d{m2.x - m1.x, m2.y - m1.y};
+                const double len2 = d.x * d.x + d.y * d.y;
+                if (len2 < 1e-18) {
+                    return v;
+                }
+                const double t = ((v.x - m1.x) * d.x + (v.y - m1.y) * d.y) / len2;
+                const Vec2 foot{m1.x + t * d.x, m1.y + t * d.y};
+                return Vec2{2 * foot.x - v.x, 2 * foot.y - v.y};
+            };
+            auto gap = [](Vec2 u, Vec2 v) { return std::hypot(u.x - v.x, u.y - v.y); };
+            const Vec2 i1 = image(at(la.p1)), i2 = image(at(la.p2));
+            const bool straight = gap(i1, at(lb.p1)) + gap(i2, at(lb.p2)) <= gap(i1, at(lb.p2)) + gap(i2, at(lb.p1));
+            addSymmetricPoints(la.p1, straight ? lb.p1 : lb.p2, axis, tag);
+            addSymmetricPoints(la.p2, straight ? lb.p2 : lb.p1, axis, tag);
+            break;
+        }
+        case EntityKind::Circle:
+            addSymmetricPoints(sketch.circle(a).center, sketch.circle(b).center, axis, tag);
+            sys.addConstraintEqualRadius(circles.at(a), circles.at(b), tag);
+            break;
+        case EntityKind::Arc: {
+            // Centres and one pair of ends mirrored make the radii equal; the other pair then
+            // only needs its midpoint on the axis.
+            const Arc& aa = std::get<Arc>(sketch.entity(a).geom);
+            const Arc& ab = std::get<Arc>(sketch.entity(b).geom);
+            addSymmetricPoints(aa.center, ab.center, axis, tag);
+            addSymmetricPoints(aa.start, ab.end, axis, tag);
+            if (aa.end == ab.start) {
+                break;  // (meeting on the axis: already said)
+            }
+            const GCS::Line& m = lines.at(axis);
+            GCS::Point m1 = m.p1, m2 = m.p2;
+            sys.addConstraintMidpointOnLine(points.at(aa.end), points.at(ab.start), m1, m2, tag);
+            break;
+        }
+        default: break;
+    }
+}
+
 void Solver::Impl::addConstraint(const Sketch& sketch, const Constraint& c)
 {
     if (impliedByArcs(sketch, c)) {
@@ -1329,7 +1414,17 @@ void Solver::Impl::addConstraint(const Sketch& sketch, const Constraint& c)
             break;
 
         case ConstraintType::Equal:
-            if (kind(0) == EntityKind::Line) {
+            if (r.size() == 3) {
+                // |p a| = |p b|, as two lines' lengths (the constraint keeps the points' params,
+                // not these line structs).
+                GCS::Line pa, pb;
+                pa.p1 = pt(r[0]);
+                pa.p2 = pt(r[1]);
+                pb.p1 = pt(r[0]);
+                pb.p2 = pt(r[2]);
+                sys.addConstraintEqualLength(pa, pb, tag);
+            }
+            else if (kind(0) == EntityKind::Line) {
                 sys.addConstraintEqualLength(ln(r[0]), ln(r[1]), tag);
             }
             else {
@@ -1361,7 +1456,7 @@ void Solver::Impl::addConstraint(const Sketch& sketch, const Constraint& c)
             break;
 
         case ConstraintType::Symmetric:
-            sys.addConstraintP2PSymmetric(pt(r[0]), pt(r[1]), ln(r[2]), tag);
+            addSymmetric(sketch, r[0], r[1], r[2], tag);
             break;
 
         case ConstraintType::Collinear: {
@@ -1981,6 +2076,22 @@ SolveResult Solver::solve()
 
     sys.invalidatedDiagnosis();
     sys.initSolution(GCS::DogLeg);  // also runs diagnosis
+    {
+        // Optional parts the rest already implies (see addSymmetric) go, unreported.
+        GCS::VEC_I redundant;
+        sys.getRedundant(redundant);
+        bool cleared = false;
+        for (int t : redundant) {
+            if (t >= GCS::OptionalTagBase) {
+                sys.clearByTag(t);
+                cleared = true;
+            }
+        }
+        if (cleared) {
+            sys.invalidatedDiagnosis();
+            sys.initSolution(GCS::DogLeg);
+        }
+    }
 
     GCS::SolveStatus status = sys.solve(GCS::DogLeg);
     if (status != GCS::SolveStatus::Success) {
@@ -1998,21 +2109,27 @@ SolveResult Solver::solve()
 
     // (As the diagnosis found them, before any redundant ones are taken out below.)
     GCS::VEC_I tags;
-    auto toIds = [](const GCS::VEC_I& in) {
-        std::vector<Id> out;
+    // An optional part (see addSymmetric) conflicting: its constraint is; redundant: not said.
+    auto toIds = [](const GCS::VEC_I& in, bool optional) {
+        std::set<Id> out;
         for (int t : in) {
-            if (t > 0) {
-                out.push_back(static_cast<Id>(t));
+            if (t >= GCS::OptionalTagBase) {
+                if (optional) {
+                    out.insert(static_cast<Id>(t - GCS::OptionalTagBase));
+                }
+            }
+            else if (t > 0) {
+                out.insert(static_cast<Id>(t));
             }
         }
-        return out;
+        return std::vector<Id>(out.begin(), out.end());
     };
     sys.getConflicting(tags);
-    result.conflicting = toIds(tags);
+    result.conflicting = toIds(tags, true);
     sys.getRedundant(tags);
-    result.redundant = toIds(tags);
+    result.redundant = toIds(tags, false);
     sys.getPartiallyRedundant(tags);
-    result.partiallyRedundant = toIds(tags);
+    result.partiallyRedundant = toIds(tags, false);
     const int dofs = sys.dofsNumber();
 
     if (status != GCS::SolveStatus::Success && !result.redundant.empty() && result.conflicting.empty()) {
@@ -2141,7 +2258,7 @@ void Solver::beginDrag(const std::vector<Id>& pointIds)
         if (std::ranges::find(d->unknowns, p.x) == d->unknowns.end()) {
             continue;  // fixed
         }
-        Impl::DragTarget t{*p.x, *p.y, d->alloc(*p.x), d->alloc(*p.y)};
+        Impl::DragTarget t{*p.x, *p.y, d->alloc(*p.x), d->alloc(*p.y), p.x, p.y};
         GCS::Point target(t.x, t.y);
         d->sys.addConstraintP2PCoincident(p, target, GCS::DefaultTemporaryConstraint);
         d->dragTargets.push_back(t);
@@ -2149,6 +2266,74 @@ void Solver::beginDrag(const std::vector<Id>& pointIds)
     d->sys.invalidatedDiagnosis();
     d->sys.initSolution(GCS::DogLeg);
     d->dragging = true;
+
+    GCS::VEC_pD dependent;
+    d->sys.getDependentParams(dependent);
+    const bool nothingConstrained = d->sys.isEmptyDiagnoseMatrix();
+    d->dragFree = std::ranges::any_of(d->dragTargets, [&](const Impl::DragTarget& t) {
+        return nothingConstrained || std::ranges::find(dependent, t.px) != dependent.end()
+            || std::ranges::find(dependent, t.py) != dependent.end();
+    });
+}
+
+bool Solver::Impl::dragHeld()
+{
+    constexpr int kHeldTag = GCS::OptionalTagBase - 1;  // (no constraint's own)
+    if (!std::ranges::all_of(dragTargets, [](const DragTarget& t) { return t.px != nullptr; })) {
+        return false;
+    }
+    // Without the pull (with it, the solve is the same constrained step that just stalled).
+    sys.clearByTag(GCS::DefaultTemporaryConstraint);
+    // Held at points walked from where they are to the targets: near a singular arrangement a
+    // small move can mean a big change elsewhere (it goes as the square root), which a solve
+    // finds more easily in steps.
+    struct Held
+    {
+        double fromX, fromY;
+        double* x;
+        double* y;
+    };
+    std::vector<Held> held;
+    for (const DragTarget& t : dragTargets) {
+        held.push_back({*t.px, *t.py, alloc(*t.px), alloc(*t.py)});
+        GCS::Point p(t.px, t.py), at(held.back().x, held.back().y);
+        sys.addConstraintP2PCoincident(p, at, kHeldTag);
+    }
+    bool ok = false;
+    for (int steps : {1, 8}) {
+        bool stepped = true;
+        for (int i = 1; i <= steps && stepped; ++i) {
+            const double f = double(i) / steps;
+            for (size_t k = 0; k < held.size(); ++k) {
+                *held[k].x = held[k].fromX + (*dragTargets[k].x - held[k].fromX) * f;
+                *held[k].y = held[k].fromY + (*dragTargets[k].y - held[k].fromY) * f;
+            }
+            sys.initSolution(GCS::DogLeg);  // (from where the last step got to)
+            GCS::SolveStatus status = sys.solve(GCS::DogLeg);
+            if (status != GCS::SolveStatus::Success) {
+                sys.undoSolution();
+                status = sys.solve(GCS::LevenbergMarquardt);
+            }
+            stepped = status == GCS::SolveStatus::Success;
+            if (stepped) {
+                sys.applySolution();
+            }
+            else {
+                sys.undoSolution();
+            }
+            ok = stepped && i == steps;
+        }
+        if (ok) {
+            break;
+        }
+    }
+    sys.clearByTag(kHeldTag);
+    for (const DragTarget& t : dragTargets) {  // (back to the plain drag, from here)
+        GCS::Point p(t.px, t.py), target(t.x, t.y);
+        sys.addConstraintP2PCoincident(p, target, GCS::DefaultTemporaryConstraint);
+    }
+    sys.initSolution(GCS::DogLeg);
+    return ok;
 }
 
 void Solver::beginDragEdge(Id id, double x, double y)
@@ -2192,18 +2377,37 @@ bool Solver::dragMap(const std::function<Vec2(Vec2)>& to)
     if (!d->dragging) {
         return false;
     }
+    // How far the dragged points are from where they're pulled to.
+    auto gap = [&] {
+        double worst = 0;
+        for (const auto& t : d->dragTargets) {
+            if (t.px) {
+                worst = std::max(worst, std::hypot(*t.px - *t.x, *t.py - *t.y));
+            }
+        }
+        return worst;
+    };
     for (auto& t : d->dragTargets) {
         const Vec2 target = to({t.startX, t.startY});
         *t.x = target.x;
         *t.y = target.y;
     }
+    const double before = gap();
     const GCS::SolveStatus status = d->sys.solve(GCS::DogLeg);
     if (status == GCS::SolveStatus::Success) {
         d->sys.applySolution();
+        if (d->dragFree && before > 1e-9 && gap() > before - 1e-9 && !d->dragHeld()) {
+            d->dragLocked = true;  // (didn't move at all, even held: see dragHeld)
+        }
         return true;
     }
     d->sys.undoSolution();
     return false;
+}
+
+bool Solver::dragLocked() const
+{
+    return d->dragLocked;
 }
 
 void Solver::endDrag()
@@ -2213,6 +2417,8 @@ void Solver::endDrag()
     }
     d->sys.clearByTag(GCS::DefaultTemporaryConstraint);
     d->dragTargets.clear();
+    d->dragFree = false;
+    d->dragLocked = false;
     d->dragging = false;
 }
 

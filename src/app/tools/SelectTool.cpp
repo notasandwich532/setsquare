@@ -128,6 +128,7 @@ void SelectTool::move(const ToolEvent& e)
                 return;
             }
             startDrag();
+            m_saidLocked = false;
             if (m_state != State::Dragging) {
                 move(e);  // label drag (or nothing)
                 return;
@@ -264,6 +265,13 @@ void SelectTool::applyPendingDrag()
     if (m_dragPending && m_state == State::Dragging) {
         m_dragPending = false;
         doc().dragTo(m_dragOffset.x, m_dragOffset.y);
+        if (doc().dragLocked() && !m_saidLocked) {
+            m_saidLocked = true;
+            emit view().message(QObject::tr(
+                "This can't move, though it shows as not fully constrained: it's held, but only exactly "
+                "(e.g. a line from an ellipse's centre as long as its major radius, which can only end at the "
+                "tip). Constrain that directly instead (say, the line collinear with the axis)."));
+        }
     }
 }
 

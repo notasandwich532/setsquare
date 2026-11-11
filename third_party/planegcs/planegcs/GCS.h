@@ -103,6 +103,10 @@ enum SpecialTag
     DefaultTemporaryConstraint = -1
 };
 
+// (drawapp) Tags from here up mark optional parts of a constraint (tag - OptionalTagBase is the
+// constraint's own tag): when a set of equations is redundant, these are chosen to go first.
+constexpr int OptionalTagBase = 1 << 29;
+
 class SketcherExport System
 {
     // This is the main class. It holds all constraints and information

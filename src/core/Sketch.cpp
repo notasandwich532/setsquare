@@ -1034,8 +1034,11 @@ void Sketch::normalize(ConstraintType type, std::vector<Id>& refs) const
         case ConstraintType::Distance: putFirst(isPoint); break;
         case ConstraintType::Tangent: putFirst(isLine); break;
         case ConstraintType::Symmetric:
-            // (point, point, line) in any click order.
-            std::ranges::stable_partition(refs, isPoint);
+            // (point, point, line) in any click order; two circles or arcs and a line, likewise.
+            // (Three lines: the last is the line of symmetry.)
+            if (std::ranges::count_if(refs, isLine) == 1) {
+                std::ranges::stable_partition(refs, [&](Id id) { return !isLine(id); });
+            }
             break;
         default: break;
     }
@@ -1122,8 +1125,8 @@ void Sketch::validate(ConstraintType type, const std::vector<Id>& refs, double v
             break;
         }
         case ConstraintType::Equal:
-            if (!(kinds({K::Line, K::Line}) || roundPair())) {
-                fail("expects (line, line) or (circle|arc, circle|arc)");
+            if (!(kinds({K::Line, K::Line}) || roundPair() || kinds({K::Point, K::Point, K::Point}))) {
+                fail("expects (line, line), (circle|arc, circle|arc) or (point, point, point)");
             }
             break;
         case ConstraintType::Ratio:
@@ -1145,8 +1148,9 @@ void Sketch::validate(ConstraintType type, const std::vector<Id>& refs, double v
             }
             break;
         case ConstraintType::Symmetric:
-            if (!kinds({K::Point, K::Point, K::Line})) {
-                fail("expects (point, point, line)");
+            if (!(kinds({K::Point, K::Point, K::Line}) || kinds({K::Line, K::Line, K::Line})
+                  || kinds({K::Circle, K::Circle, K::Line}) || kinds({K::Arc, K::Arc, K::Line}))) {
+                fail("expects two points, two lines, two circles or two arcs, then the line of symmetry");
             }
             break;
         case ConstraintType::Distance:

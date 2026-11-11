@@ -91,6 +91,9 @@ public:
     void beginDrag(const std::vector<core::Id>& points);
     void beginDragEdge(core::Id roundEntity, double x, double y);
     void dragTo(double dx, double dy);
+    // The drag is stuck on something that looks free but is held exactly (see
+    // core::Solver::dragLocked).
+    bool dragLocked() const { return m_dragSolver && m_dragSolver->dragLocked(); }
     // Moves the dragged points rigidly: turned by `angle` degrees about `about`, then shifted.
     // Recorded as s.move(...).
     void dragMove(double dx, double dy, double angle, core::Vec2 about);

@@ -132,3 +132,28 @@ TEST_CASE("canAddConstraint checks without adding", "[sketch]")
     const Id sym = s.addConstraint(CT::Symmetric, {p, l, q});
     CHECK(s.constraint(sym).refs == std::vector<Id>{p, q, l});
 }
+
+TEST_CASE("A point-to-line distance knows the lines its ends are on", "[dimensions]")
+{
+    // A box's top side (the measured line) and an outline's top edge, ending at the point: their
+    // extension lines are drawn only past those lines' ends, not along them.
+    Sketch s;
+    const Id edge = s.addLine(0, 50, 100, 50);
+    const Id corner = s.line(edge).p1;
+    const Id boxTop = s.addLine(60, 30, 90, 30);
+    const Id d = s.addConstraint(CT::Distance, {corner, boxTop}, 20.0);
+    const DimensionLayout L = layoutDimension(s, s.constraint(d));
+    REQUIRE(L.valid);
+    CHECK(L.bOnLine);
+    CHECK(L.lineA.x == Approx(60.0));
+    CHECK(L.lineB.x == Approx(90.0));
+    CHECK(L.aOnLine);
+    CHECK(L.aLineB.x == Approx(100.0));
+
+    // A lone point: no line of its own.
+    const Id lone = s.addPoint(10, 70);
+    const Id d2 = s.addConstraint(CT::Distance, {lone, boxTop}, 40.0);
+    const DimensionLayout L2 = layoutDimension(s, s.constraint(d2));
+    CHECK(L2.bOnLine);
+    CHECK_FALSE(L2.aOnLine);
+}

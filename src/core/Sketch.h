@@ -195,10 +195,12 @@ enum class ConstraintType
     Parallel,       // (line, line)
     Perpendicular,  // (line, line)
     Tangent,        // (line, circle|arc) or (circle|arc, circle|arc)
-    Equal,          // (line, line) lengths, or (circle|arc, circle|arc) radii
+    Equal,          // (line, line) lengths, (circle|arc, circle|arc) radii, or (point, a, b):
+                    // a and b the same distance from the point (an equal-distance chamfer's legs)
     Midpoint,       // (point, line)
     Concentric,     // (circle|arc, circle|arc)
-    Symmetric,      // (point, point, line)
+    Symmetric,      // (a, b, line): a and b mirror images in the line; two points, two lines, two
+                    // circles or two arcs
     Collinear,      // (line, line)
     Group,          // (points..., circles...): held rigidly together (they move and turn as one);
                     // params = {anchor distance, then each further point's place from the

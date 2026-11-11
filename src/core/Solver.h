@@ -52,6 +52,10 @@ public:
     // Like dragTo, but each target is `to` of where it started (e.g. a rotation).
     bool dragMap(const std::function<Vec2(Vec2)>& to);
     void endDrag();
+    // The drag couldn't move points the solve calls free: they're held, but only exactly (a
+    // singular arrangement, e.g. a point on an ellipse as far from its centre as the major
+    // radius, which can only be at the tip), which the diagnosis can't see.
+    bool dragLocked() const;
 
 private:
     struct Impl;

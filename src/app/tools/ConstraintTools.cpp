@@ -101,7 +101,7 @@ QString ConstraintTool::hint() const
             return QObject::tr("Ratio: pick two lines, or two circles/arcs; then type how many times the second the first is");
         case ToolKind::Midpoint: return QObject::tr("Midpoint: pick a point and a line");
         case ToolKind::Concentric: return QObject::tr("Concentric: pick two circles/arcs");
-        case ToolKind::Symmetric: return QObject::tr("Symmetric: pick two points, then the line of symmetry");
+        case ToolKind::Symmetric: return QObject::tr("Symmetric: pick two points (or two lines, circles or arcs), then the line of symmetry");
         case ToolKind::Collinear: return QObject::tr("Collinear: pick two lines");
         case ToolKind::Fix: return QObject::tr("Fix/Unfix: click geometry to lock or unlock it");
         default: return {};

@@ -1669,7 +1669,8 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
         .def("equal", constraintFn(ConstraintType::Equal))
         .def("midpoint", constraintFn(ConstraintType::Midpoint), "(point, line)")
         .def("concentric", constraintFn(ConstraintType::Concentric))
-        .def("symmetric", constraintFn(ConstraintType::Symmetric), "(point, point, line)")
+        .def("symmetric", constraintFn(ConstraintType::Symmetric),
+             "(a, b, line): two points, lines, circles or arcs, mirror images in the line")
         .def("collinear", constraintFn(ConstraintType::Collinear), "(line, line)")
         .def("group", [](const SketchH&, py::handle items) {
             const std::vector<Id> ids = itemsOf(items);

@@ -1920,14 +1920,19 @@ SolveStatus System::solve(Algorithm alg, bool isRedundantsolving)
             restoreReference();
             referenceRestored = true;
         }
+        SolveStatus part = SolveStatus::Success;
         if (subSystems[cid] && subSystemsAux[cid]) {
-            status = solve(subSystems[cid], subSystemsAux[cid], isRedundantsolving);
+            part = solve(subSystems[cid], subSystemsAux[cid], isRedundantsolving);
         }
         else if (subSystems[cid]) {
-            status = solve(subSystems[cid], alg, isRedundantsolving);
+            part = solve(subSystems[cid], alg, isRedundantsolving);
         }
         else if (subSystemsAux[cid]) {
-            status = solve(subSystemsAux[cid], alg, isRedundantsolving);
+            part = solve(subSystemsAux[cid], alg, isRedundantsolving);
+        }
+        // (drawapp) The worst of the parts, not just the last one's.
+        if (static_cast<int>(part) > static_cast<int>(status)) {
+            status = part;
         }
     }
     if (status == SolveStatus::Success) {
@@ -5550,6 +5555,11 @@ void System::identifyConflictingRedundantConstraints(
                 auto tag1 = pair1.first->getTag();
                 auto tag2 = pair2.first->getTag();
 
+                // (drawapp) Optional parts of a constraint are the first to go.
+                const bool optional1 = tag1 >= OptionalTagBase, optional2 = tag2 >= OptionalTagBase;
+                if (optional1 != optional2) {
+                    return optional2;
+                }
                 return (
                     sizeOfSet2 > sizeOfSet1  // (1)
                     || (sizeOfSet2 == sizeOfSet1

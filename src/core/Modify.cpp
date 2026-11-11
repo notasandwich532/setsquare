@@ -1366,6 +1366,9 @@ Corner chamferCurves(Sketch& s, Id a, Vec2 nearA, Id b, Vec2 nearB, ChamferKind 
         s.setConstraintFlip(angle, angleFlipAt(s, keptA.piece, out.joint, inside));
         out.dimensions.push_back(angle);
     }
+    else if (kind == ChamferKind::EqualDistance) {
+        s.addConstraint(CT::Equal, {corner, keptA.point, keptB.point});  // one dimension sets both
+    }
     else {
         out.dimensions.push_back(s.addConstraint(CT::Distance, {corner, keptB.point}, d2));
     }
@@ -1442,6 +1445,9 @@ Corner chamfer(Sketch& s, Id a, Vec2 nearA, Id b, Vec2 nearB, ChamferKind kind, 
         const Id angle = s.addConstraint(CT::Angle, {pieceA, out.joint}, value2);
         s.setConstraintFlip(angle, angleFlipAt(s, pieceA, out.joint, inside));
         out.dimensions.push_back(angle);
+    }
+    else if (kind == ChamferKind::EqualDistance) {
+        s.addConstraint(CT::Equal, {corner, c1, c2});  // one dimension sets both
     }
     else {
         out.dimensions.push_back(s.addConstraint(CT::Distance, {corner, c2}, d2));

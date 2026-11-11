@@ -375,6 +375,22 @@ std::vector<SketchView::Annotation> SketchView::layoutAnnotations() const
             glyphAt((pos(c.refs[0]) + pos(c.refs[1])) / 2 + QPointF(0, -kGlyphOffset), symbol);
             continue;
         }
+        if (c.type == ConstraintType::Equal && c.refs.size() == 3) {
+            // Two equal distances from a point: an "=" beside the middle of each, on the side
+            // away from the other.
+            for (int i = 1; i <= 2; ++i) {
+                const QPointF from = pos(c.refs[0]), to = pos(c.refs[static_cast<size_t>(i)]);
+                const QPointF other = pos(c.refs[static_cast<size_t>(3 - i)]);
+                const QPointF d = to - from;
+                const double len = std::hypot(d.x(), d.y());
+                QPointF normal = len > 1e-9 ? QPointF(-d.y(), d.x()) / len : QPointF(0, -1);
+                if (QPointF::dotProduct(normal, other - from) > 0) {
+                    normal = -normal;
+                }
+                glyphAt((from + to) / 2 + normal * kGlyphOffset, symbol);
+            }
+            continue;
+        }
         if (c.type == ConstraintType::Tangent) {
             // One symbol, at the point where the curves touch.
             if (const auto touch = tangentContact(s, c)) {
@@ -513,12 +529,23 @@ void SketchView::drawDimension(QPainter& painter, const core::DimensionLayout& L
             const QPointF b2 = b + n * dotp(label - b, n);
             // Extension lines, overshooting the dimension line slightly.
             const auto overshoot = [&](QPointF from, QPointF to) { return to + unit(to - from) * 4.0; };
-            if (std::hypot((a2 - a).x(), (a2 - a).y()) > 1.0) {
-                painter.drawLine(a, overshoot(a, a2));
-            }
-            if (std::hypot((b2 - b).x(), (b2 - b).y()) > 1.0) {
-                painter.drawLine(b, overshoot(b, b2));
-            }
+            // From `from` to the dimension line at `to`; or, for an end on a line running that
+            // way, only from the line's nearer end, if the dimension line is past it (not drawn
+            // over the line itself).
+            const auto extension = [&](QPointF from, QPointF to, bool onLine, core::Vec2 l1, core::Vec2 l2) {
+                if (onLine) {
+                    const QPointF la = toScreen(l1), lb = toScreen(l2);
+                    const QPointF d = lb - la;
+                    const double len2 = dotp(d, d);
+                    const double t = len2 > 0 ? std::clamp(dotp(to - la, d) / len2, 0.0, 1.0) : 0.0;
+                    from = la + d * t;
+                }
+                if (std::hypot((to - from).x(), (to - from).y()) > 1.0) {
+                    painter.drawLine(from, overshoot(from, to));
+                }
+            };
+            extension(a, a2, L.aOnLine, L.aLineA, L.aLineB);
+            extension(b, b2, L.bOnLine, L.lineA, L.lineB);
             painter.drawLine(a2, b2);
             // Extend towards a label placed beyond the ends.
             const double t = dotp(label - a2, unit(b2 - a2));

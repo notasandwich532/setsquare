@@ -41,6 +41,7 @@ private:
 
     // Latest drag offset not yet solved; solved once per frame in beforePaint().
     bool m_dragPending = false;
+    bool m_saidLocked = false;  // (this drag: told why it's stuck)
     core::Vec2 m_dragOffset;
     core::Vec2 m_labelStart;  // label position when a label drag began
 };

@@ -314,6 +314,14 @@ TEST_CASE("Chamfer: equal, two distances, distance and angle", "[modify][chamfer
         CHECK(d1 == Approx(5.0).margin(1e-6));
         if (kind == mod::ChamferKind::EqualDistance) {
             CHECK(d2 == Approx(5.0).margin(1e-6));
+            // One dimension, which sets both legs.
+            REQUIRE(c.dimensions.size() == 1);
+            s.setConstraintValue(c.dimensions[0], 7.0);
+            REQUIRE(solve(s).ok);
+            // (from the corner, wherever the rectangle has gone: it's free to move)
+            CHECK(dist(pos(s, cut.p1), pos(s, corner)) == Approx(7.0).margin(1e-6));
+            CHECK(dist(pos(s, cut.p2), pos(s, corner)) == Approx(7.0).margin(1e-6));
+            requireClean(s, 4);
         }
         else if (kind == mod::ChamferKind::TwoDistances) {
             CHECK(d2 == Approx(8.0).margin(1e-6));

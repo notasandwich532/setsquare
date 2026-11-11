@@ -337,6 +337,34 @@ TEST_CASE("Dragging an endpoint of a pinned fixed-length line rotates it", "[sol
     CHECK(s.point(pivot).x == 0.0);
 }
 
+TEST_CASE("Dragging out of a singular arrangement: a point that can only be at an ellipse's tip", "[solver][drag]")
+{
+    // A point on the ellipse as far from the centre as the major radius: it can only be at the
+    // tip, which to first order pins the major radius, but the ellipse can still grow (the point
+    // then slides off the tip). The drag's constrained step saw no way to move; now it does.
+    Sketch s;
+    // (Turned a little: exactly along an axis, the solver can't tell which way q should slide.)
+    const double c = std::cos(0.3), sn = std::sin(0.3);
+    const Id centre = s.addPoint(0, 0);
+    s.entity(centre).fixed = true;
+    const Id major = s.addPoint(20 * c, 20 * sn);
+    const Id minor = s.addPoint(-8 * sn, 8 * c);
+    const Id e = s.addEllipse(centre, major, minor);  // (free to turn about its centre)
+    const Id q = s.addPoint(-20 * c, -20 * sn);
+    s.addConstraint(CT::Coincident, {q, e});
+    s.addConstraint(CT::Distance, {centre, q}, 20.0);
+    REQUIRE(solve(s).ok);
+
+    Solver solver(s);
+    solver.beginDrag({major});
+    REQUIRE(solver.dragTo(3 * c, 3 * sn));  // pull the major radius out to 23
+    solver.endDrag();
+    solver.writeBack(s);
+    CHECK(std::hypot(s.point(major).x, s.point(major).y) == Approx(23.0).margin(1e-5));
+    CHECK(std::hypot(s.point(q).x, s.point(q).y) == Approx(20.0).margin(1e-6));
+    CHECK(solve(s).ok);
+}
+
 TEST_CASE("Dragging a free line moves both endpoints", "[solver][drag]")
 {
     Sketch s;

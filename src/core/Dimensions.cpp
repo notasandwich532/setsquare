@@ -224,7 +224,27 @@ DimensionLayout layoutDimension(const Sketch& s, const Constraint& c)
                 lineEnds(s, c.refs[1], la, lb);
                 L.a = pos(s, c.refs[0]);
                 L.b = foot(L.a, la, lb);
+                L.bOnLine = true;
+                L.lineA = la;
+                L.lineB = lb;
                 const Vec2 lineDir = unit(sub(lb, la));
+                // A line the point ends, running the same way: the point's extension line can
+                // start from that line's end the same way.
+                for (const auto& [id, e] : s.entities()) {
+                    const auto* l = std::get_if<Line>(&e.geom);
+                    if (!l || id == c.refs[1] || (l->p1 != c.refs[0] && l->p2 != c.refs[0])) {
+                        continue;
+                    }
+                    const Vec2 p = pos(s, l->p1), q = pos(s, l->p2);
+                    const Vec2 d = sub(q, p);
+                    const Vec2 u = unit(d);
+                    if (norm(d) > 1e-9 && std::abs(u.x * lineDir.y - u.y * lineDir.x) < 1e-6) {
+                        L.aOnLine = true;
+                        L.aLineA = p;
+                        L.aLineB = q;
+                        break;
+                    }
+                }
                 L.dir = unit(sub(L.b, L.a), Vec2{-lineDir.y, lineDir.x});
             }
             else {
