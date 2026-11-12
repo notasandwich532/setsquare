@@ -55,10 +55,20 @@ def segments(text, colour=RED):
 
 
 def svg():
-    return doc.to_svg(undecorated=False, margin=0)
+    return doc.to_svg(undecorated=False, margin=0, hatch_lines=True)
 
 
-# Cut exactly to the area: 45 degree lines 3.175 apart, every end on the outline.
+# In the SVG, by default: a <pattern> of one tile (45 degree lines 3.175 apart: a 3.175 square,
+# turned), the area filled with it.
+tiled = doc.to_svg(undecorated=False, margin=0)
+m = re.search(r'<pattern id="(hatch\d+)" patternUnits="userSpaceOnUse" x="0" y="0" width="([\d.]+)" height="([\d.]+)"', tiled)
+assert m, tiled[:1500]
+assert isclose(float(m.group(2)), 3.175) and isclose(float(m.group(3)), 3.175), m.groups()
+assert f'fill="url(#{m.group(1)})"' in tiled
+assert tiled.count("<pattern ") == 1
+
+# As lines (hatch_lines=True): cut exactly to the area, 45 degree lines 3.175 apart, every end on
+# the outline.
 segs = segments(svg())
 assert 12 <= len(segs) <= 15, len(segs)  # ((40 + 20) / sqrt 2 / 3.175: about 13)
 for a, b in segs:
@@ -78,19 +88,21 @@ for a, b in segments(svg()):
     for x, y in (a, b):
         assert hypot(x - 20, y - 10) > 6 - 0.05, (x, y)  # (ends on the ring at most: its polygon)
 
-# Dashes and dots, and the DXF: LINEs and POINTs on the HATCH layer.
+# Dashes and dots; and the DXF: a HATCH with the pattern's own lines (on the FILLS layer).
 f.hatch = drawapp.hatch("DOTS", scale=4)
 dots = segments(svg())
 assert dots and all(a == b for a, b in dots), dots[:5]
 dxf = doc.to_dxf().replace("\r\n", "\n")
-assert "\nHATCH\n" in dxf and dxf.count("\nPOINT\n") == len(dots), (dxf.count("\nPOINT\n"), len(dots))
+hatches = dxf.split("\nHATCH\n")[1:]
+assert any("\n2\nDOTS\n" in h and "\n78\n1\n" in h for h in hatches), hatches[:1]
 f.hatch = drawapp.hatch("DASH", scale=2, width=0.3)
 dashed = segments(svg())
 lengths = [hypot(b[0] - a[0], b[1] - a[1]) for a, b in dashed]
 assert all(l <= 6.35 + 1e-3 for l in lengths), lengths  # (dashes 6.35 long; cut short at the edges and hole)
 assert sum(isclose(l, 6.35, abs_tol=1e-3) for l in lengths) > len(lengths) / 2, lengths
 assert 'stroke-width="0.3"' in svg()
-assert doc.to_dxf().replace("\r\n", "\n").count("\nLINE\n") >= len(dashed)
+dxf = doc.to_dxf().replace("\r\n", "\n")
+assert "\n2\nDASH\n" in dxf and "\n49\n6.35\n" in dxf and "\n8\nFILLS\n" in dxf
 
 # It follows the geometry.
 before = len(segments(svg()))
@@ -101,6 +113,7 @@ assert len(segments(svg())) > before
 # Too fine to lay out line by line: filled solid in the exports instead of failing.
 f.hatch = drawapp.hatch("LINE", scale=1e-6)
 assert 'fill="#ff0000"' in svg()
+assert 'fill="#ff0000"' in doc.to_svg(undecorated=False, margin=0)  # (no pattern that fine either)
 
 # --- saved and opened ----------------------------------------------------------------------------
 f.hatch = own

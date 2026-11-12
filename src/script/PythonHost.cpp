@@ -2544,13 +2544,16 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
              "with doc.transaction(): ... groups changes into one undo step")
         .def("to_json", [](const DocumentH&) { return core::toJson(sketch()); })
         .def("export_svg", [](const DocumentH&, const std::string& path, bool fills, bool undecorated,
-                              bool construction, double margin, py::object canvas, bool page) {
+                              bool construction, double margin, py::object canvas, bool page, bool textAsOutlines,
+                              bool hatchLines) {
             core::exporter::SvgOptions o;
             o.fills = fills;
             o.undecorated = undecorated;
             o.construction = construction;
             o.margin = margin;
             o.page = page;
+            o.textAsOutlines = textAsOutlines;
+            o.hatchLines = hatchLines;
             if (!canvas.is_none()) {
                 o.canvas = canvas.cast<std::array<double, 4>>();
             }
@@ -2561,17 +2564,21 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
             }
         }, py::arg("path"), py::arg("fills") = true, py::arg("undecorated") = true, py::arg("construction") = false,
            py::arg("margin") = 2.0, py::arg("canvas") = py::none(), py::arg("page") = true,
+           py::arg("text_as_outlines") = false, py::arg("hatch_lines") = false,
            "Write the drawing as SVG, in millimetres: fills, strokes, and (undecorated=True) curves without a "
-           "stroke in thin black; construction only if asked. With a page set (and page=True), the SVG is the "
-           "page; else fitted round the drawing with `margin`. canvas=(x0, y0, x1, y1) frames a fixed area in "
-           "its own units instead (for icons).")
-        .def("to_svg", [](const DocumentH&, bool fills, bool undecorated, bool construction, double margin, bool page) {
+           "stroke in thin black; construction only if asked; text as text in its font (text_as_outlines=True: "
+           "as its letters' shapes); hatches as <pattern>s (hatch_lines=True: their lines, cut to their areas). With a page set (and page=True), the SVG is the page; else fitted round the "
+           "drawing with `margin`. canvas=(x0, y0, x1, y1) frames a fixed area in its own units instead (for icons).")
+        .def("to_svg", [](const DocumentH&, bool fills, bool undecorated, bool construction, double margin, bool page,
+                          bool textAsOutlines, bool hatchLines) {
             core::exporter::SvgOptions o;
             o.fills = fills;
             o.undecorated = undecorated;
             o.construction = construction;
             o.margin = margin;
             o.page = page;
+            o.textAsOutlines = textAsOutlines;
+            o.hatchLines = hatchLines;
             try {
                 return core::exporter::toSvg(sketch(), o);
             }
@@ -2579,30 +2586,39 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
                 throw py::value_error(e.what());
             }
         }, py::arg("fills") = true, py::arg("undecorated") = true, py::arg("construction") = false,
-           py::arg("margin") = 2.0, py::arg("page") = true, "The SVG export as a string (see export_svg).")
-        .def("export_dxf", [](const DocumentH&, const std::string& path, bool styles, bool construction) {
+           py::arg("margin") = 2.0, py::arg("page") = true, py::arg("text_as_outlines") = false,
+           py::arg("hatch_lines") = false, "The SVG export as a string (see export_svg).")
+        .def("export_dxf", [](const DocumentH&, const std::string& path, bool styles, bool construction, bool fills,
+                              bool textAsOutlines) {
             core::exporter::DxfOptions o;
             o.styles = styles;
             o.construction = construction;
+            o.fills = fills;
+            o.textAsOutlines = textAsOutlines;
             Document::SilentRecording quiet(doc());
             QString error;
             if (!doc().exportDxf(QString::fromStdString(path), o, &error)) {
                 throw std::runtime_error(error.toStdString());
             }
-        }, py::arg("path"), py::arg("styles") = true, py::arg("construction") = false,
-           "Write the geometry as DXF (R12, millimetres): exact lines, circles and arcs; strokes' colours and "
-           "line styles (styles=True); construction on a switched-off layer if asked. No fills.")
-        .def("to_dxf", [](const DocumentH&, bool styles, bool construction) {
+        }, py::arg("path"), py::arg("styles") = true, py::arg("construction") = false, py::arg("fills") = true,
+           py::arg("text_as_outlines") = false,
+           "Write the drawing as DXF (2004, millimetres): every curve exact (lines, circles, arcs, ellipses, "
+           "splines); strokes' colours, line styles and weights (styles=True); fills as hatches; text in its font "
+           "(text_as_outlines=True: its letters' shapes); construction on a switched-off layer if asked.")
+        .def("to_dxf", [](const DocumentH&, bool styles, bool construction, bool fills, bool textAsOutlines) {
             core::exporter::DxfOptions o;
             o.styles = styles;
             o.construction = construction;
+            o.fills = fills;
+            o.textAsOutlines = textAsOutlines;
             try {
                 return core::exporter::toDxf(sketch(), o);
             }
             catch (const core::SketchError& e) {
                 throw py::value_error(e.what());
             }
-        }, py::arg("styles") = true, py::arg("construction") = false, "The DXF export as a string.")
+        }, py::arg("styles") = true, py::arg("construction") = false, py::arg("fills") = true,
+           py::arg("text_as_outlines") = false, "The DXF export as a string.")
         .def_property_readonly("history", [](const DocumentH&) {
             py::list out;
             for (const QString& entry : doc().history()) {

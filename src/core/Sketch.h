@@ -312,6 +312,18 @@ struct TextContour
     std::vector<Point> points;
     std::string ops;
 };
+// A stretch of a text written as text (not as its letters' outlines), for exporting it so other
+// programs can edit it: a line of it, or (along a path) one letter. In text space, as the letters.
+struct TextRun
+{
+    std::string text;
+    Point at;                    // the start of its baseline
+    double angle = 0.0;          // degrees, its baseline's direction (in text space)
+    double size = 0.0;           // the font's size (its em, as CSS's font-size), mm
+    double tracking = 0.0;       // extra space after each letter, mm
+    std::vector<double> glyphs;  // where each letter (code point) starts along it from `at`, mm
+};
+
 // Whether a cubic is really a quadratic (as TrueType letters' curves are), and its one control
 // point if so: written as that, it takes a point less.
 bool quadraticOf(const Point& from, const Point& c1, const Point& c2, const Point& to, Point& control);
@@ -367,6 +379,9 @@ struct Text
     // drawing and picking; made from `letters` again when loaded).
     std::vector<TextContour> letters;
     std::vector<std::vector<Point>> shape;
+    // The same as text, in runs (made with the letters, saved). Empty where it can't be written as
+    // text, only as its outlines: mirrored, its outlines merged or thickened.
+    std::vector<TextRun> runs;
 };
 
 // The points a text sits on: its anchor, and a box text's box corners (all four). Moving them all

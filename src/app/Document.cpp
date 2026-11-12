@@ -848,9 +848,10 @@ bool Document::exportSvg(const QString& path, const core::exporter::SvgOptions& 
     if (!writeExport(path, [&] { return core::exporter::toSvg(m_sketch, o); }, error)) {
         return false;
     }
-    announce(QStringLiteral("doc.export_svg(%1, fills=%2, undecorated=%3, construction=%4, margin=%5)")
+    announce(QStringLiteral("doc.export_svg(%1, fills=%2, undecorated=%3, construction=%4, margin=%5%6%7)")
                  .arg(pyString(path), pyBool(o.fills), pyBool(o.undecorated), pyBool(o.construction),
-                      Editor::number(o.margin)));
+                      Editor::number(o.margin), o.textAsOutlines ? QStringLiteral(", text_as_outlines=True") : QString(),
+                      o.hatchLines ? QStringLiteral(", hatch_lines=True") : QString()));
     return true;
 }
 
@@ -859,8 +860,10 @@ bool Document::exportDxf(const QString& path, const core::exporter::DxfOptions& 
     if (!writeExport(path, [&] { return core::exporter::toDxf(m_sketch, o); }, error)) {
         return false;
     }
-    announce(QStringLiteral("doc.export_dxf(%1, styles=%2, construction=%3)")
-                 .arg(pyString(path), pyBool(o.styles), pyBool(o.construction)));
+    announce(QStringLiteral("doc.export_dxf(%1, styles=%2, construction=%3%4%5)")
+                 .arg(pyString(path), pyBool(o.styles), pyBool(o.construction),
+                      o.fills ? QString() : QStringLiteral(", fills=False"),
+                      o.textAsOutlines ? QStringLiteral(", text_as_outlines=True") : QString()));
     return true;
 }
 

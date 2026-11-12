@@ -118,7 +118,7 @@ s.delete_layer(other)
 # --- strokes ----------------------------------------------------------------------------------------
 s.stroke(sides, color=g, width=1)
 assert sides[0].stroke["gradient"] == g and sides[0].stroke["width"] == 1
-strokes = svg()[svg().index('inkscape:label="Strokes"'):]
+strokes = svg()
 assert len(re.findall(r'stroke="url\(#gradient\d+\)"', strokes)) == 4, strokes[:600]
 s.stroke(sides[0], color="#000000")  # a plain colour replaces it
 assert "gradient" not in sides[0].stroke

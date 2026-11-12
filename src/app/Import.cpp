@@ -3958,20 +3958,62 @@ bool straightCubic(const Segment& s)
     return std::abs(cross(d, sub(s.p[1], s.p[0]))) / l < tol && std::abs(cross(d, sub(s.p[2], s.p[0]))) / l < tol;
 }
 
+// Curves made so far in an import (by what they are: kind and where), for every file layer going
+// into the drawing's one layer: the same curve twice is made once. With who made it.
+struct MadeCurves
+{
+    std::map<std::array<long long, 4>, std::pair<Id, const void*>> byKey;
+    // Whole circles, found by nearness: one written as a <circle> and as arcs round it (a fill's
+    // outline) has its centre a hair apart, as the file rounds the arcs' ends.
+    struct Circle
+    {
+        Vec2 c;
+        double r;
+        Id id;
+        const void* by;
+    };
+    std::vector<Circle> circles;
+};
+
 class Builder
 {
 public:
-    Builder(core::Sketch& sketch, PointPool& pool, Vec2 shift, Curves curves)
+    Builder(core::Sketch& sketch, PointPool& pool, Vec2 shift, Curves curves, MadeCurves& made)
         : m_s(sketch)
         , m_pool(pool)
         , m_shift(shift)
         , m_curves(curves)
+        , m_made(made)
     {}
+
+    // A curve another file layer made (this one's shapes use it too): kept out of this layer's group.
+    bool foreign(Id id) const { return m_foreign.contains(id); }
 
     std::vector<Id> contour(const Contour& c)
     {
         std::vector<Id> out;
         const auto& segs = c.segments;
+        // A closed outline of pieces of one circle or ellipse all the way round (as SVG has to
+        // write one in a path): the whole circle or ellipse.
+        if (c.closed && segs.size() >= 2 && segs.front().kind == Segment::Kind::Ellipse) {
+            const Segment& f = segs.front();
+            // (to a hair: a file's numbers are rounded, and each piece's centre is found from them)
+            const double tol = 2e-4 * std::max({1.0, f.rx, f.ry});
+            const bool round = std::abs(f.rx - f.ry) <= tol;
+            double turn = 0;
+            const bool one = std::ranges::all_of(segs, [&](const Segment& s) {
+                if (s.kind == Segment::Kind::Line && len(sub(s.p[1], s.p[0])) <= tol) {
+                    return true;  // (closing it where it already ends)
+                }
+                turn += s.dt;
+                return s.kind == Segment::Kind::Ellipse && len(sub(s.c, f.c)) <= tol && std::abs(s.rx - f.rx) <= tol
+                    && std::abs(s.ry - f.ry) <= tol && (round || std::abs(std::remainder(s.phi - f.phi, kPi)) <= 1e-9);
+            });
+            if (one && std::abs(std::abs(turn) - 2 * kPi) < 1e-3) {
+                single(ellipse(f.c, f.rx, f.ry, f.phi, f.t0, turn > 0 ? 2 * kPi : -2 * kPi), out);
+                return out;
+            }
+        }
         size_t i = 0;
         while (i < segs.size()) {
             if (segs[i].kind == Segment::Kind::Cubic && m_curves == Curves::Smooth) {
@@ -4036,7 +4078,7 @@ private:
             case Segment::Kind::Line: {
                 const Id a = m_pool.at(at(s.p[0])), b = m_pool.at(at(s.p[1]));
                 if (a != b) {
-                    out.push_back(once({0, std::min(a, b), std::max(a, b), 0}, [&] { return m_s.addLine(a, b); }));
+                    out.push_back(once({0, std::min(where(a), where(b)), std::max(where(a), where(b)), 0}, [&] { return m_s.addLine(a, b); }));
                 }
                 break;
             }
@@ -4049,11 +4091,21 @@ private:
                 Id d = m_pool.at(at(s.p[3]));
                 if (d == a) {
                     d = m_pool.fresh(at(s.p[3]));  // (a loop: its ends are distinct points)
+                    core::Spline sp;
+                    sp.kind = core::SplineKind::Control;
+                    sp.points = {a, m_pool.fresh(at(s.p[1])), m_pool.fresh(at(s.p[2])), d};
+                    out.push_back(m_s.addSpline(sp));
+                    break;
                 }
-                core::Spline sp;
-                sp.kind = core::SplineKind::Control;
-                sp.points = {a, m_pool.fresh(at(s.p[1])), m_pool.fresh(at(s.p[2])), d};
-                out.push_back(m_s.addSpline(sp));
+                // (the same piece run either way: made once)
+                const bool forward = where(a) < where(d);
+                const Vec2 c1 = forward ? s.p[1] : s.p[2], c2 = forward ? s.p[2] : s.p[1];
+                out.push_back(once({3, std::min(where(a), where(d)), std::max(where(a), where(d)), mix({c1.x, c1.y, c2.x, c2.y})}, [&] {
+                    core::Spline sp;
+                    sp.kind = core::SplineKind::Control;
+                    sp.points = {a, m_pool.fresh(at(s.p[1])), m_pool.fresh(at(s.p[2])), d};
+                    return m_s.addSpline(sp);
+                }));
                 break;
             }
             case Segment::Kind::Ellipse: {
@@ -4069,11 +4121,27 @@ private:
                 };
                 if (s.whole()) {
                     if (round) {
-                        out.push_back(once({1, c, 0, std::llround(s.rx * 1e6)}, [&] { return m_s.addCircle(c, s.rx); }));
+                        const Vec2 centre = at(s.c);
+                        const double tol = 2e-4 * std::max(1.0, s.rx);
+                        const auto same = std::ranges::find_if(m_made.circles, [&](const MadeCurves::Circle& k) {
+                            return len(sub(k.c, centre)) <= tol && std::abs(k.r - s.rx) <= tol;
+                        });
+                        if (same != m_made.circles.end()) {
+                            if (same->by != this) {
+                                m_foreign.insert(same->id);
+                            }
+                            out.push_back(same->id);
+                            break;
+                        }
+                        const Id made = m_s.addCircle(c, s.rx);
+                        m_made.circles.push_back({centre, s.rx, made, this});
+                        out.push_back(made);
                     }
                     else {
-                        const auto [major, minor] = axes();
-                        out.push_back(m_s.addEllipse(c, major, minor));
+                        out.push_back(once({4, where(c), 0, mix({s.rx, s.ry, std::remainder(s.phi, kPi)})}, [&] {
+                            const auto [major, minor] = axes();
+                            return m_s.addEllipse(c, major, minor);
+                        }));
                     }
                     break;
                 }
@@ -4088,11 +4156,13 @@ private:
                     std::swap(a, b);  // (ours run counter-clockwise)
                 }
                 if (round) {
-                    out.push_back(once({2, c, a, static_cast<long long>(b)}, [&] { return m_s.addArc(c, a, b); }));
+                    out.push_back(once({2, where(c), where(a), where(b)}, [&] { return m_s.addArc(c, a, b); }));
                 }
                 else {
-                    const auto [major, minor] = axes();
-                    out.push_back(m_s.addEllipseArc(c, major, minor, a, b));
+                    out.push_back(once({5, where(c), static_cast<long long>(static_cast<unsigned long long>(where(a)) * 1000003ULL ^ static_cast<unsigned long long>(where(b))), mix({s.rx, s.ry, std::remainder(s.phi, kPi)})}, [&] {
+                        const auto [major, minor] = axes();
+                        return m_s.addEllipseArc(c, major, minor, a, b);
+                    }));
                 }
                 break;
             }
@@ -4139,22 +4209,45 @@ private:
         out.push_back(m_s.addSpline(sp));
     }
 
-    // A curve the file has twice (a hatch's boundary over its outline, say): made once.
+    // Numbers (to a micron) as one key.
+    static long long mix(std::initializer_list<double> values)
+    {
+        unsigned long long k = 1469598103934665603ULL;
+        for (double v : values) {
+            k = (k ^ static_cast<unsigned long long>(std::llround(v * 1e6))) * 1099511628211ULL;
+        }
+        return static_cast<long long>(k);
+    }
+
+    // A point (as welded) as a key.
+    long long where(Id point) const
+    {
+        const core::Point& p = m_s.point(point);
+        return mix({p.x, p.y});
+    }
+
+    // A curve the file has twice (a hatch's boundary over its outline, a fill's outline under the
+    // lines along it, in this file layer or another): made once. `key` says what it is by its
+    // points' places (see where()).
     template <typename Make>
     Id once(const std::array<long long, 4>& key, const Make& make)
     {
-        const auto [it, fresh] = m_made.try_emplace(key, kNoId);
+        const auto [it, fresh] = m_made.byKey.try_emplace(key, kNoId, this);
         if (fresh) {
-            it->second = make();
+            it->second.first = make();
         }
-        return it->second;
+        else if (it->second.second != this) {
+            m_foreign.insert(it->second.first);
+        }
+        return it->second.first;
     }
 
     core::Sketch& m_s;
     PointPool& m_pool;
     Vec2 m_shift;
     Curves m_curves;
-    std::map<std::array<long long, 4>, Id> m_made;  // lines, circles and arcs made, by their points
+    MadeCurves& m_made;
+    std::set<Id> m_foreign;
 };
 }  // namespace
 
@@ -4269,11 +4362,13 @@ Report build(core::Sketch& sketch, const Drawing& drawing, const Options& o)
     std::set<Id> imported;
     std::vector<Id> sublayersUsed;
     const double size = std::max({bx1 - bx0, by1 - by0, 1.0});
+    MadeCurves madeCurves;  // (all the file's layers go into one of ours: a curve in two is made once)
     for (const std::string& l : fileLayers) {
         sketch.setActiveSublayer(target[l]);
         PointPool pool(sketch, std::max(1e-6, 1e-7 * size));
-        Builder builder(sketch, pool, shift, o.curves);
+        Builder builder(sketch, pool, shift, o.curves, madeCurves);
         std::vector<Id> made;
+        std::set<Id> inMade;  // (a curve the file has twice in this layer: once)
         // Gradients placed so far in this layer: shapes painted alike share one (and its geometry).
         std::vector<std::pair<GradientDef, core::Gradient>> placed;
         auto gradientOf = [&](const GradientDef& d) {
@@ -4329,8 +4424,12 @@ Report build(core::Sketch& sketch, const Drawing& drawing, const Options& o)
                 }
             }
             imported.insert(curves.begin(), curves.end());
-            made.insert(made.end(), curves.begin(), curves.end());
-            report.curves += static_cast<int>(curves.size());
+            for (Id id : curves) {
+                if (!builder.foreign(id) && inMade.insert(id).second) {
+                    made.push_back(id);
+                    ++report.curves;
+                }
+            }
             if (st.fill && !st.construction) {
                 // Where it's filled: its outline (as it was before any clip cut it).
                 Filled f{shape, {}, 1e300, 1e300, -1e300, -1e300};

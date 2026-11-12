@@ -751,17 +751,43 @@ QStringList linesOf(const core::Text& t, const QFontMetricsF& fm, double width)
 // The letters laid out in lines (font pixels, y down, the anchor at 0, 0): each line aligned on
 // its own, the block placed vertically on the anchor, then mirrored in place if asked. Wrapped to
 // `wrapWidth` (font pixels) if that's more than 0.
-QPainterPath layoutLines(const core::Text& t, const QFont& font, double capHeight, double wrapWidth = 0)
+// Each letter's start along `line` (font pixels), by code point.
+std::vector<double> glyphStarts(const QString& line, const QFontMetricsF& fm)
+{
+    std::vector<double> out;
+    for (qsizetype i = 0; i < line.size(); ++i) {
+        if (!line[i].isLowSurrogate()) {
+            out.push_back(fm.horizontalAdvance(line.left(i)));
+        }
+    }
+    return out;
+}
+
+// A run of text in font pixels (y down, baseline start at x, y) as one in text space.
+struct PixelRun
+{
+    QString text;
+    double x = 0, y = 0;
+    double angle = 0;  // degrees, y up
+    std::vector<double> glyphs;
+};
+
+QPainterPath layoutLines(const core::Text& t, const QFont& font, double capHeight, double wrapWidth = 0,
+                         std::vector<PixelRun>* runs = nullptr)
 {
     const QFontMetricsF fm(font);
     const QStringList lines = linesOf(t, fm, wrapWidth);
     QPainterPath path;
     path.setFillRule(Qt::WindingFill);
     double left = 0, right = 0;
+    std::vector<PixelRun> placed;
     for (qsizetype i = 0; i < lines.size(); ++i) {
         const double width = fm.horizontalAdvance(lines[i]);
         const double x = t.align == core::TextAlign::Left ? 0.0 : t.align == core::TextAlign::Center ? -width / 2 : -width;
         path.addText(x, double(i) * fm.lineSpacing(), font, lines[i]);
+        if (!lines[i].trimmed().isEmpty()) {
+            placed.push_back({lines[i], x, double(i) * fm.lineSpacing(), 0.0, glyphStarts(lines[i], fm)});
+        }
         left = i == 0 ? x : std::min(left, x);
         right = i == 0 ? x + width : std::max(right, x + width);
     }
@@ -774,6 +800,12 @@ QPainterPath layoutLines(const core::Text& t, const QFont& font, double capHeigh
         case core::TextVAlign::Bottom: shift = -lastBaseline; break;
     }
     path.translate(0, shift);
+    if (runs && !t.flipH && !t.flipV) {  // (mirrored: only as outlines)
+        for (PixelRun& r : placed) {
+            r.y += shift;
+            runs->push_back(std::move(r));
+        }
+    }
     // Mirrored about the middle of the block (caps' top to last baseline), so it stays put.
     const double cx = (left + right) / 2, cy = shift + (lastBaseline - capHeight) / 2;
     if (t.flipH || t.flipV) {
@@ -790,7 +822,7 @@ QPainterPath layoutLines(const core::Text& t, const QFont& font, double capHeigh
 // The letters set along a curve, one by one (same units, relative to the anchor): each turned
 // to the curve where its middle falls, standing on it (or centred on it, or hanging below).
 QPainterPath layoutAlongPath(const core::Text& t, const core::Sketch& s, const QFont& font, double capHeight,
-                             double mmPerPixel)
+                             double mmPerPixel, std::vector<PixelRun>* runs = nullptr)
 {
     QPainterPath path;
     path.setFillRule(Qt::WindingFill);
@@ -930,6 +962,11 @@ QPainterPath layoutAlongPath(const core::Text& t, const core::Sketch& s, const Q
         const double sign = t.flipV ? -1.0 : 1.0;  // mirrored: hanging the other way
         const QTransform frame(direction.x(), direction.y(), -up.x() * sign, -up.y() * sign, point.x(), point.y());
         path.addPath(frame.map(g));
+        if (runs && !t.flipV && !glyph.trimmed().isEmpty()) {
+            // The letter on its own: its baseline's start, turned with the curve (y up).
+            const QPointF origin = frame.map(QPointF(-advance / 2, -lift));
+            runs->push_back({glyph, origin.x(), origin.y(), std::atan2(-direction.y(), direction.x()) * 180.0 / std::numbers::pi, {0.0}});
+        }
     }
     path.setFillRule(Qt::WindingFill);
     return path;
@@ -960,7 +997,7 @@ Box boxOf(const core::Sketch& s, const core::Text& t)
 // The letters in a box (same units; the anchor, the box's corner, at 0, 0): each line against
 // its left side, middle or right side, the block against its top, middle or bottom.
 QPainterPath layoutInBox(const core::Text& t, const core::Sketch& s, const QFont& font, double capHeight,
-                         double mmPerPixel)
+                         double mmPerPixel, std::vector<PixelRun>* runs = nullptr)
 {
     const Box box = boxOf(s, t);
     core::Text placed = t;
@@ -969,12 +1006,19 @@ QPainterPath layoutInBox(const core::Text& t, const core::Sketch& s, const QFont
     if (placed.valign == core::TextVAlign::Baseline) {
         placed.valign = core::TextVAlign::Bottom;
     }
-    QPainterPath path = layoutLines(placed, font, capHeight, t.wrap ? box.width / mmPerPixel : 0.0);
+    const size_t before = runs ? runs->size() : 0;
+    QPainterPath path = layoutLines(placed, font, capHeight, t.wrap ? box.width / mmPerPixel : 0.0, runs);
     const double x = t.align == core::TextAlign::Left ? 0.0 : t.align == core::TextAlign::Center ? box.width / 2 : box.width;
     const double y = placed.valign == core::TextVAlign::Top ? box.height
         : placed.valign == core::TextVAlign::Middle         ? box.height / 2
                                                             : 0.0;
     path.translate(x / mmPerPixel, -y / mmPerPixel);  // (font pixels, y down)
+    if (runs) {
+        for (size_t i = before; i < runs->size(); ++i) {
+            (*runs)[i].x += x / mmPerPixel;
+            (*runs)[i].y -= y / mmPerPixel;
+        }
+    }
     return path;
 }
 
@@ -1037,8 +1081,11 @@ double wrappedHeight(const core::Text& t, double width)
     return (f.capHeight + double(lines.size() - 1) * fm.lineSpacing() + fm.descent()) * f.mmPerPixel;
 }
 
-std::vector<core::TextContour> makeLetters(const core::Text& t, const core::Sketch* sketch)
+std::vector<core::TextContour> makeLetters(const core::Text& t, const core::Sketch* sketch, std::vector<core::TextRun>* runs)
 {
+    if (runs) {
+        runs->clear();
+    }
     if (t.text.empty()) {
         return {};
     }
@@ -1047,9 +1094,27 @@ std::vector<core::TextContour> makeLetters(const core::Text& t, const core::Sket
     const double capHeight = setup.capHeight;
     const double mmPerPixel = setup.mmPerPixel;
 
-    QPainterPath path = t.path != core::kNoId && sketch ? layoutAlongPath(t, *sketch, font, capHeight, mmPerPixel)
-        : t.inBox() && sketch                           ? layoutInBox(t, *sketch, font, capHeight, mmPerPixel)
-                                                        : layoutLines(t, font, capHeight);
+    // As text too, unless its outlines are made into something the font hasn't got.
+    std::vector<PixelRun> pixelRuns;
+    std::vector<PixelRun>* wanted = runs && t.outline == core::TextOutline::AsDesigned && t.minThickness <= 0.0 ? &pixelRuns : nullptr;
+    QPainterPath path = t.path != core::kNoId && sketch ? layoutAlongPath(t, *sketch, font, capHeight, mmPerPixel, wanted)
+        : t.inBox() && sketch                           ? layoutInBox(t, *sketch, font, capHeight, mmPerPixel, wanted)
+                                                        : layoutLines(t, font, capHeight, 0, wanted);
+    if (runs) {
+        const double tracking = t.spacing / 100.0 * kPixelSize * mmPerPixel;
+        for (const PixelRun& r : pixelRuns) {
+            core::TextRun run;
+            run.text = r.text.toStdString();
+            run.at = {r.x * mmPerPixel, -r.y * mmPerPixel};
+            run.angle = r.angle;
+            run.size = kPixelSize * mmPerPixel;
+            run.tracking = r.glyphs.size() > 1 ? tracking : 0.0;
+            for (double g : r.glyphs) {
+                run.glyphs.push_back(g * mmPerPixel);
+            }
+            runs->push_back(std::move(run));
+        }
+    }
     switch (t.outline) {
         case core::TextOutline::AsDesigned: break;
         case core::TextOutline::Merged: path = path.simplified(); break;
@@ -1138,7 +1203,7 @@ void update(core::Text& text, const core::Sketch* sketch)
     if (text.inBox() && sketch) {
         text.angle = boxOf(*sketch, text).angle;  // turned with its box
     }
-    text.letters = makeLetters(text, sketch);
+    text.letters = makeLetters(text, sketch, &text.runs);
     text.shape = core::flattenLetters(text.letters, core::letterTolerance(text.height));
     text.layoutKey = sketch ? linkKey(*sketch, text) : 0;
 }

@@ -43,7 +43,9 @@ TEST_CASE("SVG is in millimetres, the right way up", "[export][svg]")
     CHECK(occurrences(svg, "<line ") == 4);
     // The bottom side (y = 0) is at the bottom of the picture.
     CHECK(svg.find("<line x1=\"0.125\" y1=\"10.125\" x2=\"20.125\" y2=\"10.125\"") != std::string::npos);
-    CHECK(svg.find("inkscape:label=\"Geometry\"") != std::string::npos);
+    // Its layer an Inkscape layer; its sublayer a group in it, by name.
+    CHECK(svg.find("inkscape:groupmode=\"layer\" inkscape:label=\"" + s.layers().front().name + '"') != std::string::npos);
+    CHECK(svg.find("inkscape:label=\"" + s.sublayers().front().name + '"') != std::string::npos);
 }
 
 TEST_CASE("SVG strokes keep their colour, width and dashes; arcs and circles stay exact", "[export][svg]")
@@ -148,7 +150,7 @@ TEST_CASE("DXF holds the exact geometry in millimetres", "[export][dxf]")
     const auto pairs = dxfPairs(exporter::toDxf(s));
     CHECK(pairs.front() == std::pair<int, std::string>{0, "SECTION"});
     CHECK(pairs.back() == std::pair<int, std::string>{0, "EOF"});
-    CHECK(std::ranges::find(pairs, std::pair<int, std::string>{1, "AC1009"}) != pairs.end());
+    CHECK(std::ranges::find(pairs, std::pair<int, std::string>{1, "AC1018"}) != pairs.end());
     CHECK(std::ranges::count(pairs, std::pair<int, std::string>{0, "LINE"}) == 4);
 
     const auto circle = dxfEntity(pairs, "CIRCLE");
@@ -182,11 +184,15 @@ TEST_CASE("DXF strokes keep a colour and line style; construction is a switched-
     CHECK(stroked.at(6) == "DASHDOT");
     CHECK(dxfEntity(pairs, "LINE", 1).at(8) == "CONSTRUCTION");
     // The CONSTRUCTION layer is off (negative colour).
-    for (size_t i = 0; i + 2 < pairs.size(); ++i) {
-        if (pairs[i] == std::pair<int, std::string>{2, "CONSTRUCTION"}) {
-            CHECK(dxfEntity(pairs, "LAYER", 3).at(62) == "-8");
+    bool found = false;
+    for (size_t n = 0; n < 10; ++n) {
+        const auto layer = dxfEntity(pairs, "LAYER", n);
+        if (layer.contains(2) && layer.at(2) == "CONSTRUCTION") {
+            CHECK(layer.at(62) == "-8");
+            found = true;
         }
     }
+    CHECK(found);
     CHECK(exporter::nearestAci({0, 0, 255, 255}) == 5);
     CHECK(exporter::nearestAci({0, 0, 0, 255}) == 7);  // black shows as 7 (black on white)
     CHECK(exporter::nearestAci({255, 128, 0, 255}) != 7);
@@ -221,7 +227,7 @@ TEST_CASE("SVG fills are outlined by the curves they're in, exactly; a gradient 
     regions::refreshFills(s);
 
     const std::string svg = exporter::toSvg(s, {});
-    const size_t fills = svg.find("id=\"fills\"");
+    const size_t fills = svg.find("-fills\"");
     REQUIRE(fills != std::string::npos);
     const size_t d = svg.find(" d=\"", fills);
     const std::string path = svg.substr(d, svg.find('"', d + 4) - d);

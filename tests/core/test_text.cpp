@@ -100,7 +100,8 @@ TEST_CASE("Texts are saved with their shape, and exported as filled outlines", "
     CHECK(r.shape[0][2].y == 10.0);
 
     const std::string svg = exporter::toSvg(s, {});
-    CHECK(svg.find("id=\"text\"") != std::string::npos);
+    // (no runs: it can only be outlines; and it's mirrored and thickened anyway)
+    CHECK(svg.find("<text") == std::string::npos);
     CHECK(svg.find("fill=\"#ff0000\"") != std::string::npos);
     CHECK(svg.find("fill-rule=\"nonzero\"") != std::string::npos);
     const std::string dxf = exporter::toDxf(s, {});

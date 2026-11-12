@@ -128,7 +128,7 @@ doc.open(path)
 assert sorted(type(x).__name__ for x in s.entities if type(x).__name__ not in ("Point", "Line")) == ["EllipseArc"] * 3
 healthy("reloaded")
 os.remove(path)
-assert "POLYLINE" in doc.to_dxf()
+assert doc.to_dxf().count("\r\nELLIPSE\r\n") == 3  # (as themselves)
 
 # --- trimming again and again (random) ---------------------------------------------------------
 trims = 0

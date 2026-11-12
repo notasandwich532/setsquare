@@ -437,9 +437,17 @@ void MainWindow::exportSvg()
         onPage->setText(tr("The page (no page set: File > Page Setup)"));
         onPage->setEnabled(false);
     }
+    auto* outlines = new QCheckBox(tr("Text as outlines (exact shapes, but no longer editable text)"), &dialog);
+    outlines->setObjectName(QStringLiteral("svgTextOutlines"));
+    outlines->setChecked(m_svgOptions.textAsOutlines);
+    auto* hatchLines = new QCheckBox(tr("Hatches as lines (for plotters and cutters)"), &dialog);
+    hatchLines->setObjectName(QStringLiteral("svgHatchLines"));
+    hatchLines->setChecked(m_svgOptions.hatchLines);
     form->addRow(fills);
     form->addRow(plain);
     form->addRow(construction);
+    form->addRow(outlines);
+    form->addRow(hatchLines);
     form->addRow(onPage);
     form->addRow(tr("Margin"), margin);
     auto marginUsed = [onPage, margin] { margin->setEnabled(!(onPage->isEnabled() && onPage->isChecked())); };
@@ -457,6 +465,8 @@ void MainWindow::exportSvg()
     m_svgOptions.undecorated = plain->isChecked();
     m_svgOptions.construction = construction->isChecked();
     m_svgOptions.margin = margin->value();
+    m_svgOptions.textAsOutlines = outlines->isChecked();
+    m_svgOptions.hatchLines = hatchLines->isChecked();
     if (onPage->isEnabled()) {
         m_svgOptions.page = onPage->isChecked();
     }
@@ -479,17 +489,25 @@ void MainWindow::exportDxf()
     dialog.setObjectName(QStringLiteral("exportDxfDialog"));
     dialog.setWindowTitle(tr("Export DXF"));
     auto* form = new QFormLayout(&dialog);
-    auto* note = new QLabel(tr("The exact geometry in millimetres (DXF R12), for CAD and CAM. Fills aren't "
-                               "included."),
+    auto* note = new QLabel(tr("The exact geometry in millimetres (DXF 2004), for CAD and CAM: lines, arcs, "
+                               "ellipses and splines as themselves, text in its font, fills as hatches."),
                             &dialog);
     note->setWordWrap(true);
     form->addRow(note);
-    auto* styles = new QCheckBox(tr("Stroke colours and line styles"), &dialog);
+    auto* styles = new QCheckBox(tr("Stroke colours, line styles and weights"), &dialog);
     styles->setChecked(m_dxfOptions.styles);
+    auto* fills = new QCheckBox(tr("Fills (solid and hatched)"), &dialog);
+    fills->setObjectName(QStringLiteral("dxfFills"));
+    fills->setChecked(m_dxfOptions.fills);
     auto* construction = new QCheckBox(tr("Construction geometry (on its own layer, switched off)"), &dialog);
     construction->setChecked(m_dxfOptions.construction);
+    auto* outlines = new QCheckBox(tr("Text as outlines (exact shapes, but no longer editable text)"), &dialog);
+    outlines->setObjectName(QStringLiteral("dxfTextOutlines"));
+    outlines->setChecked(m_dxfOptions.textAsOutlines);
     form->addRow(styles);
+    form->addRow(fills);
     form->addRow(construction);
+    form->addRow(outlines);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
     buttons->button(QDialogButtonBox::Ok)->setText(tr("Export..."));
     form->addRow(buttons);
@@ -499,7 +517,9 @@ void MainWindow::exportDxf()
         return;
     }
     m_dxfOptions.styles = styles->isChecked();
+    m_dxfOptions.fills = fills->isChecked();
     m_dxfOptions.construction = construction->isChecked();
+    m_dxfOptions.textAsOutlines = outlines->isChecked();
 
     const QString path = exportPath(QStringLiteral("dxf"), tr("Export DXF"), tr("DXF drawings (*.dxf)"));
     if (path.isEmpty()) {

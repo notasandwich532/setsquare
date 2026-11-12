@@ -25,27 +25,38 @@ struct SvgOptions
     // For icons: a fixed canvas (sketch x0, y0, x1, y1) instead of fitting the drawing. The SVG
     // is then in canvas units (no mm, no margin), e.g. a 24 x 24 icon grid.
     std::optional<std::array<double, 4>> canvas;
+
+    // Text as its letters' outlines (filled paths: exact everywhere, but no longer text), rather
+    // than as text in its font (editable elsewhere; shown in that program's copy of the font).
+    // Text that can't be text (mirrored, merged or thickened outlines) is outlines anyway.
+    bool textAsOutlines = false;
+    // Hatches as their lines, cut to their areas (for plotters and cutters), rather than as
+    // <pattern>s (one repeating tile: small, and editable as a pattern elsewhere).
+    bool hatchLines = false;
 };
 
 // SVG of the drawing as Presentation view shows it: fills (with their holes) under strokes, in
 // millimetres (width/height in mm, a viewBox in mm, so it prints and cuts at true size), with
-// y pointing up as in the sketch. Lines, circles and arcs stay exact; fills follow arcs closely.
-// Groups are Inkscape layers: Fills, Strokes, Geometry, Construction. Throws SketchError if
-// there's nothing to export.
+// y pointing up as in the sketch. Lines, circles and arcs stay exact; so do fills' outlines.
+// Each layer is an Inkscape layer: its fills (a group), then its sublayers (a group each, by
+// name: texts, then lines, then construction). Hatched fills are <pattern>s where the hatch
+// repeats in a tile, else their lines. Throws SketchError if there's nothing to export.
 std::string toSvg(const Sketch& sketch, const SvgOptions& options = {});
 
 struct DxfOptions
 {
-    bool styles = true;         // strokes keep their colour and line style (else all plain)
+    bool styles = true;         // strokes keep their colour, line style and weight (else all plain)
     bool construction = false;  // construction geometry, on its own layer (switched off)
+    bool fills = true;          // solid and hatched fills, as HATCH entities
+    // Text as its letters' outlines (closed polylines and splines) rather than TEXT in its font.
+    // Text that can't be text (mirrored, merged or thickened outlines) is outlines anyway.
+    bool textAsOutlines = false;
 };
 
-// DXF (R12, the version every CAD/CAM program reads) of the geometry: exact LINE, CIRCLE and ARC
-// entities in millimetres, y up. Layers: GEOMETRY (curves without a stroke), STROKES (with one,
-// each in its colour, matched to the nearest AutoCAD colour, and line style), CONSTRUCTION
-// (optional, off), HATCH (hatched fills: their lines, cut to their areas, as LINEs and POINTs, as
-// R12 itself writes a hatch). R12 has no solid fills, true colours or line weights, so those
-// aren't written.
+// DXF (AutoCAD 2004, AC1018) of the drawing in millimetres, y up, every curve exact: LINE, CIRCLE,
+// ARC, ELLIPSE, SPLINE; TEXT in its font; fills as HATCH (solid, or the hatch's own pattern). Layers:
+// GEOMETRY (curves without a stroke), STROKES (with one: its colour, as true colour and the nearest
+// AutoCAD colour, line style and weight), TEXT, FILLS, CONSTRUCTION (optional, off).
 // Throws SketchError if there's nothing to export.
 std::string toDxf(const Sketch& sketch, const DxfOptions& options = {});
 

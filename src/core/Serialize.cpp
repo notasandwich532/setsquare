@@ -536,6 +536,26 @@ std::string toJson(const Sketch& sketch, bool compact, const std::vector<std::st
                     j["gradient"] = gradientToJson(t.gradient);
                 }
             }
+            if (!t.runs.empty()) {
+                // (rounded to a micron: they're for other programs' text, not the letters)
+                auto um = [](double v) { return std::round(v * 1000.0) / 1000.0; };
+                json runs = json::array();
+                for (const TextRun& r : t.runs) {
+                    json g = json::array();
+                    for (double x : r.glyphs) {
+                        g.push_back(um(x));
+                    }
+                    json jr{{"text", r.text}, {"at", {um(r.at.x), um(r.at.y)}}, {"size", um(r.size)}, {"glyphs", std::move(g)}};
+                    if (r.angle != 0.0) {
+                        jr["angle"] = std::round(r.angle * 1e4) / 1e4;
+                    }
+                    if (r.tracking != 0.0) {
+                        jr["tracking"] = um(r.tracking);
+                    }
+                    runs.push_back(std::move(jr));
+                }
+                j["runs"] = std::move(runs);
+            }
             texts.push_back(std::move(j));
         }
         doc["texts"] = std::move(texts);
@@ -794,6 +814,19 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
                 }
             }
             t.shape = flattenLetters(t.letters, letterTolerance(t.height));
+            for (const json& jr : j.value("runs", json::array())) {
+                TextRun r;
+                r.text = jr.value("text", std::string());
+                const std::vector<double> at = jr.value("at", std::vector<double>{0.0, 0.0});
+                if (at.size() == 2) {
+                    r.at = {at[0], at[1]};
+                }
+                r.angle = jr.value("angle", 0.0);
+                r.size = jr.value("size", 0.0);
+                r.tracking = jr.value("tracking", 0.0);
+                r.glyphs = jr.value("glyphs", std::vector<double>{});
+                t.runs.push_back(std::move(r));
+            }
             sketch.insertText(t);
         }
         // Items from before sublayers (or in one that's gone) go in the first one.
