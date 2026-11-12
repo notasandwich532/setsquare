@@ -52,8 +52,9 @@ void Document::modify(const QString& /*label*/, const std::function<void(core::S
 {
     core::Sketch working = m_sketch;
     fn(working);  // may throw; m_sketch is untouched in that case
+    const core::Sketch before = m_sketch;
     commit(std::move(working));
-    resolve();
+    resolve(&before);
     emit changed();
 }
 
@@ -63,8 +64,9 @@ void Document::edit(const QString& /*label*/, const std::function<void(Editor&)>
     QStringList python;
     Editor editor(working, &python);
     fn(editor);  // may throw; m_sketch is untouched in that case
+    const core::Sketch before = m_sketch;
     commit(std::move(working));
-    resolve();
+    resolve(&before);
     emit changed();
     record(python.join(QLatin1Char('\n')));
 }
@@ -445,6 +447,7 @@ bool Document::commitChecked(core::Sketch working, QString* error, const std::ve
         result = core::solve(working);
         textshapes::refreshPathTexts(working);
     }
+    core::regions::carryFills(working, m_sketch);  // (a filled shape moved: its fill with it)
     core::regions::refreshFills(working);
     commit(std::move(working));
     m_result = std::move(result);
@@ -531,6 +534,7 @@ void Document::dragTo(double dx, double dy)
     }
     if (m_dragSolver->dragTo(dx, dy)) {
         m_dragSolver->writeBack(m_sketch);
+        core::regions::carryFills(m_sketch, m_beforeDrag);  // (a filled shape: its fill along, as it goes)
         followProjections();
         textshapes::refreshPathTexts(m_sketch);
         m_dragMoved = true;
@@ -548,6 +552,7 @@ void Document::dragMove(double dx, double dy, double angle, core::Vec2 about)
     const core::Affine t = Editor::moveMap(dx, dy, angle, about);
     if (m_dragSolver->dragMap([&](core::Vec2 p) { return t.apply(p); })) {
         m_dragSolver->writeBack(m_sketch);
+        core::regions::carryFills(m_sketch, m_beforeDrag);
         followProjections();
         textshapes::refreshPathTexts(m_sketch);
         m_dragMoved = true;
@@ -712,13 +717,16 @@ void Document::reset(core::Sketch sketch)
     emit fileStateChanged();
 }
 
-void Document::resolve()
+void Document::resolve(const core::Sketch* before)
 {
     m_result = core::solve(m_sketch);
     textshapes::refreshPathTexts(m_sketch);  // text along a curve follows it
     if (textshapes::fitBoxes(m_sketch)) {    // boxes that grow with their text (a new width: new lines)
         m_result = core::solve(m_sketch);
         textshapes::refreshPathTexts(m_sketch);
+    }
+    if (before) {
+        core::regions::carryFills(m_sketch, *before);  // a filled shape moved: its fill with it
     }
     core::regions::refreshFills(m_sketch);   // fills keep track of their areas as edits go on
 }

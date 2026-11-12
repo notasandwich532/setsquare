@@ -666,6 +666,94 @@ std::optional<Region> resolve(const Arrangements& arrangements, const Fill& fill
     return resolve(arrangements.of(fill.layer), fill);
 }
 
+void carryFills(Sketch& now, const Sketch& before)
+{
+    if (before.fills().empty()) {
+        return;
+    }
+    // A curve moved as a whole: every point of it moved.
+    auto movedWhole = [&](Id curve) {
+        if (!before.hasEntity(curve) || !now.hasEntity(curve)) {
+            return false;
+        }
+        const std::vector<Id> points = before.definingPoints(curve);
+        return !points.empty() && std::ranges::all_of(points, [&](Id p) {
+            if (!now.hasEntity(p)) {
+                return false;
+            }
+            const Point& a = before.point(p);
+            const Point& b = now.point(p);
+            return std::hypot(b.x - a.x, b.y - a.y) > 1e-9;
+        });
+    };
+    // Where only some of a fill's outline moved: whether what moved encloses it on its own (it's
+    // the moving shape's: say one left half across a line by an earlier drag), found among the
+    // curves that moved alone (the rest made construction, in a copy, made when first needed).
+    std::optional<Sketch> movedOnly;
+    std::optional<Arrangements> movedAreas;
+    auto enclosedByMoved = [&](const Fill& f) {
+        if (!movedOnly) {
+            movedOnly = before;
+            for (const auto& [id, e] : before.entities()) {
+                if (e.kind() != EntityKind::Point && !e.construction && !movedWhole(id)) {
+                    movedOnly->entity(id).construction = true;
+                }
+            }
+            movedAreas.emplace(*movedOnly);
+        }
+        return movedAreas->of(f.layer).regionAt({f.seed.x, f.seed.y}).has_value();
+    };
+
+    std::vector<Fill> moved;
+    for (const auto& [id, was] : before.fills()) {
+        if (!now.hasFill(id) || was.boundary.empty()) {
+            continue;
+        }
+        // The outline's curves that moved as a whole: where their points were and are.
+        std::vector<Vec2> from, to;
+        bool all = true;
+        for (Id curve : was.boundary) {
+            if (!movedWhole(curve)) {
+                all = all && !(before.hasEntity(curve) && now.hasEntity(curve));  // (one that's gone doesn't count)
+                continue;
+            }
+            for (Id p : before.definingPoints(curve)) {
+                from.push_back({before.point(p).x, before.point(p).y});
+                to.push_back({now.point(p).x, now.point(p).y});
+            }
+        }
+        if (from.empty() || (!all && !enclosedByMoved(was))) {
+            continue;  // (its outline stayed put, or it isn't the moving shape's)
+        }
+        // The turn and shift that best take them there (least squares), applied to the seed.
+        Vec2 ca{}, cb{};
+        for (size_t i = 0; i < from.size(); ++i) {
+            ca = {ca.x + from[i].x, ca.y + from[i].y};
+            cb = {cb.x + to[i].x, cb.y + to[i].y};
+        }
+        const double n = static_cast<double>(from.size());
+        ca = {ca.x / n, ca.y / n};
+        cb = {cb.x / n, cb.y / n};
+        double sDot = 0, sCross = 0;
+        for (size_t i = 0; i < from.size(); ++i) {
+            const Vec2 a{from[i].x - ca.x, from[i].y - ca.y}, b{to[i].x - cb.x, to[i].y - cb.y};
+            sDot += a.x * b.x + a.y * b.y;
+            sCross += a.x * b.y - a.y * b.x;
+        }
+        const double turn = (std::abs(sDot) + std::abs(sCross) > 1e-12) ? std::atan2(sCross, sDot) : 0.0;
+        const double c = std::cos(turn), sn = std::sin(turn);
+        const Vec2 d{was.seed.x - ca.x, was.seed.y - ca.y};
+        Fill f = now.fill(id);
+        f.seed = Point{cb.x + c * d.x - sn * d.y, cb.y + sn * d.x + c * d.y};
+        if (f.seed.x != now.fill(id).seed.x || f.seed.y != now.fill(id).seed.y) {
+            moved.push_back(std::move(f));
+        }
+    }
+    for (const Fill& f : moved) {
+        now.setFill(f);
+    }
+}
+
 void refreshFills(Sketch& s)
 {
     if (s.fills().empty()) {

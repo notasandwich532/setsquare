@@ -87,4 +87,11 @@ std::optional<Region> resolve(const Arrangements& arrangements, const Fill& fill
 // left as they are.
 void refreshFills(Sketch& sketch);
 
+// Before refreshFills, after geometry has moved (`before` as it was): each fill's seed carried
+// along with the curves around it that moved as a whole (turned and shifted as they were, as near
+// as can be), so a filled shape dragged across other lines takes its fill with it rather than
+// leaving it behind (where its outline, cut by them, no longer finds it). Fills whose outline
+// didn't move are left as they are.
+void carryFills(Sketch& now, const Sketch& before);
+
 }  // namespace core::regions

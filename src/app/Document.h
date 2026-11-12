@@ -158,7 +158,9 @@ private:
     core::Id collinearByPoint(const std::vector<core::Id>& refs, QString* error);
     // Writes an export (made by `make`, which may throw SketchError) to `path`.
     bool writeExport(const QString& path, const std::function<std::string()>& make, QString* error);
-    void resolve();
+    // Solves and brings what follows the geometry up to date (texts on curves, fitted boxes,
+    // fills); given how it was before an edit, fills go along with shapes that moved.
+    void resolve(const core::Sketch* before = nullptr);
     void followProjections();  // while dragging
 
     core::Sketch m_sketch;
