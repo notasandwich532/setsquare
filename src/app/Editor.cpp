@@ -1199,6 +1199,18 @@ void Editor::remove(Id id)
 {
     const QString what = name(m_sketch, id);  // before it's gone
     m_sketch.remove(id);
+    // A fill whose outline is gone altogether (its shape deleted) goes too. (One whose outline is
+    // only broken stays, to come back when it's mended; but with nothing of its shape left, it
+    // would only colour whatever's drawn there next.)
+    std::vector<Id> orphans;
+    for (const auto& [fid, f] : m_sketch.fills()) {
+        if (!f.boundary.empty() && std::ranges::none_of(f.boundary, [&](Id c) { return m_sketch.hasEntity(c); })) {
+            orphans.push_back(fid);
+        }
+    }
+    for (Id fid : orphans) {
+        m_sketch.remove(fid);
+    }
     log(QStringLiteral("s.delete(%1)").arg(what));
 }
 
