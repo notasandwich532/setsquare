@@ -859,13 +859,20 @@ void MainWindow::createActions()
                           {ToolKind::Project, tr("Project"), {}},
                       });
     toolbar->addAction(m_insertImage);
-    // Modify tools on a row of their own: one row is too narrow for everything.
-    addToolBarBreak();
+    // Modify tools on the same row, after a gap one tool button wide.
     auto* modifyBar = addToolBar(tr("Modify"));
     modifyBar->setObjectName("ModifyToolbar");
     modifyBar->setMovable(false);
     modifyBar->setToolButtonStyle(Qt::ToolButtonIconOnly);  // names in the tooltips
     modifyBar->setIconSize(QSize(26, 26));
+    {
+        // (A blank, disabled button: sized just like the tools'.)
+        QPixmap blank(modifyBar->iconSize());
+        blank.fill(Qt::transparent);
+        auto* gap = modifyBar->addAction(QIcon(blank), QString());
+        gap->setObjectName(QStringLiteral("ModifyGap"));
+        gap->setEnabled(false);
+    }
     addTools(modifyBar, {{ToolKind::Fillet, tr("Fillet"), {}}});
     addDropdown(modifyBar, tr("Chamfer"),
                 {

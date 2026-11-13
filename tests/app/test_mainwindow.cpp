@@ -80,6 +80,30 @@ TEST_CASE("S opens a search box that finds and runs tools", "[mainwindow][tools]
     CHECK(view->toolKind() == ToolKind::RectangularPattern);
 }
 
+TEST_CASE("The modify tools share the drawing tools' row, a tool button's width along", "[mainwindow][tools]")
+{
+    MainWindow window;
+    window.resize(1280, 800);  // (the opening size on a normal screen)
+    window.show();
+    QApplication::processEvents();
+    auto* sketchBar = window.findChild<QToolBar*>(QStringLiteral("SketchToolbar"));
+    auto* modifyBar = window.findChild<QToolBar*>(QStringLiteral("ModifyToolbar"));
+    REQUIRE(sketchBar != nullptr);
+    REQUIRE(modifyBar != nullptr);
+    CHECK(modifyBar->geometry().top() == sketchBar->geometry().top());
+    CHECK(modifyBar->geometry().left() > sketchBar->geometry().right());
+    auto* gapAction = modifyBar->findChild<QAction*>(QStringLiteral("ModifyGap"));
+    REQUIRE(gapAction != nullptr);
+    CHECK(modifyBar->actions().front() == gapAction);
+    const QWidget* gap = modifyBar->widgetForAction(gapAction);
+    const QWidget* line = sketchBar->widgetForAction(sketchBar->actions().at(1));  // (a plain tool button)
+    CHECK(gap->width() == line->width());
+    CHECK_FALSE(gap->isEnabled());
+    INFO("sketch " << sketchBar->geometry().width() << ", modify " << modifyBar->geometry().width()
+                   << ", window " << window.width());
+    CHECK(modifyBar->geometry().right() < window.width());  // all of it shows at the opening size
+}
+
 TEST_CASE("The sketch toolbar shows one icon per kind of tool, the rest in its menu", "[mainwindow][tools]")
 {
     MainWindow window;
