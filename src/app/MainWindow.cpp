@@ -55,12 +55,21 @@
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QPainter>
-#include <QStyleOption>
 #include <QToolBar>
 
 namespace
 {
-// Between groups of tools on a toolbar: the style's own separator line, with space either side.
+// The toolbars' separator line: a quarter of the way from the background to the text, so it shows
+// in the dark theme and the light (the style's own is too dark to see on the dark one).
+QColor separatorColor(const QPalette& palette)
+{
+    const QColor a = palette.color(QPalette::Window);
+    const QColor b = palette.color(QPalette::WindowText);
+    return QColor::fromRgbF(a.redF() * 0.7f + b.redF() * 0.3f, a.greenF() * 0.7f + b.greenF() * 0.3f,
+                            a.blueF() * 0.7f + b.blueF() * 0.3f);
+}
+
+// Between groups of tools on a toolbar: the separator line, with space either side.
 class GroupDivider : public QWidget
 {
 public:
@@ -70,12 +79,7 @@ protected:
     void paintEvent(QPaintEvent*) override
     {
         QPainter painter(this);
-        QStyleOption option;
-        option.initFrom(this);
-        const int extent = style()->pixelMetric(QStyle::PM_ToolBarSeparatorExtent, nullptr, this);
-        option.rect = QRect((width() - extent) / 2, 0, extent, height());
-        option.state |= QStyle::State_Horizontal;  // (a vertical line, as on a horizontal toolbar)
-        style()->drawPrimitive(QStyle::PE_IndicatorToolBarSeparator, &option, &painter, this);
+        painter.fillRect(QRect(width() / 2, 4, 1, height() - 8), separatorColor(palette()));
     }
 };
 }  // namespace
@@ -1014,7 +1018,9 @@ void MainWindow::createActions()
     m_toolActions[ToolKind::Select]->setChecked(true);
     // The active tool (and other modes that are on, like presentation view) shows green.
     setStyleSheet(QStringLiteral("QToolBar QToolButton:checked { background-color: #2e7d32; color: #ffffff;"
-                                 " border: 1px solid #4caf50; border-radius: 3px; }"));
+                                 " border: 1px solid #4caf50; border-radius: 3px; }"
+                                 " QToolBar::separator { background-color: %1; width: 1px; margin: 4px 3px; }")
+                      .arg(separatorColor(palette()).name()));
     connect(m_view, &SketchView::toolChanged, this, [this](ToolKind kind) {
         if (auto it = m_toolActions.find(kind); it != m_toolActions.end()) {
             it->second->setChecked(true);
