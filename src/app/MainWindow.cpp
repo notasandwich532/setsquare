@@ -54,7 +54,31 @@
 #include <QScreen>
 #include <QStandardPaths>
 #include <QStatusBar>
+#include <QPainter>
+#include <QStyleOption>
 #include <QToolBar>
+
+namespace
+{
+// Between groups of tools on a toolbar: the style's own separator line, with space either side.
+class GroupDivider : public QWidget
+{
+public:
+    using QWidget::QWidget;
+
+protected:
+    void paintEvent(QPaintEvent*) override
+    {
+        QPainter painter(this);
+        QStyleOption option;
+        option.initFrom(this);
+        const int extent = style()->pixelMetric(QStyle::PM_ToolBarSeparatorExtent, nullptr, this);
+        option.rect = QRect((width() - extent) / 2, 0, extent, height());
+        option.state |= QStyle::State_Horizontal;  // (a vertical line, as on a horizontal toolbar)
+        style()->drawPrimitive(QStyle::PE_IndicatorToolBarSeparator, &option, &painter, this);
+    }
+};
+}  // namespace
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -859,19 +883,14 @@ void MainWindow::createActions()
                           {ToolKind::Project, tr("Project"), {}},
                       });
     toolbar->addAction(m_insertImage);
-    // Modify tools on the same row, after a gap one tool button wide.
-    auto* modifyBar = addToolBar(tr("Modify"));
-    modifyBar->setObjectName("ModifyToolbar");
-    modifyBar->setMovable(false);
-    modifyBar->setToolButtonStyle(Qt::ToolButtonIconOnly);  // names in the tooltips
-    modifyBar->setIconSize(QSize(26, 26));
+    // The modify tools follow on the same toolbar, after a group divider: a line with half a tool
+    // button's space either side (stronger than the plain separators within a group).
+    QToolBar* modifyBar = toolbar;
     {
-        // (A blank, disabled button: sized just like the tools'.)
-        QPixmap blank(modifyBar->iconSize());
-        blank.fill(Qt::transparent);
-        auto* gap = modifyBar->addAction(QIcon(blank), QString());
-        gap->setObjectName(QStringLiteral("ModifyGap"));
-        gap->setEnabled(false);
+        auto* divider = new GroupDivider(toolbar);
+        divider->setObjectName(QStringLiteral("ModifyDivider"));
+        divider->setFixedWidth(toolbar->widgetForAction(m_insertImage)->sizeHint().width());
+        toolbar->addWidget(divider);
     }
     addTools(modifyBar, {{ToolKind::Fillet, tr("Fillet"), {}}});
     addDropdown(modifyBar, tr("Chamfer"),

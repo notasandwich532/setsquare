@@ -86,22 +86,31 @@ TEST_CASE("The modify tools share the drawing tools' row, a tool button's width 
     window.resize(1280, 800);  // (the opening size on a normal screen)
     window.show();
     QApplication::processEvents();
-    auto* sketchBar = window.findChild<QToolBar*>(QStringLiteral("SketchToolbar"));
-    auto* modifyBar = window.findChild<QToolBar*>(QStringLiteral("ModifyToolbar"));
-    REQUIRE(sketchBar != nullptr);
-    REQUIRE(modifyBar != nullptr);
-    CHECK(modifyBar->geometry().top() == sketchBar->geometry().top());
-    CHECK(modifyBar->geometry().left() > sketchBar->geometry().right());
-    auto* gapAction = modifyBar->findChild<QAction*>(QStringLiteral("ModifyGap"));
-    REQUIRE(gapAction != nullptr);
-    CHECK(modifyBar->actions().front() == gapAction);
-    const QWidget* gap = modifyBar->widgetForAction(gapAction);
-    const QWidget* line = sketchBar->widgetForAction(sketchBar->actions().at(1));  // (a plain tool button)
-    CHECK(gap->width() == line->width());
-    CHECK_FALSE(gap->isEnabled());
-    INFO("sketch " << sketchBar->geometry().width() << ", modify " << modifyBar->geometry().width()
-                   << ", window " << window.width());
-    CHECK(modifyBar->geometry().right() < window.width());  // all of it shows at the opening size
+    auto* bar = window.findChild<QToolBar*>(QStringLiteral("SketchToolbar"));
+    REQUIRE(bar != nullptr);
+    CHECK(window.findChild<QToolBar*>(QStringLiteral("ModifyToolbar")) == nullptr);  // (one toolbar)
+    auto* divider = bar->findChild<QWidget*>(QStringLiteral("ModifyDivider"));
+    REQUIRE(divider != nullptr);
+    const QWidget* line = bar->widgetForAction(bar->actions().at(1));  // (a plain tool button)
+    CHECK(divider->width() == line->width());
+    // Between Insert Image and Fillet, nothing else.
+    const QWidget* image = nullptr;
+    const QWidget* fillet = nullptr;
+    for (QAction* a : bar->actions()) {
+        if (a->text().contains(QStringLiteral("Insert Image"))) {
+            image = bar->widgetForAction(a);
+        }
+        if (a->text() == QStringLiteral("Fillet")) {
+            fillet = bar->widgetForAction(a);
+        }
+    }
+    REQUIRE(image != nullptr);
+    REQUIRE(fillet != nullptr);
+    CHECK(divider->geometry().top() == image->geometry().top());
+    CHECK(fillet->geometry().left() - image->geometry().right() <= divider->width() + 10);
+    const QWidget* last = bar->widgetForAction(bar->actions().back());  // (Divide)
+    REQUIRE(last != nullptr);
+    CHECK(last->isVisible());  // all of it shows at the opening size (not in the overflow)
 }
 
 TEST_CASE("The sketch toolbar shows one icon per kind of tool, the rest in its menu", "[mainwindow][tools]")
