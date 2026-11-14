@@ -71,15 +71,13 @@ QByteArray symbolSvg(const QString& name)
         // A level: a bar with its ends ticked.
         {QStringLiteral("horizontal"), "<path d='M2 8H14M2 5V11M14 5V11'/>"},
         {QStringLiteral("vertical"), "<path d='M8 2V14M5 2H11M5 14H11'/>"},
-        // A point on a point: a dot in a ring.
-        {QStringLiteral("coincident"), "<circle cx='8' cy='8' r='5'/><circle cx='8' cy='8' r='2' fill='#a8b2bf'/>"},
+        // A point on a point: a small square (a ring would look like concentric's).
+        {QStringLiteral("coincident"), "<rect x='5' y='5' width='6' height='6' fill='#a8b2bf'/>"},
         {QStringLiteral("parallel"), "<path d='M3.5 13.5L8.5 2.5M7.5 13.5L12.5 2.5'/>"},
         {QStringLiteral("perpendicular"), "<path d='M2.5 13.5H13.5M8 13.5V2.5'/>"},
         // A circle with a line along its top.
         {QStringLiteral("tangent"), "<circle cx='8' cy='10' r='4'/><path d='M1.5 6H14.5'/>"},
         {QStringLiteral("equal"), "<path d='M3 5.5H13M3 10.5H13'/>"},
-        // A line with a marker pointing at its middle.
-        {QStringLiteral("midpoint"), "<path d='M1.5 12H14.5'/><path d='M5 4.5H11L8 9.5Z' fill='#a8b2bf'/>"},
         {QStringLiteral("concentric"), "<circle cx='8' cy='8' r='6'/><circle cx='8' cy='8' r='2.5'/>"},
         // Two halves mirrored about a dashed line.
         {QStringLiteral("symmetric"),
@@ -89,6 +87,9 @@ QByteArray symbolSvg(const QString& name)
         {QStringLiteral("collinear"), "<path d='M1.5 14.5L6.5 9.5M9.5 6.5L14.5 1.5'/><circle cx='8' cy='8' r='1.1' "
                                       "fill='#a8b2bf'/>"},
     };
+    if (name == QStringLiteral("midpoint")) {
+        return icons::svg(name);  // its tool's icon (drawn grey, as the symbols are)
+    }
     const auto it = bodies.find(name);
     if (it == bodies.end()) {
         return {};
