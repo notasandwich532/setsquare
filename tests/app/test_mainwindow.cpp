@@ -113,6 +113,45 @@ TEST_CASE("The modify tools share the drawing tools' row, a tool button's width 
     CHECK(last->isVisible());  // all of it shows at the opening size (not in the overflow)
 }
 
+TEST_CASE("Tool shortcuts: each key starts its tool, and no two things share one", "[mainwindow][tools]")
+{
+    MainWindow window;
+    window.show();
+    auto* view = window.findChild<SketchView*>();
+    REQUIRE(view != nullptr);
+    window.activateWindow();
+    REQUIRE(QTest::qWaitForWindowActive(&window));  // shortcuts only reach the active window
+
+    // No key on two actions (Qt would run neither).
+    std::map<QString, QString> taken;
+    for (QAction* a : window.findChildren<QAction*>()) {
+        for (const QKeySequence& key : a->shortcuts()) {
+            const QString k = key.toString();
+            const auto it = taken.find(k);
+            INFO(k.toStdString() << ": " << a->text().toStdString() << " and "
+                                 << (it != taken.end() ? it->second.toStdString() : std::string()));
+            CHECK((it == taken.end() || it->second == a->text()));  // (one action listing a key twice is fine)
+            taken[k] = a->text();
+        }
+    }
+
+    const std::pair<QKeySequence, ToolKind> keys[] = {
+        {QKeySequence(Qt::Key_F), ToolKind::Fillet},
+        {QKeySequence(Qt::SHIFT | Qt::Key_F), ToolKind::Fix},
+        {QKeySequence(Qt::Key_M), ToolKind::Measure},
+        {QKeySequence(Qt::Key_R), ToolKind::Rectangle},
+        {QKeySequence(Qt::SHIFT | Qt::Key_R), ToolKind::RectangleCenter},
+        {QKeySequence(Qt::ALT | Qt::Key_R), ToolKind::Rectangle3Point},
+    };
+    for (const auto& [key, kind] : keys) {
+        INFO(key.toString().toStdString());
+        view->setTool(ToolKind::Select);
+        view->setFocus();
+        QTest::keySequence(view, key);
+        CHECK(view->toolKind() == kind);
+    }
+}
+
 TEST_CASE("The sketch toolbar shows one icon per kind of tool, the rest in its menu", "[mainwindow][tools]")
 {
     MainWindow window;

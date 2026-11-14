@@ -850,8 +850,8 @@ void MainWindow::createActions()
     addDropdown(toolbar, tr("Rectangle"),
                 {
                     {ToolKind::Rectangle, tr("2-Point Rectangle"), QKeySequence(Qt::Key_R)},
-                    {ToolKind::Rectangle3Point, tr("3-Point Rectangle"), {}},
-                    {ToolKind::RectangleCenter, tr("Center Rectangle"), {}},
+                    {ToolKind::Rectangle3Point, tr("3-Point Rectangle"), QKeySequence(Qt::ALT | Qt::Key_R)},
+                    {ToolKind::RectangleCenter, tr("Center Rectangle"), QKeySequence(Qt::SHIFT | Qt::Key_R)},
                 });
     addDropdown(toolbar, tr("Circle"),
                 {
@@ -902,7 +902,7 @@ void MainWindow::createActions()
         divider->setFixedWidth(toolbar->widgetForAction(m_insertImage)->sizeHint().width());
         toolbar->addWidget(divider);
     }
-    addTools(modifyBar, {{ToolKind::Fillet, tr("Fillet"), {}}});
+    addTools(modifyBar, {{ToolKind::Fillet, tr("Fillet"), QKeySequence(Qt::Key_F)}});
     addDropdown(modifyBar, tr("Chamfer"),
                 {
                     {ToolKind::ChamferEqual, tr("Equal Distance Chamfer"), {}},
@@ -921,7 +921,7 @@ void MainWindow::createActions()
     modifyBar->addSeparator();
     addDropdown(modifyBar, tr("Move"),
                 {
-                    {ToolKind::Move, tr("Move/Copy"), QKeySequence(Qt::Key_M)},
+                    {ToolKind::Move, tr("Move/Copy"), {}},  // (M is Measure)
                     {ToolKind::Scale, tr("Scale"), {}},
                 });
     addTools(modifyBar, {{ToolKind::Mirror, tr("Mirror"), {}}});
@@ -988,7 +988,7 @@ void MainWindow::createActions()
                                 {ToolKind::Concentric, tr("Concentric"), {}},
                                 {ToolKind::Symmetric, tr("Symmetric"), {}},
                                 {ToolKind::Collinear, tr("Collinear"), {}},
-                                {ToolKind::Fix, tr("Fix/Unfix"), QKeySequence(Qt::Key_F)},
+                                {ToolKind::Fix, tr("Fix/Unfix"), QKeySequence(Qt::SHIFT | Qt::Key_F)},
                                 {ToolKind::Group, tr("Group"), QKeySequence(Qt::CTRL | Qt::Key_G)},
                             });
     // Inspecting, after a group divider: Measure.
@@ -998,7 +998,7 @@ void MainWindow::createActions()
         divider->setFixedWidth(toolbar->widgetForAction(m_insertImage)->sizeHint().width());
         constraintBar->addWidget(divider);
     }
-    addTools(constraintBar, {{ToolKind::Measure, tr("Measure"), {}}});
+    addTools(constraintBar, {{ToolKind::Measure, tr("Measure"), QKeySequence(Qt::Key_M)}});
 
     sketchMenu->addSeparator();
     auto* construction = sketchMenu->addAction(tr("Toggle &Construction"));
