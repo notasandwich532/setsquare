@@ -1066,9 +1066,6 @@ QString Editor::annotationArgs(const core::Sketch& s, const core::DrawnDimension
     }
     args << QStringLiteral("color=\"%1\"").arg(QString::fromStdString(d.style.color.hex()));
     args << QStringLiteral("width=") + number(d.style.width);
-    if (d.alongY) {
-        args << QStringLiteral("along_y=True");
-    }
     if (d.kind == core::DrawnDimensionKind::Leader) {
         if (d.refs.empty()) {
             args << QStringLiteral("tip=") + pair({d.tip.x, d.tip.y});
@@ -1105,8 +1102,8 @@ void Editor::setAnnotation(const core::DrawnDimension& d)
          << QStringLiteral("text_height=") + number(now.textHeight)
          << QStringLiteral("color=\"%1\"").arg(QString::fromStdString(now.style.color.hex()))
          << QStringLiteral("width=") + number(now.style.width);
-    if (now.kind == core::DrawnDimensionKind::Ordinate) {
-        args << (now.alongY ? QStringLiteral("along_y=True") : QStringLiteral("along_y=False"));
+    if (now.kind == core::DrawnDimensionKind::Ordinate && now.refs.size() == 2) {
+        args << QStringLiteral("origin=") + name(m_sketch, now.refs[1]);
     }
     if (now.kind == core::DrawnDimensionKind::Leader) {
         args << QStringLiteral("along=") + number(now.along) << QStringLiteral("tip=") + pair({now.tip.x, now.tip.y});

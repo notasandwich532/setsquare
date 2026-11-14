@@ -73,11 +73,15 @@ TEST_CASE("Each kind measures what it should", "[annotations]")
     CHECK(annotation::value(s, make(DrawnDimensionKind::ArcLength, {arc})) == Approx(5 * std::numbers::pi));
 
     const Id origin = s.addPoint(5, 0);
+    // An ordinate: both, x and y from its origin (signed); <x> and <y> each on its own.
     DrawnDimension ord = make(DrawnDimensionKind::Ordinate, {a, origin});
-    CHECK(annotation::label(s, ord) == "5.00");
-    ord.alongY = true;
-    CHECK(annotation::label(s, ord) == "10.00");
-    CHECK(annotation::label(s, make(DrawnDimensionKind::Ordinate, {origin, a})) == "-5.00");  // (signed)
+    CHECK(annotation::label(s, ord) == "X5.00  Y10.00");
+    CHECK(annotation::label(s, make(DrawnDimensionKind::Ordinate, {origin, a})) == "X-5.00  Y-10.00");
+    ord.text = "Hole A: <>";
+    CHECK(annotation::label(s, ord) == "Hole A: X5.00  Y10.00");
+    ord.text = "(<x>, <y>)";
+    CHECK(annotation::label(s, ord) == "(5.00, 10.00)");
+    CHECK(annotation::coordinates(s, ord).y == Approx(10));
 
     CHECK(annotation::label(s, make(DrawnDimensionKind::Leader, {a})) == "Note");  // (no number)
 

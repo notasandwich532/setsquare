@@ -291,11 +291,11 @@ exported (SVG, PDF, DXF; `dimensions=False` on an export leaves them out).
 n = s.annotate("horizontal", line, at=(20, -8))       # also "aligned", "vertical" (two points, a point and a line, or a line)
 s.annotate("diameter", circle, text="2× Ø<> THRU")     # <> is the value; "radius", "angle" ([l1, l2], flip=0-3)
 s.annotate("arc_length", arc)
-s.annotate("ordinate", point, along_y=True)            # from the origin (or [point, origin_point])
+s.annotate("ordinate", point, origin=corner)           # "X40.00  Y20.00" from corner (or the origin); text: <> both, <x>, <y>
 s.annotate("leader", curve, along=0.5, text="Polish")  # or a point; or tip=(x, y) with no refs
 #   decimals= (None: the drawing's), text_height= (3.5 mm), width= (0.25 mm), color= ("#000000"), font=
 s.edit_annotation(n, at=(20, -12), decimals=3)         # any of annotate's settings
-n.kind, n.refs, n.value, n.label, n.at, n.text, n.decimals, n.text_height, n.width, n.color
+n.kind, n.refs, n.value, n.label, n.at, n.text, n.decimals, n.text_height, n.width, n.color   # (an ordinate's value: (x, y))
 s.annotations                                          # all of them
 s.dimension_decimals = 1                               # the drawing's (2 to start with)
 ```

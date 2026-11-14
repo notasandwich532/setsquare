@@ -91,7 +91,6 @@ Vec2 defaultOffset(const Sketch& s, const DrawnDimension& d)
             const ArcShape a = arcShape(s, d.refs[0]);
             return mul(polar(a.startAngle + a.sweep / 2), a.radius + 2.5 * h);
         }
-        case DrawnDimensionKind::Ordinate: return d.alongY ? Vec2{4 * h, 0} : Vec2{0, 4 * h};
         default: return {4 * h, 3 * h};
     }
 }
@@ -329,46 +328,10 @@ void arcLength(Builder& b, const Sketch& s, const DrawnDimension& d, const std::
     b.g.label = label;
 }
 
-void ordinate(Builder& b, const Sketch& s, const DrawnDimension& d, const std::string& text)
-{
-    const Vec2 p = pos(s, d.refs[0]);
-    const Vec2 label = add(p, d.labelX == 0 && d.labelY == 0 ? defaultOffset(s, d) : Vec2{d.labelX, d.labelY});
-    const double h = b.z.h;
-    // A leader across the axis it measures along (an x: up or down; a y: across), jogging over to
-    // the label near its end; the number at its end, along it.
-    if (!d.alongY) {
-        const double side = sign(label.y - p.y);
-        const Vec2 start{p.x, p.y + side * b.z.gap};
-        const Vec2 knee{p.x, label.y - side * 1.2 * h};
-        if (std::abs(label.x - p.x) < 1e-9 || side * (knee.y - start.y) <= 0) {
-            b.line(start, label);
-        }
-        else {
-            b.line(start, knee);
-            b.line(knee, label);
-        }
-        // Reading up the page: its middle on the leader.
-        b.g.text = {text, Vec2{label.x + h / 2, label.y + side * 0.4 * h}, 90.0, h, side > 0 ? 0 : 2};
-    }
-    else {
-        const double side = sign(label.x - p.x);
-        const Vec2 start{p.x + side * b.z.gap, p.y};
-        const Vec2 knee{label.x - side * 1.2 * h, p.y};
-        if (std::abs(label.y - p.y) < 1e-9 || side * (knee.x - start.x) <= 0) {
-            b.line(start, label);
-        }
-        else {
-            b.line(start, knee);
-            b.line(knee, label);
-        }
-        b.textLevel(label, side, text);
-    }
-    b.g.label = label;
-}
-
 void leader(Builder& b, const Sketch& s, const DrawnDimension& d, const std::string& text)
 {
-    const Vec2 tip = leaderTip(s, d);
+    // (An ordinate: to its point, saying where it is.)
+    const Vec2 tip = d.kind == DrawnDimensionKind::Ordinate ? pos(s, d.refs[0]) : leaderTip(s, d);
     const Vec2 label = add(tip, d.labelX == 0 && d.labelY == 0 ? defaultOffset(s, d) : Vec2{d.labelX, d.labelY});
     const double side = sign(label.x - tip.x);
     b.line(tip, label);
@@ -388,19 +351,24 @@ double value(const Sketch& s, const DrawnDimension& d)
             const ArcShape a = arcShape(s, d.refs[0]);
             return a.radius * std::abs(a.sweep);
         }
-        case DrawnDimensionKind::Ordinate: {
-            const Vec2 p = pos(s, d.refs[0]), o = pos(s, d.refs[1]);
-            return d.alongY ? p.y - o.y : p.x - o.x;
-        }
+        case DrawnDimensionKind::Ordinate: return coordinates(s, d).x;
         default: return 0.0;
     }
 }
 
-std::string number(const Sketch& s, const DrawnDimension& d)
+Vec2 coordinates(const Sketch& s, const DrawnDimension& d)
+{
+    if (d.kind != DrawnDimensionKind::Ordinate || d.refs.size() != 2) {
+        return {};
+    }
+    return sub(pos(s, d.refs[0]), pos(s, d.refs[1]));
+}
+
+std::string number(const Sketch& s, const DrawnDimension& d, double v)
 {
     const int places = d.decimals < 0 ? s.dimensionDecimals() : d.decimals;
     char buffer[64];
-    std::snprintf(buffer, sizeof buffer, "%.*f", places, value(s, d));
+    std::snprintf(buffer, sizeof buffer, "%.*f", places, v);
     std::string out = buffer;
     // (No "-0.00": a value that rounds to nothing has no sign.)
     if (out.front() == '-' && out.find_first_not_of("-0.") == std::string::npos) {
@@ -409,13 +377,28 @@ std::string number(const Sketch& s, const DrawnDimension& d)
     return out;
 }
 
+std::string number(const Sketch& s, const DrawnDimension& d)
+{
+    return number(s, d, value(s, d));
+}
+
 std::string label(const Sketch& s, const DrawnDimension& d)
 {
     std::string out = d.text;
-    const std::string n = d.kind == DrawnDimensionKind::Leader ? std::string() : number(s, d);
-    for (size_t at = out.find("<>"); at != std::string::npos; at = out.find("<>", at + n.size())) {
-        out.replace(at, 2, n);
+    auto replaceAll = [&](const std::string& token, const std::string& with) {
+        for (size_t at = out.find(token); at != std::string::npos; at = out.find(token, at + with.size())) {
+            out.replace(at, token.size(), with);
+        }
+    };
+    if (d.kind == DrawnDimensionKind::Ordinate) {
+        const Vec2 c = coordinates(s, d);
+        const std::string x = number(s, d, c.x), y = number(s, d, c.y);
+        replaceAll("<x>", x);
+        replaceAll("<y>", y);
+        replaceAll("<>", "X" + x + "  Y" + y);
+        return out;
     }
+    replaceAll("<>", d.kind == DrawnDimensionKind::Leader ? std::string() : number(s, d));
     return out;
 }
 
@@ -449,7 +432,7 @@ Graphics graphics(const Sketch& s, const DrawnDimension& d)
         case DrawnDimensionKind::Diameter: round(b, s, d, ConstraintType::Diameter, text); break;
         case DrawnDimensionKind::Angle: angle(b, s, d, text); break;
         case DrawnDimensionKind::ArcLength: arcLength(b, s, d, text); break;
-        case DrawnDimensionKind::Ordinate: ordinate(b, s, d, text); break;
+        case DrawnDimensionKind::Ordinate: leader(b, s, d, text); break;
         case DrawnDimensionKind::Leader: leader(b, s, d, text); break;
     }
     g.valid = !g.lines.empty() || !g.arcs.empty();

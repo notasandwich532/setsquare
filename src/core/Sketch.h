@@ -434,7 +434,7 @@ enum class DrawnDimensionKind
     Diameter,    // (circle|arc)
     Angle,       // (line, line): which of the four angles by `flip` (as a Constraint's)
     ArcLength,   // (arc): the length along it
-    Ordinate,    // (point, origin point): the point's x (or with alongY, its y) from the origin's
+    Ordinate,    // (point, origin point): the point's x and y from the origin's, on a leader to it
     Leader,      // an arrow to (point), to (curve) at parameter `along`, or to `tip` (no refs); its
                  // text is a note
 };
@@ -449,10 +449,11 @@ struct DrawnDimension
     double labelX = 0.0;  // the label's offset from where it's anchored (zero: a default place)
     double labelY = 0.0;
     std::uint8_t flip = 0;  // Angle: which of the four (see Constraint::flip)
-    bool alongY = false;    // Ordinate: measures y (else x)
     double along = 0.0;     // Leader on a curve: where on it (the curve's parameter)
     Point tip;              // Leader with nothing to point at: where it points
-    std::string text = "<>";  // what it says, <> standing for the measured value (a Leader's: its note)
+    // What it says, <> standing for the measured value (an Ordinate's: both, "X.. Y.."; <x> and <y>
+    // each on its own); a Leader's: its note.
+    std::string text = "<>";
     std::string font;         // family
     int decimals = -1;        // places after the point; -1: the drawing's (Sketch::dimensionDecimals)
     double textHeight = 3.5;  // capital letter height, mm

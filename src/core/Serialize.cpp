@@ -580,9 +580,6 @@ std::string toJson(const Sketch& sketch, bool compact, const std::vector<std::st
             if (d.flip != 0) {
                 j["flip"] = d.flip;
             }
-            if (d.alongY) {
-                j["along_y"] = true;
-            }
             if (d.kind == DrawnDimensionKind::Leader) {
                 j["along"] = d.along;
                 j["tip"] = {d.tip.x, d.tip.y};
@@ -884,7 +881,7 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
             d.textHeight = j.value("text_height", d.textHeight);
             d.decimals = j.value("decimals", -1);
             d.flip = j.value("flip", std::uint8_t{0});
-            d.alongY = j.value("along_y", false);
+            // ("along_y", from when an ordinate showed one of x and y: they show both now)
             d.along = j.value("along", 0.0);
             if (j.contains("tip")) {
                 d.tip = {j.at("tip").at(0).get<double>(), j.at("tip").at(1).get<double>()};

@@ -23,9 +23,10 @@ class QSpinBox;
 // Pick what to measure as with the Dimension tool (a line, a circle, two points, two lines...),
 // then click where the label goes. The panel's kind says what's made: Auto (as the Dimension tool
 // would; placing it decides horizontal, vertical or aligned), or one in particular: aligned,
-// horizontal, vertical, radius, diameter, angle, arc length (an arc), ordinate x or y (a point,
-// from the origin; Alt+click a point to measure from it instead), or a leader (click where it
-// points: a point, a curve or anywhere; then where its note goes).
+// horizontal, vertical, radius, diameter, angle (two lines), arc length (an arc), ordinate (a
+// point's x and y, from the origin: the sketch's, or one picked with the panel's Origin button or
+// Alt+click), or a leader (click where it points: a point, a curve or anywhere; then where its
+// note goes).
 //
 // The panel's text (<> for the value), decimals, text height and line width go on new ones, and
 // on the one being edited: the last made, or one clicked (or double-clicked from Select). Its
@@ -47,8 +48,7 @@ public:
         Diameter,
         Angle,
         ArcLength,
-        OrdinateX,
-        OrdinateY,
+        Ordinate,
         Leader,
     };
 
@@ -66,6 +66,10 @@ public:
     void setKind(Kind kind);
     core::Id current() const { return m_current; }
     void setCurrent(core::Id dimension);  // edited by the panel (kNoId: none)
+    // Ordinates' origin: a point (kNoId: the sketch's). The one being edited, if an ordinate, too.
+    void setOrigin(core::Id point);
+    core::Id origin() const;
+    void pickOrigin();  // the next point clicked is the origin
 
 private:
     // The dimension these picks would make with its label at `at` (none: nullopt; `incomplete`
@@ -81,7 +85,8 @@ private:
     std::vector<core::Id> m_picks;
     std::optional<core::Vec2> m_freeTip;  // a leader's, pointing at nothing in particular
     double m_along = 0.0;                 // a leader's, on a curve
-    core::Id m_origin = core::kNoId;      // ordinates' (none: the sketch's)
+    // Ordinates' (none: the sketch's). To start with: the drawing's last ordinate's.
+    core::Id m_origin = core::kNoId;
     core::Vec2 m_mouse;
     core::Id m_current = core::kNoId;
 
@@ -92,5 +97,9 @@ private:
     QDoubleSpinBox* m_height = nullptr;
     QDoubleSpinBox* m_width = nullptr;
     QSpinBox* m_drawingDecimals = nullptr;
+    class QPushButton* m_originButton = nullptr;
+    class QToolButton* m_originReset = nullptr;
+    QWidget* m_originRow = nullptr;
+    bool m_pickingOrigin = false;
     bool m_syncing = false;
 };

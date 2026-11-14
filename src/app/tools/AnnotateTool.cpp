@@ -13,9 +13,12 @@
 
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QHBoxLayout>
 #include <QLineEdit>
 #include <QPainter>
+#include <QPushButton>
 #include <QSpinBox>
+#include <QToolButton>
 
 #include <algorithm>
 
@@ -70,8 +73,7 @@ DrawnDimensionKind drawnKindOf(AnnotateTool::Kind kind)
         case AnnotateTool::Kind::Diameter: return DrawnDimensionKind::Diameter;
         case AnnotateTool::Kind::Angle: return DrawnDimensionKind::Angle;
         case AnnotateTool::Kind::ArcLength: return DrawnDimensionKind::ArcLength;
-        case AnnotateTool::Kind::OrdinateX:
-        case AnnotateTool::Kind::OrdinateY: return DrawnDimensionKind::Ordinate;
+        case AnnotateTool::Kind::Ordinate: return DrawnDimensionKind::Ordinate;
         case AnnotateTool::Kind::Leader: return DrawnDimensionKind::Leader;
         default: return DrawnDimensionKind::Aligned;
     }
@@ -80,7 +82,15 @@ DrawnDimensionKind drawnKindOf(AnnotateTool::Kind kind)
 
 AnnotateTool::AnnotateTool(SketchView& view)
     : Tool(view)
-{}
+{
+    // Ordinates go on from where the drawing's last one was measured from (else the origin).
+    const core::Sketch& s = view.document().sketch();
+    for (const auto& [id, d] : s.drawnDimensions()) {
+        if (d.kind == DrawnDimensionKind::Ordinate && d.refs.size() == 2) {
+            m_origin = d.refs[1] == s.origin() ? kNoId : d.refs[1];
+        }
+    }
+}
 
 AnnotateTool::~AnnotateTool()
 {
@@ -102,10 +112,13 @@ QString AnnotateTool::hint() const
             ? QObject::tr("Leader: click what it points at (a point, a curve, or anywhere)")
             : QObject::tr("Click where its note goes, then type the note in the panel");
     }
-    if (k == Kind::OrdinateX || k == Kind::OrdinateY) {
-        return QObject::tr("Ordinate: click a point, then where its number goes (measured from the %1; Alt+click a "
-                           "point to measure from it)")
-            .arg(m_origin != kNoId ? QObject::tr("point you chose") : QObject::tr("origin"));
+    if (m_pickingOrigin) {
+        return QObject::tr("Click the point ordinates are measured from (Esc: as it was)");
+    }
+    if (k == Kind::Ordinate) {
+        return QObject::tr("Ordinate: click a point, then where its x and y go. Measured from the %1 (the panel's "
+                           "Origin to pick another; or Alt+click it)")
+            .arg(origin() != kNoId ? QObject::tr("point you chose") : QObject::tr("sketch's origin"));
     }
     if (m_picks.empty()) {
         return QObject::tr("Annotate: pick what to measure (a line, circle, arc, two points or lines), then click where "
@@ -124,9 +137,36 @@ void AnnotateTool::activate()
     m_kind = m_panel->addChoice(QObject::tr("Kind"), "annotateKind",
                                 {QObject::tr("Auto"), QObject::tr("Aligned"), QObject::tr("Horizontal"),
                                  QObject::tr("Vertical"), QObject::tr("Radius"), QObject::tr("Diameter"),
-                                 QObject::tr("Angle"), QObject::tr("Arc length"), QObject::tr("Ordinate X"),
-                                 QObject::tr("Ordinate Y"), QObject::tr("Leader (note)")},
+                                 QObject::tr("Angle"), QObject::tr("Arc length"), QObject::tr("Ordinate (X, Y)"),
+                                 QObject::tr("Leader (note)")},
                                 static_cast<int>(s_kind));
+    // Ordinates' origin: a button to pick it (showing which it is), and one back to the sketch's.
+    m_originRow = new QWidget;
+    auto* originLayout = new QHBoxLayout(m_originRow);
+    originLayout->setContentsMargins(0, 0, 0, 0);
+    originLayout->setSpacing(4);
+    m_originButton = new QPushButton;
+    m_originButton->setObjectName(QStringLiteral("annotateOrigin"));
+    m_originButton->setCheckable(true);
+    m_originButton->setToolTip(QObject::tr("Click, then click the point ordinates are measured from"));
+    m_originReset = new QToolButton;
+    m_originReset->setObjectName(QStringLiteral("annotateOriginReset"));
+    m_originReset->setText(QStringLiteral("×"));
+    m_originReset->setToolTip(QObject::tr("Back to the sketch's origin"));
+    originLayout->addWidget(m_originButton, 1);
+    originLayout->addWidget(m_originReset);
+    m_panel->addWidget(QObject::tr("Origin"), m_originRow);
+    QObject::connect(m_originButton, &QPushButton::clicked, m_panel, [this](bool on) {
+        if (on) {
+            pickOrigin();
+        }
+        else {
+            m_pickingOrigin = false;
+            syncPanel();
+            refresh();
+        }
+    });
+    QObject::connect(m_originReset, &QToolButton::clicked, m_panel, [this] { setOrigin(kNoId); });
     m_text = m_panel->addText(QObject::tr("Text"), "annotateText", QString());
     m_text->setToolTip(QObject::tr("What it says: <> is the measured value (e.g. \"4× Ø<> THRU\"). Empty: the "
                                    "usual for its kind"));
@@ -226,6 +266,16 @@ void AnnotateTool::syncPanel()
     const core::Sketch& s = doc().sketch();
     m_drawingDecimals->setValue(s.dimensionDecimals());
     m_decimals->setItemText(0, QObject::tr("The drawing's (%1)").arg(s.dimensionDecimals()));
+    // The origin row: for ordinates (being made, or the one being edited).
+    const bool ordinate = m_current != kNoId ? s.drawnDimension(m_current).kind == DrawnDimensionKind::Ordinate
+                                             : kind() == Kind::Ordinate;
+    m_panel->setRowVisible(m_originRow, ordinate);
+    m_originButton->setChecked(m_pickingOrigin);
+    const Id o = origin();
+    m_originButton->setText(m_pickingOrigin ? QObject::tr("Click a point...")
+                            : o == kNoId    ? QObject::tr("The sketch's origin")
+                                            : QObject::tr("A point (%1)").arg(Editor::name(s, o)));
+    m_originReset->setEnabled(o != kNoId);
     if (m_current != kNoId) {
         // Its settings (its text only where it isn't the usual for its kind).
         const DrawnDimension& d = s.drawnDimension(m_current);
@@ -266,6 +316,45 @@ void AnnotateTool::applyPanel()
     view().tryEdit(QObject::tr("Edit annotation"), [&](Editor& ed) { ed.setAnnotation(d); });
 }
 
+Id AnnotateTool::origin() const
+{
+    const core::Sketch& s = doc().sketch();
+    if (m_current != kNoId && s.hasDrawnDimension(m_current)) {
+        const DrawnDimension& d = s.drawnDimension(m_current);
+        if (d.kind == DrawnDimensionKind::Ordinate && d.refs.size() == 2) {
+            return d.refs[1] == s.origin() ? kNoId : d.refs[1];  // (the one being edited's)
+        }
+    }
+    return isPoint(s, m_origin) ? m_origin : kNoId;
+}
+
+void AnnotateTool::pickOrigin()
+{
+    m_pickingOrigin = true;
+    syncPanel();
+    refresh();
+}
+
+void AnnotateTool::setOrigin(Id point)
+{
+    const core::Sketch& s = doc().sketch();
+    m_pickingOrigin = false;
+    m_origin = isPoint(s, point) ? point : kNoId;
+    // The one being edited, if it's an ordinate, is measured from there now too.
+    if (m_current != kNoId && s.hasDrawnDimension(m_current)
+        && s.drawnDimension(m_current).kind == DrawnDimensionKind::Ordinate) {
+        DrawnDimension d = s.drawnDimension(m_current);
+        const Id from = m_origin != kNoId ? m_origin : s.origin();
+        if (from != kNoId && from != d.refs[0]) {
+            d.refs.resize(1);
+            d.refs.push_back(from);
+            view().tryEdit(QObject::tr("Ordinate origin"), [&](Editor& ed) { ed.setAnnotation(d); });
+        }
+    }
+    syncPanel();
+    refresh();
+}
+
 bool AnnotateTool::takeColor(const core::Color& color, bool second)
 {
     // Colour 1 recolours the one being edited too (and becomes Colour 1, for the next ones).
@@ -297,14 +386,12 @@ std::optional<DrawnDimension> AnnotateTool::candidate(const std::vector<Id>& pic
             }
             d.refs = picks;
             break;
-        case Kind::OrdinateX:
-        case Kind::OrdinateY: {
-            const Id origin = m_origin != kNoId && s.hasEntity(m_origin) ? m_origin : s.origin();
-            if (picks.size() != 1 || !isPoint(s, picks[0]) || origin == kNoId || origin == picks[0]) {
+        case Kind::Ordinate: {
+            const Id from = isPoint(s, m_origin) ? m_origin : s.origin();
+            if (picks.size() != 1 || !isPoint(s, picks[0]) || from == kNoId || from == picks[0]) {
                 return std::nullopt;
             }
-            d.refs = {picks[0], origin};
-            d.alongY = k == Kind::OrdinateY;
+            d.refs = {picks[0], from};
             break;
         }
         case Kind::Leader:
@@ -348,6 +435,11 @@ std::optional<DrawnDimension> AnnotateTool::candidate(const std::vector<Id>& pic
                                  : round ? (d.kind == DrawnDimensionKind::Radius || d.kind == DrawnDimensionKind::Diameter)
                                          : d.kind == wanted;
                 if (!fits || !s.canAddConstraint(constraintOf(wanted), d.refs)) {
+                    // One line, for an angle: not wrong, just one short (it measures between two).
+                    if (incomplete && wanted == DrawnDimensionKind::Angle && picks.size() == 1
+                        && s.entity(picks[0]).kind() == core::EntityKind::Line) {
+                        *incomplete = true;
+                    }
                     return std::nullopt;
                 }
                 d.kind = wanted;
@@ -392,11 +484,14 @@ void AnnotateTool::press(const ToolEvent& e)
     const Id hit = view().pickAt(e.screen, false);
     const bool geometry = s.hasEntity(hit) && !s.isHiddenReference(hit);
 
-    if ((k == Kind::OrdinateX || k == Kind::OrdinateY) && (e.modifiers & Qt::AltModifier)) {
+    // The origin for ordinates: picked (the panel's button), or Alt+click.
+    if (m_pickingOrigin || (k == Kind::Ordinate && (e.modifiers & Qt::AltModifier))) {
         if (isPoint(s, hit)) {
-            m_origin = hit;
+            setOrigin(hit == s.origin() ? kNoId : hit);
             emit view().message(QObject::tr("Ordinates are measured from that point now"));
-            refresh();
+        }
+        else {
+            emit view().message(QObject::tr("Click a point for the origin"));
         }
         return;
     }
@@ -460,6 +555,12 @@ void AnnotateTool::move(const ToolEvent& e)
 
 bool AnnotateTool::cancel()
 {
+    if (m_pickingOrigin) {
+        m_pickingOrigin = false;
+        syncPanel();
+        refresh();
+        return true;
+    }
     if (!m_picks.empty() || m_freeTip) {
         reset();
         view().setSelection(m_current != kNoId ? std::set<Id>{m_current} : std::set<Id>{});
@@ -489,12 +590,19 @@ bool AnnotateTool::keyPress(int key, const QString&)
 void AnnotateTool::paintOverlay(QPainter& painter)
 {
     const core::Sketch& s = doc().sketch();
-    // Where ordinates are measured from, when it's not the origin.
-    if ((kind() == Kind::OrdinateX || kind() == Kind::OrdinateY) && m_origin != kNoId && s.hasEntity(m_origin)) {
-        const core::Point& o = s.point(m_origin);
+    // Where ordinates are measured from: ringed, with a cross (the sketch's origin too).
+    const bool ordinate = m_current != kNoId && s.hasDrawnDimension(m_current)
+        ? s.drawnDimension(m_current).kind == DrawnDimensionKind::Ordinate
+        : kind() == Kind::Ordinate;
+    const Id from = origin() != kNoId ? origin() : s.origin();
+    if ((ordinate || m_pickingOrigin) && from != kNoId && s.hasEntity(from)) {
+        const core::Point& o = s.point(from);
+        const QPointF at = view().toScreen({o.x, o.y});
         painter.setPen(QPen(theme::canvas().dimension, 1.5));
         painter.setBrush(Qt::NoBrush);
-        painter.drawEllipse(view().toScreen({o.x, o.y}), 7.0, 7.0);
+        painter.drawEllipse(at, 9.0, 9.0);
+        painter.drawLine(at + QPointF(-14, 0), at + QPointF(14, 0));
+        painter.drawLine(at + QPointF(0, -14), at + QPointF(0, 14));
     }
     const auto d = candidate(m_picks, m_mouse);
     if (!d) {

@@ -572,9 +572,16 @@ void dragPoints(const std::vector<Id>& points, double dx, double dy)
 // goes depends on the rest.
 void annotationSettings(core::DrawnDimension& d, const py::object& at, const py::object& text,
                         const py::object& decimals, const py::object& textHeight, const py::object& width,
-                        const py::object& color, const py::object& font, const py::object& alongY,
+                        const py::object& color, const py::object& font, const py::object& origin,
                         const py::object& along, const py::object& tip, const py::object& flip)
 {
+    if (!origin.is_none()) {
+        if (d.kind != core::DrawnDimensionKind::Ordinate || d.refs.empty()) {
+            throw py::value_error("origin= is an ordinate's (the point it's measured from)");
+        }
+        d.refs.resize(1);
+        d.refs.push_back(idOf(origin));
+    }
     if (!text.is_none()) {
         d.text = text.cast<std::string>();
     }
@@ -592,9 +599,6 @@ void annotationSettings(core::DrawnDimension& d, const py::object& at, const py:
     }
     if (!font.is_none()) {
         d.font = font.cast<std::string>();
-    }
-    if (!alongY.is_none()) {
-        d.alongY = alongY.cast<bool>();
     }
     if (!along.is_none()) {
         d.along = along.cast<double>();
@@ -1331,9 +1335,14 @@ PYBIND11_EMBEDDED_MODULE(setsquare, m)
         })
         .def_property_readonly("refs", [annotationOf](const AnnotationH& a) { return wrapAll(annotationOf(a.id).refs); },
                                "What it measures (or points at).")
-        .def_property_readonly("value", [annotationOf](const AnnotationH& a) {
-            return core::annotation::value(sketch(), annotationOf(a.id));
-        }, "What it measures now: mm, or degrees (0 for a leader).")
+        .def_property_readonly("value", [annotationOf](const AnnotationH& a) -> py::object {
+            const core::DrawnDimension& d = annotationOf(a.id);
+            if (d.kind == core::DrawnDimensionKind::Ordinate) {
+                const core::Vec2 c = core::annotation::coordinates(sketch(), d);
+                return py::make_tuple(c.x, c.y);
+            }
+            return py::float_(core::annotation::value(sketch(), d));
+        }, "What it measures now: mm, or degrees (an ordinate: (x, y) from its origin; 0 for a leader).")
         .def_property_readonly("label", [annotationOf](const AnnotationH& a) {
             return core::annotation::label(sketch(), annotationOf(a.id));
         }, "What it says, its <> filled in.")
@@ -1938,7 +1947,7 @@ PYBIND11_EMBEDDED_MODULE(setsquare, m)
            "Raises ValueError if `at` isn't enclosed: see loose_ends().")
         .def("annotate", [](const SketchH&, const std::string& kind, py::object refs, py::object at, py::object text,
                             py::object decimals, py::object textHeight, py::object width, py::object color,
-                            py::object font, py::object alongY, py::object along, py::object tip, py::object flip) {
+                            py::object font, py::object origin, py::object along, py::object tip, py::object flip) {
             core::DrawnDimension d;
             if (!core::drawnDimensionKindFromString(kind, d.kind)) {
                 throw py::value_error("unknown kind '" + kind + "': aligned, horizontal, vertical, radius, diameter, "
@@ -1954,36 +1963,36 @@ PYBIND11_EMBEDDED_MODULE(setsquare, m)
             if (d.kind == core::DrawnDimensionKind::Ordinate && d.refs.size() == 1 && sketch().origin() != kNoId) {
                 d.refs.push_back(sketch().origin());  // (from the origin, unless given)
             }
-            annotationSettings(d, at, text, decimals, textHeight, width, color, font, alongY, along, tip, flip);
+            annotationSettings(d, at, text, decimals, textHeight, width, color, font, origin, along, tip, flip);
             return wrap(editReturningId("Annotate", [&](Editor& ed) { return ed.annotate(d); }));
         }, py::arg("kind"), py::arg("refs") = py::none(), py::arg("at") = py::none(), py::arg("text") = py::none(),
            py::arg("decimals") = py::none(), py::arg("text_height") = py::none(), py::arg("width") = py::none(),
-           py::arg("color") = py::none(), py::arg("font") = py::none(), py::arg("along_y") = py::none(),
+           py::arg("color") = py::none(), py::arg("font") = py::none(), py::arg("origin") = py::none(),
            py::arg("along") = py::none(), py::arg("tip") = py::none(), py::arg("flip") = py::none(),
            "Draw a dimension (or note) on the drawing: it measures, never drives, and is shown and exported with it. "
            "kind: 'aligned', 'horizontal', 'vertical' (refs: two points, a point and a line, or a line), 'radius', "
            "'diameter' (a circle or arc), 'angle' (two lines; flip= 0-3 for which of the four), 'arc_length' (an arc), "
-           "'ordinate' (a point, and the origin point it's measured from: the sketch's if left out; along_y=True for "
-           "its y), 'leader' (a point, a curve along= its parameter, or nothing and tip=(x, y)). at: where the label "
+           "'ordinate' (a point: its x and y from origin=, a point, or the sketch's origin; <x> and <y> each on its "
+           "own in text), 'leader' (a point, a curve along= its parameter, or nothing and tip=(x, y)). at: where the label "
            "goes. text: what it says, <> standing for the value (the default: '<>', 'R<>', 'Ø<>', '<>°', '⌒<>'; a "
            "leader's 'Note'). decimals: places after the point (None: the drawing's). text_height (mm, capital "
            "letters; 3.5), width (line width, mm; 0.25), color (black), font.")
         .def("edit_annotation", [](const SketchH&, py::handle item, py::object at, py::object text, py::object decimals,
                                    py::object textHeight, py::object width, py::object color, py::object font,
-                                   py::object alongY, py::object along, py::object tip, py::object flip) {
+                                   py::object origin, py::object along, py::object tip, py::object flip) {
             const Id id = idOf(item);
             if (!sketch().hasDrawnDimension(id)) {
                 throw py::value_error("not an annotation");
             }
             core::DrawnDimension d = sketch().drawnDimension(id);
-            annotationSettings(d, at, text, decimals, textHeight, width, color, font, alongY, along, tip, flip);
+            annotationSettings(d, at, text, decimals, textHeight, width, color, font, origin, along, tip, flip);
             editReturningId("Edit annotation", [&](Editor& ed) {
                 ed.setAnnotation(d);
                 return id;
             });
         }, py::arg("annotation"), py::arg("at") = py::none(), py::arg("text") = py::none(),
            py::arg("decimals") = py::none(), py::arg("text_height") = py::none(), py::arg("width") = py::none(),
-           py::arg("color") = py::none(), py::arg("font") = py::none(), py::arg("along_y") = py::none(),
+           py::arg("color") = py::none(), py::arg("font") = py::none(), py::arg("origin") = py::none(),
            py::arg("along") = py::none(), py::arg("tip") = py::none(), py::arg("flip") = py::none(),
            "Change an annotation (what's given; as Sketch.annotate's). decimals=-1: back to the drawing's.")
         .def_property_readonly("annotations", [](const SketchH&) {

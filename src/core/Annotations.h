@@ -17,11 +17,16 @@ namespace core::annotation
 // Text heights are capital letter heights; fonts are sized by their em, about this much taller.
 constexpr double kCapHeight = 0.7;  // capital height / em (Arial's is 0.716)
 
-// The value it shows: lengths in mm, angles in degrees (ordinates signed). 0 for a leader.
+// The value it shows: lengths in mm, angles in degrees; an ordinate's x (see coordinates). 0 for a
+// leader.
 double value(const Sketch& sketch, const DrawnDimension& d);
-// The value as written: `decimals` places (the drawing's, unless the dimension says).
-std::string number(const Sketch& sketch, const DrawnDimension& d);
-// What it says: its text with <> replaced by the number.
+// An ordinate's point from its origin (signed).
+Vec2 coordinates(const Sketch& sketch, const DrawnDimension& d);
+// A value as written: `decimals` places (the drawing's, unless the dimension says).
+std::string number(const Sketch& sketch, const DrawnDimension& d, double value);
+std::string number(const Sketch& sketch, const DrawnDimension& d);  // its own value
+// What it says: its text with <> replaced by the number (an ordinate's: "X<x>  Y<y>"; <x> and <y>
+// by each).
 std::string label(const Sketch& sketch, const DrawnDimension& d);
 // The text a new one of a kind starts with: "<>", "R<>", "Ø<>", "<>°", "⌒<>"; a leader's "Note".
 std::string defaultText(DrawnDimensionKind kind);

@@ -16,7 +16,9 @@
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QLineEdit>
+#include <QPushButton>
 #include <QSpinBox>
+#include <QToolButton>
 #include <QTest>
 
 using namespace core;
@@ -123,10 +125,31 @@ TEST_CASE("Annotate: circles, kinds from the panel, leaders", "[annotate]")
     CHECK(f.label(f.only()) == "R5.00");
     f.doc.undo();
 
-    f.tool().setKind(AnnotateTool::Kind::OrdinateX);
-    f.click(40, 30);  // a corner, from the origin
-    f.click(40, 45);
-    CHECK(f.label(f.only()) == "40.00");
+    // An ordinate: x and y, from the origin; then from a point picked with the panel's Origin.
+    f.tool().setKind(AnnotateTool::Kind::Ordinate);
+    f.click(40, 30);  // a corner
+    f.click(50, 45);
+    CHECK(f.label(f.only()) == "X40.00  Y30.00");
+    auto* origin = f.input<QPushButton>("annotateOrigin");
+    CHECK(origin->isVisible());
+    QTest::mouseClick(origin, Qt::LeftButton);
+    f.click(10, 10);  // the opposite corner
+    CHECK(f.label(f.only()) == "X30.00  Y20.00");  // (the one being edited follows)
+    CHECK(f.tool().origin() != kNoId);
+    QTest::mouseClick(f.input<QToolButton>("annotateOriginReset"), Qt::LeftButton);
+    CHECK(f.label(f.only()) == "X40.00  Y30.00");
+    f.doc.undo();
+    f.doc.undo();
+    f.doc.undo();
+    CHECK(f.sketch().drawnDimensions().empty());
+
+    // An angle, chosen in the panel: one line, then the other (the first isn't refused on its own).
+    f.tool().setKind(AnnotateTool::Kind::Angle);
+    f.click(25, 10);  // the bottom
+    f.click(10, 20);  // the left side
+    f.click(15, 15);  // inside the corner
+    CHECK(f.only().kind == DrawnDimensionKind::Angle);
+    CHECK(f.label(f.only()) == "90.00\xC2\xB0");
     f.doc.undo();
 
     // A leader: where it points, then where its note goes; then the note is typed.

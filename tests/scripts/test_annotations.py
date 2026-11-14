@@ -20,9 +20,11 @@ al = s.annotate("arc_length", arc)
 assert al.label == "⌒%.2f" % (2 * pi), al.label
 ang = s.annotate("angle", [sides[0], sides[1]])
 assert ang.label == "90.00°", ang.label
-ox = s.annotate("ordinate", sides[0].p2)  # (from the origin)
-oy = s.annotate("ordinate", sides[1].p2, along_y=True)
-assert ox.label == "40.00" and oy.label == "20.00", (ox.label, oy.label)
+ox = s.annotate("ordinate", sides[0].p2)  # (from the origin: x and y)
+assert ox.label == "X40.00  Y0.00" and ox.value == (40, 0), (ox.label, ox.value)
+oy = s.annotate("ordinate", sides[1].p2, origin=sides[0].p1, text="(<x>, <y>)")  # (from a corner)
+assert oy.label == "(40.00, 20.00)", oy.label
+assert oy.refs[1] == sides[0].p1
 note = s.annotate("leader", hole, along=1.0, text="2 holes")
 assert note.label == "2 holes" and note.value == 0
 free = s.annotate("leader", tip=(60, 60), at=(70, 70), text="here")
