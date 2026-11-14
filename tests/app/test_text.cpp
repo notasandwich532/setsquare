@@ -135,6 +135,26 @@ TEST_CASE("Minimum thickness widens narrow strokes to it, and leaves wide enough
     CHECK(thick.y1 - thick.y0 < 10.0 + 3.0);  // the ends grow less than the full width
 }
 
+TEST_CASE("Thickened letters are smooth curves, not a traced outline's steps", "[text]")
+{
+    // Strokes made thicker (and the letters' own outline where it's still the edge) are curves:
+    // a few dozen pieces a letter, mostly curved, not hundreds of short straight lines.
+    for (const char* letters : {"Rag 8", "S", "o"}) {
+        INFO(letters);
+        const auto contours = textshapes::makeLetters(sample(letters, TextOutline::AsDesigned, 1.2));
+        REQUIRE_FALSE(contours.empty());
+        size_t curves = 0, lines = 0;
+        for (const TextContour& c : contours) {
+            curves += static_cast<size_t>(std::ranges::count(c.ops, 'C'));
+            lines += static_cast<size_t>(std::ranges::count(c.ops, 'L'));
+        }
+        CHECK(curves > 3 * lines);
+        CHECK(curves + lines < 160 * std::string(letters).size());
+    }
+    // An "o" thickened is still a ring: an outline and its hole.
+    CHECK(textshapes::makeLetters(sample("o", TextOutline::AsDesigned, 1.2)).size() == 2);
+}
+
 TEST_CASE("Text tool: drag out a box, type, search for a font, OK", "[text][tool]")
 {
     Fixture f;

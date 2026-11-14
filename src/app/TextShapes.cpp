@@ -17,7 +17,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <array>
 #include <functional>
+#include <unordered_map>
 #include <map>
 #include <numbers>
 #include <set>
@@ -474,15 +476,510 @@ std::vector<Branch> branchesOf(const std::vector<std::uint8_t>& skel, int w, int
     return out;
 }
 
+// --- putting a traced outline back together from the curves it was traced from ---
+
+QPointF cubicAt(const QPointF* p, double t)
+{
+    const double u = 1 - t;
+    return p[0] * (u * u * u) + p[1] * (3 * u * u * t) + p[2] * (3 * u * t * t) + p[3] * (t * t * t);
+}
+
+// The part of a cubic between t0 and t1 (t1 < t0: running backwards).
+std::array<QPointF, 4> cubicPart(const QPointF* p, double t0, double t1)
+{
+    auto split = [](std::array<QPointF, 4> c, double t, bool keepEnd) {
+        const QPointF a = c[0] + (c[1] - c[0]) * t, b = c[1] + (c[2] - c[1]) * t, d = c[2] + (c[3] - c[2]) * t;
+        const QPointF ab = a + (b - a) * t, bd = b + (d - b) * t;
+        const QPointF m = ab + (bd - ab) * t;
+        return keepEnd ? std::array<QPointF, 4>{m, bd, d, c[3]} : std::array<QPointF, 4>{c[0], a, ab, m};
+    };
+    const bool backwards = t1 < t0;
+    if (backwards) {
+        std::swap(t0, t1);
+    }
+    std::array<QPointF, 4> c{p[0], p[1], p[2], p[3]};
+    c = split(c, t1, false);  // [0, t1]
+    if (t1 > 1e-12) {
+        c = split(c, t0 / t1, true);  // [t0, t1]
+    }
+    if (backwards) {
+        std::reverse(c.begin(), c.end());
+    }
+    return c;
+}
+
+// Outlines' lines and curves, found again by where they pass: for each subpath (all closed),
+// arc length along it, and a spatial index of points along them.
+class CurveSet
+{
+public:
+    explicit CurveSet(double spacing)
+        : m_spacing(spacing)
+        , m_cell(spacing * 4)
+    {}
+
+    void add(const QPainterPath& path)
+    {
+        QPointF start, at;
+        bool open = false;
+        auto closeSub = [&] {
+            if (open && QLineF(at, start).length() > 1e-9) {
+                addSeg({at, (at * 2 + start) / 3, (at + start * 2) / 3, start}, false);
+            }
+            open = false;
+        };
+        for (int i = 0; i < path.elementCount(); ++i) {
+            const QPainterPath::Element e = path.elementAt(i);
+            if (e.isMoveTo()) {
+                closeSub();
+                m_subs.push_back({static_cast<int>(m_segs.size()), 0, 0.0});
+                start = at = QPointF(e.x, e.y);
+                open = true;
+            }
+            else if (e.isLineTo()) {
+                const QPointF to(e.x, e.y);
+                if (QLineF(at, to).length() > 1e-9) {
+                    addSeg({at, (at * 2 + to) / 3, (at + to * 2) / 3, to}, false);
+                }
+                at = to;
+            }
+            else if (e.isCurveTo() && i + 2 < path.elementCount()) {
+                const QPointF c1(e.x, e.y), c2(path.elementAt(i + 1).x, path.elementAt(i + 1).y),
+                    to(path.elementAt(i + 2).x, path.elementAt(i + 2).y);
+                addSeg({at, c1, c2, to}, true);
+                at = to;
+                i += 2;
+            }
+        }
+        closeSub();
+    }
+
+    struct Hit
+    {
+        int sub = -1;
+        double s = 0.0;  // arc length along it
+        double distance = 1e300;
+    };
+    // The nearest point within `within` (on subpath `onlySub`, if that's 0 or more).
+    Hit nearest(QPointF p, double within, int onlySub = -1) const
+    {
+        Hit best;
+        const double reach = within + m_spacing;
+        const int x0 = cellOf(p.x() - reach), x1 = cellOf(p.x() + reach);
+        const int y0 = cellOf(p.y() - reach), y1 = cellOf(p.y() + reach);
+        int bestSample = -1;
+        double bestD = 1e300;
+        for (int cx = x0; cx <= x1; ++cx) {
+            for (int cy = y0; cy <= y1; ++cy) {
+                const auto it = m_grid.find(key(cx, cy));
+                if (it == m_grid.end()) {
+                    continue;
+                }
+                for (int k : it->second) {
+                    if (onlySub >= 0 && m_segs[static_cast<size_t>(m_samples[static_cast<size_t>(k)].seg)].sub != onlySub) {
+                        continue;
+                    }
+                    const double d = QLineF(p, m_samples[static_cast<size_t>(k)].p).length();
+                    if (d < bestD) {
+                        bestD = d;
+                        bestSample = k;
+                    }
+                }
+            }
+        }
+        if (bestSample < 0) {
+            return best;
+        }
+        // Refined along its segment, about the sample.
+        const Sample& sm = m_samples[static_cast<size_t>(bestSample)];
+        const Seg& g = m_segs[static_cast<size_t>(sm.seg)];
+        double lo = std::max(0.0, sm.t - sm.dt), hi = std::min(1.0, sm.t + sm.dt);
+        for (int i = 0; i < 30; ++i) {
+            const double a = lo + (hi - lo) / 3, b = hi - (hi - lo) / 3;
+            if (QLineF(p, cubicAt(g.p.data(), a)).length() < QLineF(p, cubicAt(g.p.data(), b)).length()) {
+                hi = b;
+            }
+            else {
+                lo = a;
+            }
+        }
+        const double t = (lo + hi) / 2;
+        best.distance = QLineF(p, cubicAt(g.p.data(), t)).length();
+        if (best.distance > within) {
+            return {};
+        }
+        best.sub = g.sub;
+        best.s = sOf(g, t);
+        return best;
+    }
+
+    double length(int sub) const { return m_subs[static_cast<size_t>(sub)].length; }
+    QPointF at(int sub, double s) const
+    {
+        const auto [seg, t] = locate(sub, s);
+        return cubicAt(m_segs[static_cast<size_t>(seg)].p.data(), t);
+    }
+
+    // Appends to `out` (which is at the piece's start) the subpath from s0 to s1, forwards or
+    // backwards (all the way round if they're the same and `whole`).
+    void appendPiece(QPainterPath& out, int sub, double s0, double s1, bool forward, bool whole = false) const
+    {
+        const double L = length(sub);
+        auto norm = [&](double s) { return std::fmod(std::fmod(s, L) + L, L); };
+        s0 = norm(s0);
+        s1 = norm(s1);
+        // As forward pieces of [a, b], wrapping past the start.
+        double a = forward ? s0 : s1, b = forward ? s1 : s0;
+        std::vector<std::pair<double, double>> spans;
+        if (b > a || (b == a && !whole)) {
+            spans.push_back({a, b});
+        }
+        else {
+            spans.push_back({a, L});
+            spans.push_back({0.0, b});
+        }
+        struct Piece
+        {
+            int seg;
+            double t0, t1;
+        };
+        std::vector<Piece> pieces;
+        const SubInfo& info = m_subs[static_cast<size_t>(sub)];
+        for (const auto& [from, to] : spans) {
+            for (int i = info.first; i < info.first + info.count; ++i) {
+                const Seg& g = m_segs[static_cast<size_t>(i)];
+                const double lo = std::max(from, g.s0), hi = std::min(to, g.s1);
+                if (hi - lo > 1e-9) {
+                    pieces.push_back({i, tOf(g, lo), tOf(g, hi)});
+                }
+            }
+        }
+        if (!forward) {
+            std::reverse(pieces.begin(), pieces.end());
+            for (Piece& pc : pieces) {
+                std::swap(pc.t0, pc.t1);
+            }
+        }
+        for (const Piece& pc : pieces) {
+            const Seg& g = m_segs[static_cast<size_t>(pc.seg)];
+            const std::array<QPointF, 4> c = cubicPart(g.p.data(), pc.t0, pc.t1);
+            if (g.cubic) {
+                out.cubicTo(c[1], c[2], c[3]);
+            }
+            else {
+                out.lineTo(c[3]);
+            }
+        }
+    }
+
+private:
+    struct Seg
+    {
+        std::array<QPointF, 4> p;
+        bool cubic = false;
+        int sub = 0;
+        double s0 = 0.0, s1 = 0.0;
+        std::array<double, 17> st{};  // arc length (from s0) at t = 0, 1/16, ... 1
+    };
+    struct SubInfo
+    {
+        int first = 0, count = 0;
+        double length = 0.0;
+    };
+    struct Sample
+    {
+        QPointF p;
+        int seg = 0;
+        double t = 0.0, dt = 0.0;
+    };
+
+    void addSeg(std::array<QPointF, 4> p, bool cubic)
+    {
+        SubInfo& info = m_subs.back();
+        Seg g{p, cubic, static_cast<int>(m_subs.size()) - 1, info.length, info.length, {}};
+        QPointF prev = p[0];
+        for (int i = 1; i <= 16; ++i) {
+            const QPointF q = cubicAt(p.data(), i / 16.0);
+            g.st[static_cast<size_t>(i)] = g.st[static_cast<size_t>(i) - 1] + QLineF(prev, q).length();
+            prev = q;
+        }
+        g.s1 = g.s0 + g.st[16];
+        info.length = g.s1;
+        ++info.count;
+        const int index = static_cast<int>(m_segs.size());
+        m_segs.push_back(g);
+        // Points along it, about `spacing` apart, indexed by where they are.
+        const int n = std::max(2, static_cast<int>(std::ceil(g.st[16] / m_spacing)));
+        for (int i = 0; i <= n; ++i) {
+            const double t = double(i) / n;
+            m_samples.push_back({cubicAt(p.data(), t), index, t, 1.0 / n});
+            const QPointF& q = m_samples.back().p;
+            m_grid[key(cellOf(q.x()), cellOf(q.y()))].push_back(static_cast<int>(m_samples.size()) - 1);
+        }
+    }
+    double sOf(const Seg& g, double t) const
+    {
+        const double f = std::clamp(t, 0.0, 1.0) * 16;
+        const int i = std::min(15, static_cast<int>(f));
+        return g.s0 + g.st[static_cast<size_t>(i)] + (g.st[static_cast<size_t>(i) + 1] - g.st[static_cast<size_t>(i)]) * (f - i);
+    }
+    double tOf(const Seg& g, double s) const
+    {
+        const double local = std::clamp(s - g.s0, 0.0, g.st[16]);
+        for (int i = 0; i < 16; ++i) {
+            if (local <= g.st[static_cast<size_t>(i) + 1] || i == 15) {
+                const double span = g.st[static_cast<size_t>(i) + 1] - g.st[static_cast<size_t>(i)];
+                return (i + (span > 0 ? (local - g.st[static_cast<size_t>(i)]) / span : 0.0)) / 16.0;
+            }
+        }
+        return 1.0;
+    }
+    std::pair<int, double> locate(int sub, double s) const
+    {
+        const SubInfo& info = m_subs[static_cast<size_t>(sub)];
+        const double L = info.length;
+        s = std::fmod(std::fmod(s, L) + L, L);
+        for (int i = info.first; i < info.first + info.count; ++i) {
+            const Seg& g = m_segs[static_cast<size_t>(i)];
+            if (s <= g.s1 || i == info.first + info.count - 1) {
+                return {i, tOf(g, s)};
+            }
+        }
+        return {info.first, 0.0};
+    }
+    int cellOf(double v) const { return static_cast<int>(std::floor(v / m_cell)); }
+    static qint64 key(int x, int y) { return (static_cast<qint64>(x) << 32) ^ static_cast<quint32>(y); }
+
+    double m_spacing, m_cell;
+    std::vector<Seg> m_segs;
+    std::vector<SubInfo> m_subs;
+    std::vector<Sample> m_samples;
+    std::unordered_map<qint64, std::vector<int>> m_grid;
+};
+
+// A traced loop (points about a grid pixel apart) as the curves it lies along: each stretch within
+// `tolerance` of one of the outlines in `sets` (the first preferred) is that outline's own lines
+// and curves between where the stretch starts and ends; the rest, simplified lines.
+void spliceLoop(QPainterPath& out, const std::vector<QPointF>& loop, const std::vector<const CurveSet*>& sets,
+                double tolerance, double jump)
+{
+    const size_t n = loop.size();
+    if (n < 3) {
+        return;
+    }
+    struct Label
+    {
+        int set = -1, sub = -1;
+        double s = 0.0;
+    };
+    std::vector<Label> labels(n);
+    // Each on the outline the one before it was on, while it's still near enough (where two run
+    // close together, not flitting between them); else the nearest, the first set's first.
+    // (Twice round, so the first point has one before it too.)
+    for (size_t pass = 0; pass < 2; ++pass) {
+        for (size_t i = 0; i < n; ++i) {
+            const Label& before = labels[(i + n - 1) % n];
+            if (before.sub >= 0) {
+                const CurveSet::Hit h = sets[static_cast<size_t>(before.set)]->nearest(loop[i], tolerance, before.sub);
+                if (h.sub >= 0) {
+                    labels[i] = {before.set, h.sub, h.s};
+                    continue;
+                }
+            }
+            labels[i] = {};
+            for (size_t k = 0; k < sets.size(); ++k) {
+                const CurveSet::Hit h = sets[k]->nearest(loop[i], tolerance);
+                if (h.sub >= 0) {
+                    labels[i] = {static_cast<int>(k), h.sub, h.s};
+                    break;
+                }
+            }
+        }
+    }
+    // Whether i and the point after it are on the same outline, in step.
+    auto stepOf = [&](size_t i) {
+        const Label& a = labels[i];
+        const Label& b = labels[(i + 1) % n];
+        if (a.sub < 0 || a.set != b.set || a.sub != b.sub) {
+            return std::optional<double>();
+        }
+        const double L = sets[static_cast<size_t>(a.set)]->length(a.sub);
+        double d = b.s - a.s;
+        if (d > L / 2) {
+            d -= L;
+        }
+        else if (d < -L / 2) {
+            d += L;
+        }
+        return std::abs(d) <= jump ? std::optional<double>(d) : std::optional<double>();
+    };
+    // Start where a stretch starts (if the whole loop is one, it's that outline whole).
+    size_t first = n;
+    for (size_t i = 0; i < n; ++i) {
+        if (!stepOf((i + n - 1) % n)) {
+            first = i;
+            break;
+        }
+    }
+    bool started = false;
+    auto goTo = [&](QPointF p) {
+        if (!started) {
+            out.moveTo(p);
+            started = true;
+        }
+        else {
+            out.lineTo(p);
+        }
+    };
+    if (first == n) {
+        double total = 0.0;
+        for (size_t i = 0; i < n; ++i) {
+            total += *stepOf(i);
+        }
+        const Label& l = labels[0];
+        const CurveSet& set = *sets[static_cast<size_t>(l.set)];
+        goTo(set.at(l.sub, l.s));
+        set.appendPiece(out, l.sub, l.s, l.s, total > 0, true);
+        out.closeSubpath();
+        return;
+    }
+    // Lines through points that lie on nothing, simplified (Ramer-Douglas-Peucker).
+    std::vector<QPointF> loose;
+    auto flushLoose = [&] {
+        if (loose.empty()) {
+            return;
+        }
+        std::vector<char> keep(loose.size(), 0);
+        keep.front() = keep.back() = 1;
+        std::function<void(size_t, size_t)> rdp = [&](size_t a, size_t b) {
+            double far = 0;
+            size_t at = a;
+            for (size_t i = a + 1; i < b; ++i) {
+                const QLineF ab(loose[a], loose[b]);
+                const double len = ab.length();
+                const QPointF d = loose[i] - loose[a];
+                const double off = len > 0 ? std::abs(d.x() * (loose[b] - loose[a]).y() - d.y() * (loose[b] - loose[a]).x()) / len
+                                           : QLineF(loose[a], loose[i]).length();
+                if (off > far) {
+                    far = off;
+                    at = i;
+                }
+            }
+            if (far > tolerance / 2) {
+                keep[at] = 1;
+                rdp(a, at);
+                rdp(at, b);
+            }
+        };
+        rdp(0, loose.size() - 1);
+        for (size_t i = 0; i < loose.size(); ++i) {
+            if (keep[i]) {
+                goTo(loose[i]);
+            }
+        }
+        loose.clear();
+    };
+    size_t i = first;
+    for (size_t done = 0; done < n;) {
+        // The stretch from i: as far as it goes in step on one outline.
+        size_t len = 1;
+        double total = 0.0;
+        while (len < n - done) {
+            const auto step = stepOf((i + len - 1) % n);
+            if (!step) {
+                break;
+            }
+            total += *step;
+            ++len;
+        }
+        const Label& a = labels[i];
+        if (a.sub >= 0 && len >= 3) {
+            flushLoose();
+            const Label& b = labels[(i + len - 1) % n];
+            const CurveSet& set = *sets[static_cast<size_t>(a.set)];
+            goTo(set.at(a.sub, a.s));
+            set.appendPiece(out, a.sub, a.s, b.s, total > 0);
+        }
+        else {
+            for (size_t k = 0; k < len; ++k) {
+                loose.push_back(loop[(i + k) % n]);
+            }
+        }
+        i = (i + len) % n;
+        done += len;
+    }
+    flushLoose();
+    out.closeSubpath();
+}
+
+// A smooth curve through points (Catmull-Rom, as cubics), on from where `path` is (its first
+// point); `closed`: round to the first again.
+void smoothThrough(QPainterPath& path, const std::vector<QPointF>& p, bool closed)
+{
+    const size_t m = p.size();
+    auto at = [&](std::ptrdiff_t i) {
+        if (closed) {
+            return p[static_cast<size_t>((i % static_cast<std::ptrdiff_t>(m) + static_cast<std::ptrdiff_t>(m)) % static_cast<std::ptrdiff_t>(m))];
+        }
+        return p[static_cast<size_t>(std::clamp<std::ptrdiff_t>(i, 0, static_cast<std::ptrdiff_t>(m) - 1))];
+    };
+    const std::ptrdiff_t pieces = static_cast<std::ptrdiff_t>(closed ? m : m - 1);
+    for (std::ptrdiff_t i = 0; i < pieces; ++i) {
+        path.cubicTo(at(i) + (at(i + 1) - at(i - 1)) / 6.0, at(i + 1) - (at(i + 2) - at(i)) / 6.0, at(i + 1));
+    }
+}
+
+// The outline of a stroke `half` either side of a smooth centre line (points about evenly
+// spaced): its two sides as smooth curves, joined straight across at its ends (a ring: two loops,
+// round opposite ways).
+QPainterPath strokeOutline(const std::vector<QPointF>& c, double half, bool closed)
+{
+    QPainterPath out;
+    out.setFillRule(Qt::WindingFill);
+    const size_t m = c.size();
+    if (m < 2 || (closed && m < 3)) {
+        return out;
+    }
+    std::vector<QPointF> left(m), right(m);
+    for (size_t i = 0; i < m; ++i) {
+        const QPointF before = closed ? c[(i + m - 1) % m] : c[i == 0 ? 0 : i - 1];
+        const QPointF after = closed ? c[(i + 1) % m] : c[std::min(m - 1, i + 1)];
+        QPointF t = after - before;
+        const double len = std::hypot(t.x(), t.y());
+        t = len > 0 ? t / len : QPointF(1, 0);
+        const QPointF n(-t.y(), t.x());
+        left[i] = c[i] + n * half;
+        right[i] = c[i] - n * half;
+    }
+    std::reverse(right.begin(), right.end());
+    if (closed) {
+        out.moveTo(left.front());
+        smoothThrough(out, left, true);
+        out.closeSubpath();
+        out.moveTo(right.front());
+        smoothThrough(out, right, true);
+        out.closeSubpath();
+        return out;
+    }
+    out.moveTo(left.front());
+    smoothThrough(out, left, false);
+    out.lineTo(right.front());  // (flat across the end)
+    smoothThrough(out, right, false);
+    out.closeSubpath();  // (and across the start)
+    return out;
+}
+
 // Thickens the parts narrower than `width` to it, leaving the rest as it is: the shape, together
 // with a disc `width` across centred on every point of its centre line (skeleton). Where the
 // shape is thick enough those discs are inside it anyway; where it's thin they make it exactly
 // that thick, carrying straight on through junctions with thick strokes (no dip on top of a T)
 // and rounding joints between thin ones. The skeleton's spurs into the corners of thick strokes
 // are pruned first (their discs would be lumps), and free ends are pulled back so a thin tip is
-// thickened to its end and no further. Worked out as distances on a fine grid and traced back
-// into smooth outlines.
-QPainterPath thicken(const QPainterPath& shape, double width)
+// thickened to its end and no further. Worked out on a fine grid: the thin parts' centre lines,
+// smoothed into curves, become strokes exactly `width` wide; the result is traced, then put back
+// together from the curves themselves: the letters' own (`original`: as the font has them) where
+// they're still the edge, the strokes' where those are.
+QPainterPath thicken(const QPainterPath& shape, double width, const QPainterPath& original)
 {
     const QRectF box = shape.boundingRect();
     if (box.isEmpty() || !(width > 0)) {
@@ -614,12 +1111,97 @@ QPainterPath thicken(const QPainterPath& shape, double width)
             }
         }
     }
-    // The centre lines discs go along: every branch, with each free end pulled back by however
-    // far a disc there would reach past the tip (half the width less the depth there), so a thin
-    // tip is thickened right to its end and no further.
-    std::vector<std::uint8_t> centres(inside.size(), 0);
-    QPainterPath caps;  // flat ends (grid coordinates)
+    // Strokes running straight on through a fork (a stem past where an arm leaves it) as one line:
+    // the fork's point is pulled aside towards the arm, so pieces ending there wouldn't line up.
+    // At each fork, the two branches leaving it most nearly opposite ways (within 35 degrees of
+    // straight on) join; the others still end there.
+    {
+        auto pointOf = [&](int i) { return QPointF(i % w + 0.5, i / w + 0.5); };
+        auto direction = [&](const Branch& br, bool fromFront) {
+            const size_t nn = br.pixels.size();
+            const size_t along = std::min(nn - 1, static_cast<size_t>(std::max(3.0f, 2 * r)));
+            const QPointF a = pointOf(fromFront ? br.pixels.front() : br.pixels.back());
+            const QPointF z = pointOf(fromFront ? br.pixels[along] : br.pixels[nn - 1 - along]);
+            const QPointF d = z - a;
+            const double len = std::hypot(d.x(), d.y());
+            return len > 0 ? d / len : QPointF();
+        };
+        for (bool merged = true; merged;) {
+            merged = false;
+            std::map<int, std::vector<std::pair<size_t, bool>>> at;  // fork -> (branch, which end)
+            for (size_t i = 0; i < branches.size(); ++i) {
+                const Branch& br = branches[i];
+                if (br.ends[0] < 0 || br.ends[0] == br.ends[1] || br.pixels.size() < 3) {
+                    continue;  // (loops)
+                }
+                for (int side = 0; side < 2; ++side) {
+                    if (degree[static_cast<size_t>(br.ends[side])] >= 3) {
+                        at[br.ends[side]].push_back({i, side == 0});
+                    }
+                }
+            }
+            for (const auto& [fork, ends] : at) {
+                double best = std::cos(145.0 * 3.141592653589793 / 180);
+                std::pair<size_t, size_t> pair{0, 0};
+                bool found = false;
+                for (size_t x = 0; x < ends.size(); ++x) {
+                    for (size_t y = x + 1; y < ends.size(); ++y) {
+                        if (ends[x].first == ends[y].first) {
+                            continue;
+                        }
+                        const double c = QPointF::dotProduct(direction(branches[ends[x].first], ends[x].second),
+                                                             direction(branches[ends[y].first], ends[y].second));
+                        if (c < best) {
+                            best = c;
+                            pair = {x, y};
+                            found = true;
+                        }
+                    }
+                }
+                if (!found) {
+                    continue;
+                }
+                // The first branch run into the fork, then the second out of it.
+                const auto [ia, aFront] = ends[pair.first];
+                const auto [ib, bFront] = ends[pair.second];
+                Branch joined;
+                std::vector<int> pa = branches[ia].pixels, pb = branches[ib].pixels;
+                if (aFront) {
+                    std::reverse(pa.begin(), pa.end());  // (to end at the fork)
+                }
+                if (!bFront) {
+                    std::reverse(pb.begin(), pb.end());  // (to start at it)
+                }
+                joined.pixels = pa;
+                joined.pixels.insert(joined.pixels.end(), pb.begin() + 1, pb.end());
+                joined.ends[0] = aFront ? branches[ia].ends[1] : branches[ia].ends[0];
+                joined.ends[1] = bFront ? branches[ib].ends[1] : branches[ib].ends[0];
+                std::vector<Branch> next;
+                for (size_t i = 0; i < branches.size(); ++i) {
+                    if (i != ia && i != ib) {
+                        next.push_back(std::move(branches[i]));
+                    }
+                }
+                next.push_back(std::move(joined));
+                branches = std::move(next);
+                --degree[static_cast<size_t>(fork)];  // (it isn't an end of those two any more)
+                --degree[static_cast<size_t>(fork)];
+                merged = true;
+                break;  // (indices have changed: look again)
+            }
+        }
+    }
+    // The thin parts' centre lines, smoothed into curves, each made into a stroke `width` wide:
+    // flat where a free end is (pulled back by however far it'd reach past the tip, so a thin tip
+    // is thickened right to its end and no further), round where it meets another thin stroke.
+    const QTransform toPath = toGrid.inverted();
+    std::vector<QPainterPath> strokes;  // (path coordinates)
     auto pointOf = [&](int i) { return QPointF(i % w + 0.5, i / w + 0.5); };
+    auto roundEnd = [&](QPointF gridPoint) {
+        QPainterPath disc;
+        disc.addEllipse(toPath.map(gridPoint), width / 2, width / 2);
+        strokes.push_back(disc);
+    };
     for (const Branch& b : branches) {
         const size_t n = b.pixels.size();
         auto trim = [&](int end, int pixel) -> size_t {
@@ -644,68 +1226,339 @@ QPainterPath thicken(const QPainterPath& shape, double width)
                 back = n - 1;
             }
         }
-        for (size_t q = front; q + back < n; ++q) {
-            centres[static_cast<size_t>(b.pixels[q])] = 1;
+        // Its centre line, from where it's pulled back to at each end (a loop: all of it once).
+        const bool ring = b.ends[0] < 0;
+        std::vector<QPointF> pts;
+        std::vector<float> depths;
+        const size_t stop = ring ? n - 1 : n - back;  // (a loop's last pixel is its first again)
+        for (size_t q = front; q < stop; ++q) {
+            pts.push_back(pointOf(b.pixels[q]));
+            depths.push_back(depthAt(b.pixels[q]));
         }
-        // A thin free end finishes flat, not round: a strip as wide as the minimum from the last
-        // disc out to the tip, along the end's direction (taken from a disc's width back, so a
-        // pointed prong's wobble doesn't turn it).
-        for (int side = 0; side < 2; ++side) {
-            const size_t cut = side == 0 ? front : back;
-            if (cut == 0) {
+        if (pts.size() < 2 || std::ranges::none_of(depths, [&](float d) { return d < r; })) {
+            continue;  // (thick enough all along)
+        }
+        const size_t m = pts.size();
+        auto wrap = [&](std::ptrdiff_t i) {
+            return static_cast<size_t>((i % static_cast<std::ptrdiff_t>(m) + static_cast<std::ptrdiff_t>(m)) % static_cast<std::ptrdiff_t>(m));
+        };
+        // Its corners: where it turns sharply (an L's, a V's), as against curving. Across a width
+        // either side it turns a lot, and nearly as much across half that (a curve turns half as
+        // much over half the length). The smoothing doesn't cross them; the strokes meet round there.
+        const std::ptrdiff_t span = std::max<std::ptrdiff_t>(3, static_cast<std::ptrdiff_t>(r));
+        auto turn = [&](size_t i, std::ptrdiff_t over) {
+            const std::ptrdiff_t at = static_cast<std::ptrdiff_t>(i);
+            if (!ring && (at - over < 0 || at + over >= static_cast<std::ptrdiff_t>(m))) {
+                return 0.0;
+            }
+            const QPointF in = pts[i] - pts[wrap(at - over)], out = pts[wrap(at + over)] - pts[i];
+            const double li = std::hypot(in.x(), in.y()), lo = std::hypot(out.x(), out.y());
+            if (li <= 0 || lo <= 0) {
+                return 0.0;
+            }
+            return std::acos(std::clamp(QPointF::dotProduct(in, out) / (li * lo), -1.0, 1.0));
+        };
+        std::vector<double> turning(m);
+        for (size_t i = 0; i < m; ++i) {
+            turning[i] = turn(i, span);
+        }
+        std::vector<size_t> corners;
+        for (size_t i = 0; i < m; ++i) {
+            const double t = turning[i];
+            if (t < 0.9 || turn(i, std::max<std::ptrdiff_t>(2, span / 2)) < 0.8 * t) {
                 continue;
             }
-            auto pixelAt = [&](size_t k) { return side == 0 ? b.pixels[k] : b.pixels[n - 1 - k]; };
-            const QPointF last = pointOf(pixelAt(cut));           // the last disc's centre
-            const QPointF end = pointOf(pixelAt(0));
-            const QPointF back2 = pointOf(pixelAt(std::min(n - 1, cut + static_cast<size_t>(r))));
-            QPointF d = last - back2;
-            double len = std::hypot(d.x(), d.y());
-            if (len <= 0) {
-                d = end - last;
-                len = std::hypot(d.x(), d.y());
+            bool peak = true;  // (the sharpest point of the bend)
+            for (std::ptrdiff_t d = -span; d <= span && peak; ++d) {
+                const std::ptrdiff_t j = static_cast<std::ptrdiff_t>(i) + d;
+                if (d == 0 || (!ring && (j < 0 || j >= static_cast<std::ptrdiff_t>(m)))) {
+                    continue;
+                }
+                const double other = turning[wrap(j)];
+                peak = other < t || (other == t && d > 0);
             }
-            if (len <= 0) {
+            if (peak) {
+                corners.push_back(i);
+            }
+        }
+        // A ring: from a corner round to it again (or, without one, a closed curve).
+        if (ring && !corners.empty()) {
+            const std::ptrdiff_t start = static_cast<std::ptrdiff_t>(corners.front());
+            std::rotate(pts.begin(), pts.begin() + start, pts.end());
+            std::rotate(depths.begin(), depths.begin() + start, depths.end());
+            for (size_t& c : corners) {
+                c = wrap(static_cast<std::ptrdiff_t>(c) - start);
+            }
+            pts.push_back(pts.front());
+            depths.push_back(depths.front());
+        }
+        const bool closed = ring && corners.empty();
+        const size_t count = pts.size();
+        const std::ptrdiff_t reach = std::max<std::ptrdiff_t>(3, static_cast<std::ptrdiff_t>(2 * r));
+        const size_t into = static_cast<size_t>(std::ceil(r));
+        // Smoothed, a stretch at a time: each point where a parabola fitted to its neighbours (a
+        // width's worth either side, nearer ones counting more) puts it. Wobbles shorter than that
+        // go (the pixels' steps, and a thin stroke's centre wandering as its width does), while
+        // curves keep their shape.
+        auto smoothed = [&](const std::vector<QPointF>& p, bool wraps) {
+            const size_t len = p.size();
+            std::vector<QPointF> out = p;
+            for (size_t i = 0; i < len; ++i) {
+                double s[5] = {0, 0, 0, 0, 0}, sx[3] = {0, 0, 0}, sy[3] = {0, 0, 0};
+                for (std::ptrdiff_t d = -reach; d <= reach; ++d) {
+                    std::ptrdiff_t j = static_cast<std::ptrdiff_t>(i) + d;
+                    if (wraps) {
+                        j = (j % static_cast<std::ptrdiff_t>(len) + static_cast<std::ptrdiff_t>(len)) % static_cast<std::ptrdiff_t>(len);
+                    }
+                    else if (j < 0 || j >= static_cast<std::ptrdiff_t>(len)) {
+                        continue;
+                    }
+                    const double u = double(d) / double(reach + 1);
+                    double tp = std::pow(1 - std::abs(u * u * u), 3);  // (tricube)
+                    for (int e = 0; e < 5; ++e) {
+                        s[e] += tp;
+                        if (e < 3) {
+                            sx[e] += tp * p[static_cast<size_t>(j)].x();
+                            sy[e] += tp * p[static_cast<size_t>(j)].y();
+                        }
+                        tp *= double(d);
+                    }
+                }
+                // [s0 s1 s2; s1 s2 s3; s2 s3 s4] (a b c) = rhs, for a: the fit at the point itself.
+                auto solveA = [&](const double* rhs) {
+                    const double det = s[0] * (s[2] * s[4] - s[3] * s[3]) - s[1] * (s[1] * s[4] - s[3] * s[2])
+                                     + s[2] * (s[1] * s[3] - s[2] * s[2]);
+                    if (std::abs(det) < 1e-9) {
+                        return rhs[0] / s[0];
+                    }
+                    return (rhs[0] * (s[2] * s[4] - s[3] * s[3]) - s[1] * (rhs[1] * s[4] - s[3] * rhs[2])
+                            + s[2] * (rhs[1] * s[3] - s[2] * rhs[2]))
+                         / det;
+                };
+                out[i] = QPointF(solveA(sx), solveA(sy));
+            }
+            return out;
+        };
+        const size_t step = std::max<size_t>(3, static_cast<size_t>(r / 2));
+        auto toCurve = [&](const std::vector<QPointF>& line) {
+            std::vector<QPointF> q;
+            for (size_t i = 0; i < line.size(); i += step) {
+                q.push_back(toPath.map(line[i]));
+            }
+            if (QLineF(q.back(), toPath.map(line.back())).length() > 1e-9) {
+                q.push_back(toPath.map(line.back()));
+            }
+            return q;
+        };
+        if (closed) {
+            pts = smoothed(pts, true);
+            // Thin all the way round: one closed stroke.
+            if (std::ranges::all_of(depths, [&](float d) { return d < r; })) {
+                std::vector<QPointF> q;
+                for (size_t i = 0; i < count; i += step) {
+                    q.push_back(toPath.map(pts[i]));
+                }
+                if (q.size() >= 3) {
+                    strokes.push_back(strokeOutline(q, width / 2, true));
+                }
                 continue;
             }
-            d /= len;
-            // Out to where the tip is: the skeleton's end and the depth left there.
-            const double reach = QPointF::dotProduct(end - last, d) + double(depthAt(pixelAt(0))) + 1.0;
-            if (reach <= 0) {
-                continue;
+            // Partly thick: as a line from its thickest point round to it again.
+            const std::ptrdiff_t thickest = std::ranges::max_element(depths) - depths.begin();
+            std::rotate(pts.begin(), pts.begin() + thickest, pts.end());
+            std::rotate(depths.begin(), depths.begin() + thickest, depths.end());
+            pts.push_back(pts.front());
+            depths.push_back(depths.front());
+        }
+        // The pieces between corners (and the chain's own ends), each smoothed on its own.
+        struct Piece
+        {
+            std::vector<QPointF> p;
+            std::vector<float> depth;
+        };
+        std::vector<size_t> cuts{0};
+        if (!closed) {
+            for (size_t c : corners) {
+                if (c > cuts.back() + 1 && c + 2 < pts.size()) {
+                    cuts.push_back(c);
+                }
             }
-            const QPointF across(-d.y() * double(r), d.x() * double(r));
-            const QPointF far = last + d * reach;
-            caps.addPolygon(QPolygonF({last + across, far + across, far - across, last - across}));
-            caps.closeSubpath();
+        }
+        cuts.push_back(pts.size() - 1);
+        std::vector<Piece> pieces;
+        for (size_t c = 0; c + 1 < cuts.size(); ++c) {
+            Piece pc;
+            pc.p.assign(pts.begin() + static_cast<std::ptrdiff_t>(cuts[c]), pts.begin() + static_cast<std::ptrdiff_t>(cuts[c + 1]) + 1);
+            pc.depth.assign(depths.begin() + static_cast<std::ptrdiff_t>(cuts[c]), depths.begin() + static_cast<std::ptrdiff_t>(cuts[c + 1]) + 1);
+            const std::vector<QPointF> raw = pc.p;
+            pc.p = smoothed(pc.p, false);
+            // Where the chain joins other strokes (not a corner of its own), it starts from the
+            // very point it shares with them, easing into the smoothed line over a width, so
+            // strokes running on through a join stay in line.
+            auto pin = [&](bool atStart) {
+                const size_t len = pc.p.size();
+                for (std::ptrdiff_t d = 0; d <= reach; ++d) {
+                    if (d >= static_cast<std::ptrdiff_t>(len)) {
+                        break;
+                    }
+                    const size_t k2 = atStart ? static_cast<size_t>(d) : len - 1 - static_cast<size_t>(d);
+                    const double t = double(d) / double(reach);
+                    const double keep = t * t * (3 - 2 * t);
+                    pc.p[k2] = raw[k2] + (pc.p[k2] - raw[k2]) * keep;
+                }
+            };
+            auto joinsOthers = [&](int end, bool pulledBack) { return end >= 0 && !pulledBack && joins[end] >= 2; };
+            if (!ring && c == 0 && joinsOthers(b.ends[0], front > 0)) {
+                pin(true);
+            }
+            if (!ring && c + 2 == cuts.size() && joinsOthers(b.ends[1], back > 0)) {
+                pin(false);
+            }
+            pieces.push_back(std::move(pc));
+        }
+        // Corners: the pieces either side meet where their lines do, and each runs straight on past
+        // there by half the width (so an L's outer corner is square, as the letter's is).
+        auto endDirection = [&](const std::vector<QPointF>& p, bool atEnd) {
+            const size_t backBy = std::min(p.size() - 1, into);
+            const QPointF d = atEnd ? p.back() - p[p.size() - 1 - backBy] : p.front() - p[backBy];
+            const double len = std::hypot(d.x(), d.y());
+            return len > 0 ? d / len : QPointF();
+        };
+        auto joinCorner = [&](Piece& in, Piece& out) {
+            const QPointF a = in.p.back(), b2 = out.p.front();
+            const QPointF da = endDirection(in.p, true), db = endDirection(out.p, false);  // (both pointing away)
+            QPointF meet = (a + b2) / 2;
+            const double cross = da.x() * db.y() - da.y() * db.x();
+            if (std::abs(cross) > 0.05) {
+                // a + s da = b2 + t db
+                const QPointF w0 = b2 - a;
+                const double sAlong = (w0.x() * db.y() - w0.y() * db.x()) / cross;
+                const QPointF at = a + da * sAlong;
+                if (sAlong > -r && sAlong < 3 * r && QLineF(at, b2).length() < 3 * r) {
+                    meet = at;
+                }
+            }
+            // Mitred: past the meeting point by just enough for the sides to meet in a point (half
+            // the width times the tangent of half the turn: as far again for a right angle, less
+            // for a gentler one); a very sharp one (that'd reach far) meets round instead.
+            const double turnAngle = std::acos(std::clamp(-QPointF::dotProduct(da, db), -1.0, 1.0));
+            const double past = r * std::tan(turnAngle / 2);
+            const float depthThere = std::min(in.depth.back(), out.depth.front());
+            in.p.back() = meet;
+            out.p.front() = meet;
+            if (past <= 2 * r) {
+                in.p.push_back(meet + da * past);
+                in.depth.push_back(depthThere);
+                out.p.insert(out.p.begin(), meet + db * past);
+                out.depth.insert(out.depth.begin(), depthThere);
+            }
+            else if (depthThere < r) {
+                roundEnd(meet);
+            }
+        };
+        for (size_t c = 0; c + 1 < pieces.size(); ++c) {
+            joinCorner(pieces[c], pieces[c + 1]);
+        }
+        if (ring && !closed && pieces.size() >= 2) {
+            joinCorner(pieces.back(), pieces.front());  // (round to the first corner again)
+        }
+        else if (ring && !closed && pieces.size() == 1) {
+            joinCorner(pieces.front(), pieces.front());
+        }
+        // Each piece's thin stretches, each on into the thick part either side by half the width
+        // (where its ends are buried).
+        for (size_t c = 0; c < pieces.size(); ++c) {
+            const Piece& pc = pieces[c];
+            const size_t last = pc.p.size() - 1;
+            std::vector<std::pair<size_t, size_t>> stretches;
+            for (size_t i = 0; i <= last;) {
+                if (pc.depth[i] >= r) {
+                    ++i;
+                    continue;
+                }
+                size_t j = i;
+                while (j + 1 <= last && pc.depth[j + 1] < r) {
+                    ++j;
+                }
+                const size_t a = i > into ? i - into : 0, z = std::min(last, j + into);
+                if (!stretches.empty() && a <= stretches.back().second) {
+                    stretches.back().second = z;
+                }
+                else {
+                    stretches.push_back({a, z});
+                }
+                i = j + 1;
+            }
+            for (const auto& [a, z] : stretches) {
+                std::vector<QPointF> line(pc.p.begin() + static_cast<std::ptrdiff_t>(a), pc.p.begin() + static_cast<std::ptrdiff_t>(z) + 1);
+                if (line.size() < 2) {
+                    continue;
+                }
+                // A free end: on, flat, to where the tip is (the skeleton's end and the depth left
+                // there), along the end's direction from half a width back.
+                auto toTip = [&](bool atStart) {
+                    const QPointF lastPt = atStart ? line.front() : line.back();
+                    const QPointF d = endDirection(line, !atStart);
+                    if (d.isNull()) {
+                        return;
+                    }
+                    const int tipPixel = atStart ? b.pixels.front() : b.pixels.back();
+                    const double reachOut = QPointF::dotProduct(pointOf(tipPixel) - lastPt, d) + double(depthAt(tipPixel)) + 1.0;
+                    if (reachOut > 0) {
+                        atStart ? (void)line.insert(line.begin(), lastPt + d * reachOut) : line.push_back(lastPt + d * reachOut);
+                    }
+                };
+                // The chain's own ends: a free one flat to its tip, one joining others round.
+                if (!ring && c == 0 && a == 0) {
+                    if (front > 0) {
+                        toTip(true);
+                    }
+                    else if (pc.depth[0] < r) {
+                        roundEnd(pc.p.front());
+                    }
+                }
+                if (!ring && c + 1 == pieces.size() && z == last) {
+                    if (back > 0) {
+                        toTip(false);
+                    }
+                    else if (pc.depth[last] < r) {
+                        roundEnd(pc.p.back());
+                    }
+                }
+                strokes.push_back(strokeOutline(toCurve(line), width / 2, false));
+            }
         }
     }
-    // The flat ends go into the drawing of the letters (so into the coverage, below).
-    painter.setTransform(QTransform());
-    painter.drawPath(caps);
+    // The strokes go into the drawing of the letters: the result is what's covered (anti-aliased,
+    // for smooth edges), traced...
+    for (const QPainterPath& s : strokes) {
+        painter.drawPath(s);
+    }
     painter.end();
-
-    // The result as a field (negative inside): the letters as drawn (anti-aliased coverage, for
-    // smooth edges), and everything within half the width of those centre lines.
-    std::vector<float> toCentre = distanceSquared(centres, w, h);
-    for (float& d : toCentre) {
-        d = std::sqrt(d);
-    }
     std::vector<float> field(inside.size());
     for (int y = 0; y < h; ++y) {
         const uchar* row = image.constScanLine(y);
         for (int x = 0; x < w; ++x) {
-            const size_t i = static_cast<size_t>(y) * w + x;
-            const float coverage = (127.5f - float(row[x])) / 255.0f;  // about -0.5 inside to 0.5 out
-            field[i] = std::min(coverage, toCentre[i] - r);
+            field[static_cast<size_t>(y) * w + x] = (127.5f - float(row[x])) / 255.0f;  // about -0.5 inside to 0.5 out
         }
+    }
+    // ...and put back together from the curves it was traced from: the letters' own outline
+    // wherever that's still the edge (as the font has it), the strokes' where they are.
+    const double pixel = 1.0 / k;  // (a grid pixel, in the path's units)
+    CurveSet own(pixel), added(pixel);
+    own.add(original);
+    for (const QPainterPath& s : strokes) {
+        added.add(s);
     }
     QPainterPath out;
     out.setFillRule(Qt::WindingFill);
-    const QTransform back = toGrid.inverted();
     for (const QPolygonF& loop : traceZero(field, w, h)) {
-        out.addPolygon(back.map(simplify(loop, 0.25)));
-        out.closeSubpath();
+        std::vector<QPointF> pts;
+        pts.reserve(static_cast<size_t>(loop.size()));
+        for (const QPointF& p : loop) {
+            pts.push_back(toPath.map(p + QPointF(0.5, 0.5)));  // (a pixel's value is its centre's)
+        }
+        spliceLoop(out, pts, {&own, &added}, 0.6 * pixel, 4.0 * pixel);
     }
     return out;
 }
@@ -1121,7 +1974,7 @@ std::vector<core::TextContour> makeLetters(const core::Text& t, const core::Sket
         case core::TextOutline::Silhouette: path = silhouette(path.simplified()); break;
     }
     if (t.minThickness > 0.0) {
-        path = thicken(path.simplified(), t.minThickness / mmPerPixel);
+        path = thicken(path.simplified(), t.minThickness / mmPerPixel, path);
     }
 
     // The path's own lines and curves (the font's, as designed; joined-up or thickened outlines
