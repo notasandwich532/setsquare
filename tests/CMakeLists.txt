@@ -32,6 +32,7 @@ catch_discover_tests(core_tests)
 # --- App: drives the real view and tools with simulated input, headless ---
 add_executable(app_tests
     app/main.cpp
+    app/test_annotate_tool.cpp
     app/test_constraint_tools.cpp
     app/test_document.cpp
     app/test_export.cpp

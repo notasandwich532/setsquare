@@ -219,6 +219,7 @@ const std::pair<ToolKind, const char*> kToolNames[] = {
     {ToolKind::Eyedropper, "eyedropper"},
     {ToolKind::Group, "group"},
     {ToolKind::Measure, "measure"},
+    {ToolKind::Annotate, "annotate"},
 };
 
 QString macrosFolder()
@@ -1036,6 +1037,8 @@ void MainWindow::createActions()
                                 {ToolKind::Hatch, tr("Hatch"), QKeySequence(Qt::SHIFT | Qt::Key_H)},
                                 {ToolKind::ResetFill, tr("Reset Fill"), {}},
                                 {ToolKind::Eyedropper, tr("Eyedropper"), QKeySequence(Qt::Key_I)},
+                                {ToolKind::Annotate, tr("Annotate (dimensions and notes on the drawing)"),
+                                 QKeySequence(Qt::SHIFT | Qt::Key_D)},
                             });
     auto* colorBar = new ColorBar(*m_view, appearanceBar);
     appearanceBar->addWidget(colorBar);

@@ -90,6 +90,14 @@ public:
     const std::optional<core::Image>& imagePreview() const { return m_imagePreview; }
     core::Id imageAt(core::Vec2 world) const;  // the topmost shown image of the active layer there
 
+    // Drawn dimensions (core::DrawnDimension): one drawn in `color` (its own, unless given); the
+    // topmost under the cursor (its text, or with `textOnly` false anywhere on it), of the active
+    // layer (any shown, in presentation view); the Annotate tool, editing one.
+    void drawAnnotation(QPainter& painter, const core::DrawnDimension& d, std::optional<QColor> color = std::nullopt) const;
+    core::Id annotationAt(QPointF screen, bool textOnly = false) const;
+    void editAnnotation(core::Id dimension);
+    class AnnotateTool* annotateTool() const;
+
     // What Paste places (set before switching to ToolKind::Paste).
     void setPasteFragment(core::Sketch fragment);
     QString formatDimension(const core::Constraint& c) const;

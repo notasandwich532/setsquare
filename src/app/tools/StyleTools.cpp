@@ -1,6 +1,7 @@
 #include "StyleTools.h"
 
 #include "../Document.h"
+#include "../Editor.h"
 #include "../SketchView.h"
 
 #include <core/Features.h>
@@ -98,7 +99,8 @@ void StrokeBrushTool::move(const ToolEvent& e)
         }
     }
     m_hover = curveAt(e.screen);
-    view().setHovered(m_hover);
+    const Id dim = view().annotationAt(e.screen);
+    view().setHovered(dim != kNoId ? dim : m_hover);
     refresh();
 }
 
@@ -145,6 +147,24 @@ void StrokeBrushTool::applyBox(bool clear)
 
 void StrokeBrushTool::clickAt(QPointF screen, Qt::KeyboardModifiers modifiers)
 {
+    // A drawn dimension: Colour 1 and the width (Alt: theirs picked up instead).
+    if (const Id dim = view().annotationAt(screen); dim != kNoId) {
+        core::DrawnDimension d = doc().sketch().drawnDimension(dim);
+        if (modifiers & Qt::AltModifier) {
+            SketchView::Paint paint = view().paint();
+            paint.color1 = d.style.color;
+            paint.width = d.style.width;
+            view().setPaint(paint);
+            return;
+        }
+        if (modifiers & Qt::ControlModifier) {
+            return;  // (they always have a colour: nothing to take off)
+        }
+        d.style.color = view().paint().color1;
+        d.style.width = std::max(0.0, view().paint().width);
+        view().tryEdit(QObject::tr("Stroke"), [&](Editor& ed) { ed.setAnnotation(d); });
+        return;
+    }
     const Id curve = curveAt(screen);
     if (curve == kNoId) {
         return;

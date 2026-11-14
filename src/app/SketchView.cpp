@@ -1,5 +1,6 @@
 #include "SketchView.h"
 
+#include <core/Annotations.h>
 #include <core/Curves.h>
 #include <core/Features.h>
 #include <core/Modify.h>
@@ -17,6 +18,7 @@
 #include "tools/GradientTool.h"
 #include "tools/HatchTool.h"
 #include "tools/ImageTool.h"
+#include "tools/AnnotateTool.h"
 #include "tools/MeasureTool.h"
 #include "tools/StyleTools.h"
 #include "tools/TextTool.h"
@@ -146,7 +148,7 @@ void SketchView::setTool(ToolKind kind)
     }
     if (kind != ToolKind::Select && kind != ToolKind::StrokeBrush && kind != ToolKind::Fill && kind != ToolKind::Gradient
         && kind != ToolKind::ResetFill && kind != ToolKind::Eyedropper && kind != ToolKind::Hatch
-        && kind != ToolKind::Measure) {
+        && kind != ToolKind::Measure && kind != ToolKind::Annotate) {
         setPresentation(false);  // editing geometry: see it (and its constraints) properly
     }
     showOptionsPanel(kind);
@@ -222,6 +224,7 @@ void SketchView::setTool(ToolKind kind)
         case ToolKind::SplineControl: m_tool = std::make_unique<SplineTool>(*this, core::SplineKind::Control); break;
         case ToolKind::Dimension: m_tool = std::make_unique<DimensionTool>(*this); break;
         case ToolKind::Measure: m_tool = std::make_unique<MeasureTool>(*this); break;
+        case ToolKind::Annotate: m_tool = std::make_unique<AnnotateTool>(*this); break;
         default: m_tool = std::make_unique<ConstraintTool>(*this, kind); break;
     }
     m_toolKind = kind;
@@ -342,6 +345,136 @@ void SketchView::editGradient(core::Id item)
     setTool(ToolKind::Gradient);
     gradientTool()->setTarget(target);
     gradientTool()->setCurrent(item);
+}
+
+void SketchView::editAnnotation(core::Id dimension)
+{
+    setTool(ToolKind::Annotate);
+    annotateTool()->setCurrent(dimension);
+}
+
+AnnotateTool* SketchView::annotateTool() const
+{
+    return m_toolKind == ToolKind::Annotate ? static_cast<AnnotateTool*>(m_tool.get()) : nullptr;
+}
+
+namespace
+{
+// A drawn dimension's text, set up to draw: its font at 100 px, and the painter's transform that
+// puts that on its place at its size (text space: x along the baseline from where it starts, y down).
+struct AnnotationText
+{
+    QFont font;
+    QString text;
+    QTransform toScreen;
+    double width = 0.0;  // at 100 px
+    double left = 0.0;   // where it starts, from its anchor (at 100 px)
+};
+
+AnnotationText annotationText(const core::annotation::Graphics& g, const core::DrawnDimension& d,
+                              const std::function<QPointF(core::Vec2)>& toScreen, double zoom)
+{
+    AnnotationText t;
+    t.font = QFont(QString::fromStdString(d.font));
+    t.font.setPixelSize(100);
+    t.text = QString::fromStdString(g.text.text);
+    t.width = QFontMetricsF(t.font).horizontalAdvance(t.text);
+    t.left = -t.width * g.text.align / 2.0;
+    const double em = g.text.height / core::annotation::kCapHeight * zoom;  // px
+    const QPointF at = toScreen(g.text.at);
+    t.toScreen.translate(at.x(), at.y());
+    t.toScreen.rotate(-g.text.angle);
+    t.toScreen.scale(em / 100.0, em / 100.0);
+    return t;
+}
+}  // namespace
+
+void SketchView::drawAnnotation(QPainter& painter, const core::DrawnDimension& d, std::optional<QColor> color) const
+{
+    const core::annotation::Graphics g = core::annotation::graphics(m_doc.sketch(), d);
+    if (!g.valid) {
+        return;
+    }
+    const QColor ink = color ? *color : QColor(d.style.color.r, d.style.color.g, d.style.color.b, d.style.color.a);
+    painter.save();
+    QPen pen = strokePen(core::StrokeStyle{d.style.color, d.style.width, core::Dash::Solid, {}});
+    pen.setColor(ink);
+    painter.setPen(pen);
+    painter.setBrush(Qt::NoBrush);
+    for (const auto& l : g.lines) {
+        painter.drawLine(toScreen(l[0]), toScreen(l[1]));
+    }
+    for (const auto& a : g.arcs) {
+        // (Counter-clockwise from its start, as arcs go.)
+        core::ArcShape arc{a.center, a.radius, a.sweep < 0 ? a.start + a.sweep : a.start, std::abs(a.sweep)};
+        drawArcPath(painter, arc);
+    }
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(ink);
+    for (const auto& arrow : g.arrows) {
+        painter.drawPolygon(QPolygonF({toScreen(arrow[0]), toScreen(arrow[1]), toScreen(arrow[2])}));
+    }
+    // The text (unless too small to read).
+    if (g.text.height / core::annotation::kCapHeight * m_zoom >= 2.0 && !g.text.text.empty()) {
+        const AnnotationText t = annotationText(g, d, [this](core::Vec2 p) { return toScreen(p); }, m_zoom);
+        painter.setTransform(t.toScreen, true);
+        painter.setFont(t.font);
+        painter.setPen(ink);
+        painter.drawText(QPointF(t.left, 0), t.text);
+    }
+    painter.restore();
+}
+
+core::Id SketchView::annotationAt(QPointF screen, bool textOnly) const
+{
+    const core::Sketch& s = m_doc.sketch();
+    core::Id found = core::kNoId;
+    for (const auto& [id, d] : s.drawnDimensions()) {  // (later ones are drawn on top: the last wins)
+        const core::Id layer = s.layerOf(id);
+        if (!s.isShown(id) || (layer != core::kNoId && s.hasLayer(layer) && !s.layer(layer).visible)
+            || (!m_presentation && layer != s.activeLayer())) {
+            continue;
+        }
+        const core::annotation::Graphics g = core::annotation::graphics(s, d);
+        if (!g.valid) {
+            continue;
+        }
+        bool hit = false;
+        if (!g.text.text.empty()) {
+            const AnnotationText t = annotationText(g, d, [this](core::Vec2 p) { return toScreen(p); }, m_zoom);
+            const QFontMetricsF fm(t.font);
+            const QRectF box(t.left - 10, -fm.ascent(), t.width + 20, fm.ascent() + fm.descent());
+            hit = t.toScreen.map(QPolygonF(box)).containsPoint(screen, Qt::OddEvenFill);
+        }
+        if (!hit && !textOnly) {
+            auto near = [&](QPointF a, QPointF b) {
+                const QPointF ab = b - a;
+                const double l2 = QPointF::dotProduct(ab, ab);
+                const double t = l2 > 0 ? std::clamp(QPointF::dotProduct(screen - a, ab) / l2, 0.0, 1.0) : 0.0;
+                const QPointF q = a + ab * t - screen;
+                return std::hypot(q.x(), q.y()) <= kPickPixels;
+            };
+            for (const auto& l : g.lines) {
+                hit = hit || near(toScreen(l[0]), toScreen(l[1]));
+            }
+            for (const auto& a : g.arcs) {
+                for (int i = 0; i < 24 && !hit; ++i) {
+                    auto at = [&](int k) {
+                        const double angle = a.start + a.sweep * k / 24.0;
+                        return toScreen({a.center.x + a.radius * std::cos(angle), a.center.y + a.radius * std::sin(angle)});
+                    };
+                    hit = near(at(i), at(i + 1));
+                }
+            }
+            for (const auto& arrow : g.arrows) {
+                hit = hit || near(toScreen(arrow[0]), toScreen(arrow[1])) || near(toScreen(arrow[0]), toScreen(arrow[2]));
+            }
+        }
+        if (hit) {
+            found = id;
+        }
+    }
+    return found;
 }
 
 void SketchView::editHatch(core::Id fill)
@@ -836,8 +969,23 @@ core::Id SketchView::pickAt(QPointF screen, bool annotations, bool editable) con
             options.sublayer = m_doc.sketch().activeSublayer();
         }
     }
+    // Drawn dimensions (for selecting: callers after geometry don't ask for annotations): their
+    // text before the geometry it may sit over, the rest of them after.
+    if (annotations) {
+        if (const core::Id dim = annotationAt(screen, true); dim != core::kNoId) {
+            return dim;
+        }
+    }
     const core::Id hit = core::pick(m_doc.sketch(), toWorld(screen), options);
-    return hit != core::kNoId ? hit : textAt(screen, editable);  // geometry first, then text under it
+    if (hit != core::kNoId) {
+        return hit;
+    }
+    if (annotations) {
+        if (const core::Id dim = annotationAt(screen, false); dim != core::kNoId) {
+            return dim;
+        }
+    }
+    return textAt(screen, editable);  // geometry first, then text under it
 }
 
 Snap SketchView::snap(QPointF screen) const
@@ -967,7 +1115,7 @@ void SketchView::deleteSelection()
     tryEdit(tr("Delete"), [&](Editor& ed) {
         for (core::Id id : doomed) {
             const core::Sketch& s = ed.sketch();
-            if (s.hasEntity(id) || s.hasConstraint(id) || s.hasText(id) || s.hasFill(id)) {
+            if (s.hasEntity(id) || s.hasConstraint(id) || s.hasText(id) || s.hasFill(id) || s.hasDrawnDimension(id)) {
                 ed.remove(id);  // may already be gone via an earlier cascade
             }
         }
@@ -1012,6 +1160,32 @@ void SketchView::fitAll()
             for (const core::Point& p : contour) {
                 const core::Point w = core::textToWorld(s.point(t.anchor), t.angle, p);
                 include({w.x, w.y});
+            }
+        }
+    }
+    for (const auto& [id, d] : s.drawnDimensions()) {
+        const core::annotation::Graphics g = core::annotation::graphics(s, d);
+        if (!g.valid) {
+            continue;
+        }
+        for (const auto& l : g.lines) {
+            include(l[0]);
+            include(l[1]);
+        }
+        for (const auto& a : g.arcs) {
+            for (int i = 0; i <= 8; ++i) {
+                const double angle = a.start + a.sweep * i / 8.0;
+                include({a.center.x + a.radius * std::cos(angle), a.center.y + a.radius * std::sin(angle)});
+            }
+        }
+        // Its text (about as long as it has letters, each about 0.75 of a capital wide).
+        const double length = g.text.height * 0.75 * static_cast<double>(QString::fromStdString(g.text.text).size());
+        const double start = -length * g.text.align / 2.0;
+        const double angle = g.text.angle * std::numbers::pi / 180;
+        for (double along : {start, start + length}) {
+            for (double up : {0.0, g.text.height}) {
+                include({g.text.at.x + along * std::cos(angle) - up * std::sin(angle),
+                         g.text.at.y + along * std::sin(angle) + up * std::cos(angle)});
             }
         }
     }
@@ -1641,6 +1815,25 @@ void SketchView::drawSketch(QPainter& painter, core::Id only) const
         const bool hot = m_selection.contains(id) || id == m_hovered;
         const QColor edge = m_selection.contains(id) ? colors.selection : id == m_hovered ? colors.hover : color;
         painter.strokePath(path, QPen(edge, hot ? kHighlightWidth : 1.0));
+    }
+
+    // Drawn dimensions: part of the drawing, in their own colour (in other sublayers, faded while
+    // sketching, as texts are).
+    for (const auto& [id, d] : sketch.drawnDimensions()) {
+        if ((only != core::kNoId && id != only) || hidden(id) || !inLayer(id)) {
+            continue;
+        }
+        QColor color(d.style.color.r, d.style.color.g, d.style.color.b, d.style.color.a);
+        if (m_selection.contains(id)) {
+            color = colors.selection;
+        }
+        else if (id == m_hovered) {
+            color = colors.hover;
+        }
+        else if (!m_presentation && d.sublayer != sketch.activeSublayer()) {
+            color.setAlphaF(color.alphaF() * (layer == activeLayer ? kOtherSublayerAlpha : kOtherLayerAlpha));
+        }
+        drawAnnotation(painter, d, color);
     }
 
     // Curves (points go on top of everything, below).

@@ -33,6 +33,10 @@ public:
     // Same, through the recording Editor: the UI's way of changing geometry. The Python
     // equivalent of the edit is emitted via recorded().
     void edit(const QString& label, const std::function<void(Editor&)>& fn);
+    // The next edit (only) merges into the last one if that had the same key and nothing has
+    // happened since: one undo step and one recorded command for a run of them (each key typed
+    // into a field is an edit).
+    void setMergeKey(const QString& key) { m_nextMergeKey = key; }
 
     // Groups everything until endTransaction() into one undo step (e.g. a whole script).
     // Nests; undo/redo are refused while one is open.
@@ -188,6 +192,9 @@ private:
     core::Sketch m_beforeDrag;
     bool m_dragMoved = false;
     bool m_labelDragging = false;
+    QString m_nextMergeKey;
+    QString m_lastMergeKey;
+    quint64 m_lastMergeRevision = 0;
 
     // What the current drag is, for recording it when it ends.
     std::vector<core::Id> m_dragPoints;

@@ -5,6 +5,7 @@
 #include "../Theme.h"
 #include "StyleTools.h"
 
+#include <core/Annotations.h>
 #include <core/Dimensions.h>
 
 #include <QPainter>
@@ -70,6 +71,13 @@ void SelectTool::startDrag()
     const core::Sketch& sketch = doc().sketch();
     const auto& selection = view().selection();
 
+    if (sketch.hasDrawnDimension(m_pressed)) {
+        // A drawn dimension: its label moves (what it measures stays).
+        m_labelStart = core::annotation::graphics(sketch, sketch.drawnDimension(m_pressed)).label;
+        doc().beginLabelDrag();
+        m_state = State::DraggingLabel;
+        return;
+    }
     if (sketch.hasConstraint(m_pressed)) {
         const core::Constraint& c = sketch.constraint(m_pressed);
         if (core::isDimension(c.type)) {
@@ -143,11 +151,17 @@ void SelectTool::move(const ToolEvent& e)
 
         case State::DraggingLabel: {
             const core::Sketch& sketch = doc().sketch();
+            const core::Vec2 label{m_labelStart.x + e.world.x - m_pressWorld.x,
+                                   m_labelStart.y + e.world.y - m_pressWorld.y};
+            if (sketch.hasDrawnDimension(m_pressed)) {
+                const core::Vec2 offset =
+                    core::annotation::labelOffsetFor(sketch, sketch.drawnDimension(m_pressed), label);
+                doc().moveLabel(m_pressed, offset.x, offset.y);
+                return;
+            }
             if (!sketch.hasConstraint(m_pressed)) {
                 return;
             }
-            const core::Vec2 label{m_labelStart.x + e.world.x - m_pressWorld.x,
-                                   m_labelStart.y + e.world.y - m_pressWorld.y};
             const core::Vec2 offset = core::labelOffsetFor(sketch, sketch.constraint(m_pressed), label);
             doc().moveLabel(m_pressed, offset.x, offset.y);
             return;
@@ -166,6 +180,10 @@ void SelectTool::doubleClick(const ToolEvent& e)
     const core::Sketch& sketch = doc().sketch();
     if (sketch.hasText(hit)) {
         view().editText(hit);
+        return;
+    }
+    if (sketch.hasDrawnDimension(hit)) {
+        view().editAnnotation(hit);  // into the annotate tool, editing it
         return;
     }
     // A gradient: into the gradient tool, editing it (a curve's stroke, else the fill there).

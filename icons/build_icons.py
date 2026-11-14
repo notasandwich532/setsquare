@@ -1190,6 +1190,36 @@ def icon_measure():
     return finish("measure")
 
 
+def icon_annotate():
+    """A dimension drawn on the drawing: grey extension lines, an amber arrowed line and its text."""
+    start()
+    left = line((3, 3), (3, 15), GREY, width=1.5)
+    right = line((21, 3), (21, 15), GREY, width=1.5)
+    for ext, x in ((left, 3), (right, 21)):
+        s.vertical(ext)
+        pin(ext.p1, x, 3)
+        s.distance(ext, value=12)
+    dim = line((3, 8), (21, 8), AMBER, width=1.5)
+    pin(dim.p1, 3, 8)
+    s.horizontal(dim)
+    s.coincident(dim.p2, right)
+    for tip, sign in ((dim.p1, 1), (dim.p2, -1)):
+        x, y = tip.pos
+        b1, b2 = s.point(x + sign * 4.5, y + 2.75), s.point(x + sign * 4.5, y - 2.75)
+        edges = [line(tip, b1, AMBER, width=1), line(b1, b2, AMBER, width=1), line(b2, tip, AMBER, width=1)]
+        pin(b1, x + sign * 4.5, y + 2.75)
+        pin(b2, x + sign * 4.5, y - 2.75)
+        for half in (0.8, -0.8):  # (the line runs through it: two halves)
+            s.fill(at=(x + sign * 3, y + half), color=AMBER)
+    label = s.rectangle((7, 13.5), (17, 19.5))  # the number, as a block
+    stroke(label, AMBER, width=1)
+    pin(label[0].p1, 7, 13.5)
+    s.distance(label[0], value=10)
+    s.distance(label[1], value=6)
+    s.fill(at=(12, 16.5), color=AMBER)
+    return finish("annotate")
+
+
 def icon_presentation():
     """An eye: the drawing as it will be seen."""
     start()
@@ -1221,7 +1251,7 @@ ICONS.update({
               icon_slot_overall, icon_slot_center_point, icon_arc_slot, icon_arc_slot_3point, icon_trim,
               icon_trim_construction, icon_extend, icon_break, icon_fillet, icon_chamfer_equal, icon_chamfer_2distances,
               icon_chamfer_angle, icon_move, icon_scale, icon_mirror, icon_rectangular_pattern, icon_circular_pattern,
-              icon_offset, icon_divide, icon_stroke_brush, icon_fill, icon_gradient, icon_hatch, icon_reset_fill, icon_image, icon_eyedropper, icon_presentation, icon_measure]
+              icon_offset, icon_divide, icon_stroke_brush, icon_fill, icon_gradient, icon_hatch, icon_reset_fill, icon_image, icon_eyedropper, icon_presentation, icon_measure, icon_annotate]
 })
 
 wanted = sys.argv[1:] or list(ICONS)

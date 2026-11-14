@@ -82,6 +82,7 @@ enum class ToolKind
     Group,
     Hatch,
     Measure,
+    Annotate,
 };
 
 struct ToolEvent

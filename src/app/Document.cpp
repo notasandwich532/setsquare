@@ -2,6 +2,7 @@
 
 #include "TextShapes.h"
 
+#include <core/Annotations.h>
 #include <core/Features.h>
 #include <core/Groups.h>
 #include <core/Regions.h>
@@ -68,7 +69,13 @@ void Document::edit(const QString& /*label*/, const std::function<void(Editor&)>
     core::Sketch working = m_sketch;
     QStringList python;
     Editor editor(working, &python);
-    fn(editor);  // may throw; m_sketch is untouched in that case
+    try {
+        fn(editor);  // may throw; m_sketch is untouched in that case
+    }
+    catch (...) {
+        m_nextMergeKey.clear();  // (it was for this edit)
+        throw;
+    }
     const core::Sketch before = m_sketch;
     commit(std::move(working));
     resolve(&before);
@@ -474,10 +481,18 @@ void Document::beginLabelDrag()
 
 void Document::moveLabel(core::Id dimension, double dx, double dy)
 {
-    if (!m_sketch.hasConstraint(dimension)) {
+    if (m_sketch.hasDrawnDimension(dimension)) {
+        core::DrawnDimension d = m_sketch.drawnDimension(dimension);
+        d.labelX = dx;
+        d.labelY = dy;
+        m_sketch.setDrawnDimension(d);
+    }
+    else if (m_sketch.hasConstraint(dimension)) {
+        m_sketch.setConstraintLabel(dimension, dx, dy);
+    }
+    else {
         return;
     }
-    m_sketch.setConstraintLabel(dimension, dx, dy);
     m_dragMoved = true;
     m_labelDimension = dimension;
     emit changed();
@@ -494,6 +509,12 @@ void Document::endLabelDrag()
             const core::Constraint& c = m_sketch.constraint(m_labelDimension);
             record(QStringLiteral("%1.label = (%2, %3)")
                        .arg(Editor::name(m_sketch, c.id), Editor::number(c.labelX), Editor::number(c.labelY)));
+        }
+        else if (m_sketch.hasDrawnDimension(m_labelDimension)) {
+            const core::annotation::Graphics g =
+                core::annotation::graphics(m_sketch, m_sketch.drawnDimension(m_labelDimension));
+            record(QStringLiteral("s.edit_annotation(%1, at=%2)")
+                       .arg(Editor::name(m_sketch, m_labelDimension), Editor::pair(g.label)));
         }
     }
     m_beforeDrag = {};
@@ -685,7 +706,20 @@ void Document::commit(core::Sketch next)
         m_transactionChanged = true;
         return;
     }
-    pushUndo(std::move(before), m_history);  // (the edit's own commands are recorded after this)
+    const QString key = std::exchange(m_nextMergeKey, QString());
+    if (!key.isEmpty() && key == m_lastMergeKey && m_revision == m_lastMergeRevision && !m_undo.empty()) {
+        // The same edit again, straight after (typing on in a field): one step, one command. The
+        // step before it stays what undo goes back to; its command replaces the last one's.
+        m_history = m_undo.back().history;
+        m_redo.clear();
+        m_revision = m_nextRevision++;
+        emit fileStateChanged();
+    }
+    else {
+        pushUndo(std::move(before), m_history);  // (the edit's own commands are recorded after this)
+    }
+    m_lastMergeKey = key;
+    m_lastMergeRevision = m_revision;
 }
 
 void Document::pushUndo(core::Sketch snapshot, QStringList history)
