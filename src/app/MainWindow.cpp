@@ -149,7 +149,9 @@ MainWindow::~MainWindow()
 
 namespace
 {
-const QString kFileFilter = QObject::tr("Sketches (*.dsk);;All files (*)");
+// Sketches are .setsq; .dsk is what they were before the app was named Setsquare (still opened).
+const QString kFileFilter = QObject::tr("Sketches (*.setsq *.dsk);;All files (*)");
+const QString kSaveFilter = QObject::tr("Sketches (*.setsq);;All files (*)");
 
 const std::pair<ToolKind, const char*> kToolNames[] = {
     {ToolKind::Select, "select"},
@@ -293,15 +295,18 @@ bool MainWindow::save()
 
 bool MainWindow::saveAs()
 {
-    const QString start = m_doc->filePath().isEmpty()
-        ? QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + QStringLiteral("/untitled.dsk")
+    QString start = m_doc->filePath().isEmpty()
+        ? QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + QStringLiteral("/untitled.setsq")
         : m_doc->filePath();
-    QString path = QFileDialog::getSaveFileName(this, tr("Save Sketch"), start, kFileFilter);
+    if (start.endsWith(QStringLiteral(".dsk"), Qt::CaseInsensitive)) {  // (an older file: offered as .setsq)
+        start = start.left(start.size() - 4) + QStringLiteral(".setsq");
+    }
+    QString path = QFileDialog::getSaveFileName(this, tr("Save Sketch"), start, kSaveFilter);
     if (path.isEmpty()) {
         return false;
     }
     if (QFileInfo(path).suffix().isEmpty()) {
-        path += QStringLiteral(".dsk");
+        path += QStringLiteral(".setsq");
     }
     QString error;
     if (!m_doc->save(path, &error)) {

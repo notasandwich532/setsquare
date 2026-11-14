@@ -65,7 +65,7 @@ s.clear_page()
 assert s.page is None
 s.set_page("A4", origin="center")
 with tempfile.TemporaryDirectory() as folder:
-    path = os.path.join(folder, "page.dsk")
+    path = os.path.join(folder, "page.setsq")
     doc.save(path)
     doc.new()
     assert s.page is None

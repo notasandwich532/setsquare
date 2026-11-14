@@ -111,7 +111,7 @@ s.coincident(p, rail)
 down = s.line(p, bottom)
 q = s.point(10, 12)
 s.line(p, q)
-path = os.path.join(tempfile.mkdtemp(), "redundant.dsk")
+path = os.path.join(tempfile.mkdtemp(), "redundant.setsq")
 doc.save(path)
 with open(path, encoding="utf-8") as f:
     data = json.load(f)

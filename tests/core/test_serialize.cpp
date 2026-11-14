@@ -1,4 +1,4 @@
-// .dsk file format round-trips, error handling, and the origin point.
+// .setsq file format round-trips, error handling, and the origin point.
 
 #include <core/Geometry.h>
 #include <core/Serialize.h>

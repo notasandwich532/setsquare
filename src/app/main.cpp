@@ -60,7 +60,7 @@ int main(int argc, char* argv[])
     QCommandLineParser parser;
     parser.setApplicationDescription("Parametric 2D drawing app");
     parser.addHelpOption();
-    parser.addPositionalArgument("file", "Sketch (.dsk) to open");
+    parser.addPositionalArgument("file", "Sketch (.setsq) to open");
     const QCommandLineOption scriptOption("script", "Run a Python script once the window is up.", "file.py");
     parser.addOption(scriptOption);
     parser.process(app);

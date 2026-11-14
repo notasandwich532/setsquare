@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-// Sketch <-> JSON (.dsk files). The format is versioned; ids are kept so that files diff well
+// Sketch <-> JSON (.setsq files). The format is versioned; ids are kept so that files diff well
 // and scripts can refer to things by id.
 //
 // {

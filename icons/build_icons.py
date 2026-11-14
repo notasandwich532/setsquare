@@ -1,5 +1,5 @@
 # Builds the tool icons: each is drawn as a fully constrained sketch on a 24 x 24 grid, saved as
-# an editable source (src/<name>.dsk) and exported as SVG (<name>.svg).
+# an editable source (src/<name>.setsq) and exported as SVG (<name>.svg).
 #
 #   setsquare-cli icons/build_icons.py            (all of them)
 #   setsquare-cli icons/build_icons.py tangent    (just some)
@@ -61,7 +61,7 @@ def finish(name):
     if not r.ok:
         problems.append("didn't solve")
     os.makedirs(os.path.join(HERE, "src"), exist_ok=True)
-    doc.save(os.path.join(HERE, "src", name + ".dsk"))
+    doc.save(os.path.join(HERE, "src", name + ".setsq"))
     doc.export_svg(os.path.join(HERE, name + ".svg"), undecorated=False, canvas=(0, 0, 24, 24))
     print(f"{name:20} {'ok' if not problems else 'PROBLEM: ' + '; '.join(problems)}")
     return not problems

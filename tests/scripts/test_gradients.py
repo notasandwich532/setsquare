@@ -144,7 +144,7 @@ f.gradient = setsquare.radial([RED, BLUE], shape=ring)
 # --- saved and opened -------------------------------------------------------------------------
 before = (f.gradient, sides[1].stroke, t.gradient)
 with tempfile.TemporaryDirectory() as folder:
-    path = os.path.join(folder, "g.dsk")
+    path = os.path.join(folder, "g.setsq")
     doc.save(path)
     doc.open(path)
 assert (f.gradient, sides[1].stroke, t.gradient) == before  # (by id: the same items)

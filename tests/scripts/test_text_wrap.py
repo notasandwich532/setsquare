@@ -63,7 +63,7 @@ for bad in (lambda: s.edit_text(t, wrap=False, grow=True), lambda: s.text("x", a
 
 # Saved and read back.
 t, a, b = box_text(words, grow=True)
-path = os.path.join(tempfile.mkdtemp(), "wrap.dsk")
+path = os.path.join(tempfile.mkdtemp(), "wrap.setsq")
 doc.save(path)
 doc.open(path)
 t = s.texts[0]

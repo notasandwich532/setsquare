@@ -21,7 +21,7 @@ s.drag_edge(c, (105, 0), 3, 0)
 assert isclose(c.radius, 8, abs_tol=1e-4), c.radius
 
 # Files: save, start over, reopen.
-path = os.path.join(tempfile.mkdtemp(), "api.dsk")
+path = os.path.join(tempfile.mkdtemp(), "api.setsq")
 count = len(s.entities)
 doc.save(path)
 assert doc.path == path and not doc.modified

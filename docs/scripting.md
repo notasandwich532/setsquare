@@ -13,8 +13,8 @@ environment variables, never get involved.
 |---|---|
 | **Console** | The *Python* dock (View → Python). Enter runs; Shift+Enter adds a line; Up/Down recall history. |
 | **Macros** | Macros → Run Script… (Ctrl+Shift+R). Scripts in the macros folder are listed under Macros → Macros Folder. |
-| **Startup** | `setsquare --script setup.py [part.dsk]` |
-| **Headless** | `setsquare-cli script.py [args]`, `setsquare-cli --open part.dsk script.py`, or `setsquare-cli -c "print(s.dof)"`. The exit code is 0 on success and 1 on an uncaught exception, and a traceback goes to stderr. |
+| **Startup** | `setsquare --script setup.py [part.setsq]` |
+| **Headless** | `setsquare-cli script.py [args]`, `setsquare-cli --open part.setsq script.py`, or `setsquare-cli -c "print(s.dof)"`. The exit code is 0 on success and 1 on an uncaught exception, and a traceback goes to stderr. |
 
 In all of these, `doc` (the document), `s` (its sketch), `app` (the window) and `setsquare` are
 predefined. Elsewhere, start with `import setsquare; doc = setsquare.document(); s = doc.sketch`.
@@ -290,7 +290,7 @@ doc.save(path)  doc.open(path)  doc.new()  doc.undo()  doc.redo()  doc.path  doc
 doc.export_svg(path, fills=True, undecorated=True, construction=False, margin=2)  # as presentation view, in mm
 doc.export_dxf(path, styles=True, construction=False)  # exact geometry, DXF R12, mm; no fills
 doc.to_svg(...), doc.to_dxf(...)                       # the same, as strings
-doc.history      # the commands that built the sketch, one per edit (saved in the .dsk; undo
+doc.history      # the commands that built the sketch, one per edit (saved in the .setsq; undo
                  # takes commands off); run them in a new sketch to rebuild it
 doc.to_json()
 app.fit()  app.selection = [l, c]  app.tool = "line"  app.message("hi")   # needs the UI

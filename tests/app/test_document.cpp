@@ -17,7 +17,7 @@ TEST_CASE("Save and open round-trip a sketch", "[document][files]")
 {
     QTemporaryDir dir;
     REQUIRE(dir.isValid());
-    const QString path = dir.filePath("bracket.dsk");
+    const QString path = dir.filePath("bracket.setsq");
 
     Document a;
     a.modify("draw", [](Sketch& s) {
@@ -40,6 +40,23 @@ TEST_CASE("Save and open round-trip a sketch", "[document][files]")
     CHECK_FALSE(b.canUndo());
 }
 
+TEST_CASE("Sketches saved as .dsk (before the app was named Setsquare) still open", "[document][files]")
+{
+    QTemporaryDir dir;
+    REQUIRE(dir.isValid());
+    const QString path = dir.filePath("older.dsk");
+    {
+        QFile f(path);
+        REQUIRE(f.open(QIODevice::WriteOnly));
+        f.write(R"({"format":"drawing_app.sketch","version":1,
+                    "entities":[{"id":1,"type":"point","x":3,"y":4}],"constraints":[]})");
+    }
+    Document doc;
+    QString error;
+    REQUIRE(doc.open(path, &error));
+    CHECK(doc.sketch().hasEntity(1));
+}
+
 TEST_CASE("Modified flag follows edits, saves and undo", "[document][files]")
 {
     QTemporaryDir dir;
@@ -49,7 +66,7 @@ TEST_CASE("Modified flag follows edits, saves and undo", "[document][files]")
 
     doc.modify("p", [](Sketch& s) { s.addPoint(1, 1); });
     CHECK(doc.isModified());
-    REQUIRE(doc.save(dir.filePath("x.dsk")));
+    REQUIRE(doc.save(dir.filePath("x.setsq")));
     CHECK_FALSE(doc.isModified());
 
     doc.modify("q", [](Sketch& s) { s.addPoint(2, 2); });
@@ -64,7 +81,7 @@ TEST_CASE("Modified flag follows edits, saves and undo", "[document][files]")
 TEST_CASE("Opening a bad file reports an error and keeps the current sketch", "[document][files]")
 {
     QTemporaryDir dir;
-    const QString path = dir.filePath("broken.dsk");
+    const QString path = dir.filePath("broken.setsq");
     {
         QFile f(path);
         REQUIRE(f.open(QIODevice::WriteOnly));
@@ -78,13 +95,13 @@ TEST_CASE("Opening a bad file reports an error and keeps the current sketch", "[
     CHECK_FALSE(doc.open(path, &error));
     CHECK_FALSE(error.isEmpty());
     CHECK(doc.sketch().entities().size() == before);
-    CHECK_FALSE(doc.open(dir.filePath("does-not-exist.dsk"), &error));
+    CHECK_FALSE(doc.open(dir.filePath("does-not-exist.setsq"), &error));
 }
 
 TEST_CASE("Files without an origin get one when opened", "[document][files]")
 {
     QTemporaryDir dir;
-    const QString path = dir.filePath("old.dsk");
+    const QString path = dir.filePath("old.setsq");
     {
         QFile f(path);
         REQUIRE(f.open(QIODevice::WriteOnly));
@@ -124,7 +141,7 @@ TEST_CASE("The command history follows edits, undo and redo, and is saved", "[do
     REQUIRE(doc.history().size() == 4);
     CHECK(doc.history().last().contains("s.circle("));
 
-    const QString path = dir.filePath("history.dsk");
+    const QString path = dir.filePath("history.setsq");
     REQUIRE(doc.save(path));
     Document loaded;
     REQUIRE(loaded.open(path));

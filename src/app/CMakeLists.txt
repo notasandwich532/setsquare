@@ -85,7 +85,7 @@ target_link_libraries(setsquare_lib PUBLIC drawdoc drawscript Qt6::Widgets Qt6::
 # Tool icons (made by icons/build_icons.py), compiled in as :/icons/<name>.svg.
 file(GLOB tool_icons CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/icons/*.svg")
 qt_add_resources(setsquare_lib "tool_icons" PREFIX "/icons" BASE "${PROJECT_SOURCE_DIR}/icons" FILES ${tool_icons})
-# The app's own icon (drawn with the app: drawings/app_icon.dsk), as :/icons/app/setsquare.svg.
+# The app's own icon (drawn with the app: drawings/app_icon.setsq), as :/icons/app/setsquare.svg.
 qt_add_resources(setsquare_lib "app_icon" PREFIX "/icons" BASE "${PROJECT_SOURCE_DIR}/icons" FILES "${PROJECT_SOURCE_DIR}/icons/app/setsquare.svg")
 if(WIN32)
     target_link_libraries(setsquare_lib PRIVATE dxgi dwmapi)  # vblank pacing (FrameClock)

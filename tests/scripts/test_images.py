@@ -91,7 +91,7 @@ assert not img.visible
 s.edit_image(img, visible=True)
 
 # --- saved in the drawing ---------------------------------------------------------------------------
-saved = os.path.join(folder, "with image.dsk")
+saved = os.path.join(folder, "with image.setsq")
 before = (img.center, img.width, img.angle, img.opacity, img.pixels)
 doc.save(saved)
 assert os.path.getsize(saved) > 100

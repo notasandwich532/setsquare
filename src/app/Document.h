@@ -114,7 +114,7 @@ public:
     // The Python commands that built the current sketch, oldest first, one per edit: what the
     // recorder writes for UI actions and for calls made from scripts and the console. Undo takes
     // the undone commands off (redo puts them back), so replaying the history on a new sketch
-    // rebuilds this one. Saved in .dsk files.
+    // rebuilds this one. Saved in .setsq files.
     const QStringList& history() const { return m_history; }
 
     // Changes with every committed edit (not while a drag is in progress).

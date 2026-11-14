@@ -52,7 +52,7 @@ for bad in ([a, tri[0]], [oval, a]):
 
 # --- saved and opened -------------------------------------------------------------------------------
 with tempfile.TemporaryDirectory() as folder:
-    path = os.path.join(folder, "t.dsk")
+    path = os.path.join(folder, "t.setsq")
     doc.save(path)
     doc.open(path)
 along = [x for x in s.texts if x.text.startswith("Along")][0]

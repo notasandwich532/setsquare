@@ -118,7 +118,7 @@ assert 'fill="#ff0000"' in doc.to_svg(undecorated=False, margin=0)  # (no patter
 # --- saved and opened ----------------------------------------------------------------------------
 f.hatch = own
 with tempfile.TemporaryDirectory() as folder:
-    path = os.path.join(folder, "h.dsk")
+    path = os.path.join(folder, "h.setsq")
     doc.save(path)
     doc.open(path)
 assert s.fills[-1].hatch == own, s.fills[-1].hatch

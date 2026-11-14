@@ -103,7 +103,7 @@ g = s.group(tri)
 lines = doc.history
 assert lines[-1].startswith(f"k{g.id} = s.group([") or lines[-1].startswith(f"d{g.id} = s.group(["), lines[-1]
 with tempfile.TemporaryDirectory() as folder:
-    path = os.path.join(folder, "group.dsk")
+    path = os.path.join(folder, "group.setsq")
     doc.save(path)
     doc.open(path)
 assert any(k.type == "group" for k in s.constraints)
