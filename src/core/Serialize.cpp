@@ -561,6 +561,39 @@ std::string toJson(const Sketch& sketch, bool compact, const std::vector<std::st
         }
         doc["texts"] = std::move(texts);
     }
+    if (!sketch.drawnDimensions().empty()) {
+        json dims = json::array();
+        for (const auto& [id, d] : sketch.drawnDimensions()) {
+            json j{{"id", id},
+                   {"kind", toString(d.kind)},
+                   {"refs", d.refs},
+                   {"label", {d.labelX, d.labelY}},
+                   {"text", d.text},
+                   {"font", d.font},
+                   {"text_height", d.textHeight},
+                   {"color", d.style.color.hex()},
+                   {"width", d.style.width},
+                   {"sublayer", d.sublayer}};
+            if (d.decimals >= 0) {
+                j["decimals"] = d.decimals;
+            }
+            if (d.flip != 0) {
+                j["flip"] = d.flip;
+            }
+            if (d.alongY) {
+                j["along_y"] = true;
+            }
+            if (d.kind == DrawnDimensionKind::Leader) {
+                j["along"] = d.along;
+                j["tip"] = {d.tip.x, d.tip.y};
+            }
+            dims.push_back(std::move(j));
+        }
+        doc["drawn_dimensions"] = std::move(dims);
+    }
+    if (sketch.dimensionDecimals() != 2) {
+        doc["dimension_decimals"] = sketch.dimensionDecimals();
+    }
     json sublayers = json::array();
     for (const Sublayer& l : sketch.sublayers()) {
         json j{{"id", l.id}, {"name", l.name}, {"layer", l.layer}};
@@ -831,6 +864,36 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
             }
             sketch.insertText(t);
         }
+        sketch.setDimensionDecimals(doc.value("dimension_decimals", 2));
+        for (const json& j : doc.value("drawn_dimensions", json::array())) {
+            DrawnDimension d;
+            d.id = j.at("id").get<Id>();
+            if (!drawnDimensionKindFromString(j.value("kind", std::string()), d.kind)) {
+                throw SketchError("unknown dimension kind '" + j.value("kind", std::string()) + "'");
+            }
+            d.refs = j.value("refs", std::vector<Id>{});
+            if (j.contains("label")) {
+                d.labelX = j.at("label").at(0).get<double>();
+                d.labelY = j.at("label").at(1).get<double>();
+            }
+            d.text = j.value("text", std::string("<>"));
+            d.font = j.value("font", std::string());
+            d.textHeight = j.value("text_height", d.textHeight);
+            d.decimals = j.value("decimals", -1);
+            d.flip = j.value("flip", std::uint8_t{0});
+            d.alongY = j.value("along_y", false);
+            d.along = j.value("along", 0.0);
+            if (j.contains("tip")) {
+                d.tip = {j.at("tip").at(0).get<double>(), j.at("tip").at(1).get<double>()};
+            }
+            const std::string color = j.value("color", std::string("#ffffff"));
+            if (!Color::fromHex(color, d.style.color)) {
+                throw SketchError("bad dimension colour '" + color + "'");
+            }
+            d.style.width = std::max(0.0, j.value("width", d.style.width));
+            d.sublayer = j.value("sublayer", Id{kNoId});
+            sketch.insertDrawnDimension(d);
+        }
         // Items from before sublayers (or in one that's gone) go in the first one.
         const Id first = sketch.sublayers().front().id;
         std::vector<Id> homeless;
@@ -846,6 +909,11 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
         }
         for (const auto& [id, t] : sketch.texts()) {
             if (!sketch.hasSublayer(t.sublayer)) {
+                homeless.push_back(id);
+            }
+        }
+        for (const auto& [id, d] : sketch.drawnDimensions()) {
+            if (!sketch.hasSublayer(d.sublayer)) {
                 homeless.push_back(id);
             }
         }

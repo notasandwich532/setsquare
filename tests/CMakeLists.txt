@@ -7,6 +7,7 @@ set(QT_BIN_DIR "${QT6_INSTALL_PREFIX}/${QT6_INSTALL_BINS}")
 
 # --- Core: model, solver, geometry (no Qt) ---
 add_executable(core_tests
+    core/test_annotations.cpp
     core/test_builders.cpp
     core/test_dimensions.cpp
     core/test_expression.cpp

@@ -1,4 +1,6 @@
 add_library(drawcore STATIC
+    Annotations.cpp
+    Annotations.h
     Builders.cpp
     Builders.h
     Dimensions.cpp

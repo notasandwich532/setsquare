@@ -214,6 +214,7 @@ void Sketch::removeSublayer(Id id)
     }
     // Its contents: texts and constraints, then geometry (whatever depends on it goes too).
     std::erase_if(m_constraints, [&](const auto& kv) { return kv.second.sublayer == id; });
+    std::erase_if(m_drawnDimensions, [&](const auto& kv) { return kv.second.sublayer == id; });
     std::vector<Id> doomed;
     for (const auto& [tid, t] : m_texts) {
         if (t.sublayer == id) {
@@ -261,6 +262,9 @@ Id Sketch::sublayerOf(Id item) const
     if (auto t = m_texts.find(item); t != m_texts.end()) {
         return t->second.sublayer;
     }
+    if (auto d = m_drawnDimensions.find(item); d != m_drawnDimensions.end()) {
+        return d->second.sublayer;
+    }
     return kNoId;
 }
 
@@ -277,6 +281,9 @@ void Sketch::setSublayerOf(Id item, Id sublayerId)
     }
     else if (auto t = m_texts.find(item); t != m_texts.end()) {
         t->second.sublayer = sublayerId;
+    }
+    else if (auto d = m_drawnDimensions.find(item); d != m_drawnDimensions.end()) {
+        d->second.sublayer = sublayerId;
     }
     else {
         throw SketchError("unknown item " + std::to_string(item));
@@ -406,6 +413,7 @@ void Sketch::removeLayer(Id id)
     // (the last one: as removeSublayer does, but without the "last sublayer" rule)
     const Id last = own.front();
     std::erase_if(m_constraints, [&](const auto& kv) { return kv.second.sublayer == last; });
+    std::erase_if(m_drawnDimensions, [&](const auto& kv) { return kv.second.sublayer == last; });
     std::vector<Id> doomed;
     for (const auto& [tid, t] : m_texts) {
         if (t.sublayer == last) {
@@ -1364,7 +1372,8 @@ bool Sketch::referencesPoint(const Entity& e, Id p) const
 
 void Sketch::remove(Id id)
 {
-    if (m_constraints.erase(id) > 0 || m_fills.erase(id) > 0 || m_images.erase(id) > 0) {
+    if (m_constraints.erase(id) > 0 || m_fills.erase(id) > 0 || m_images.erase(id) > 0
+        || m_drawnDimensions.erase(id) > 0) {
         return;
     }
     if (auto t = m_texts.find(id); t != m_texts.end()) {
@@ -1465,6 +1474,9 @@ void Sketch::remove(Id id)
             || doomed.contains(kv.second.boxCorner);
     });
     std::erase_if(m_constraints, [&](const auto& kv) {
+        return std::ranges::any_of(kv.second.refs, [&](Id r) { return doomed.contains(r); });
+    });
+    std::erase_if(m_drawnDimensions, [&](const auto& kv) {
         return std::ranges::any_of(kv.second.refs, [&](Id r) { return doomed.contains(r); });
     });
 }
@@ -2075,6 +2087,139 @@ const Text& Sketch::text(Id id) const
     return it->second;
 }
 
+// ---------------------------------------------------------------------------------------------
+// Drawn dimensions
+// ---------------------------------------------------------------------------------------------
+
+namespace
+{
+constexpr std::pair<DrawnDimensionKind, const char*> kDrawnKinds[] = {
+    {DrawnDimensionKind::Aligned, "aligned"},     {DrawnDimensionKind::Horizontal, "horizontal"},
+    {DrawnDimensionKind::Vertical, "vertical"},   {DrawnDimensionKind::Radius, "radius"},
+    {DrawnDimensionKind::Diameter, "diameter"},   {DrawnDimensionKind::Angle, "angle"},
+    {DrawnDimensionKind::ArcLength, "arc_length"}, {DrawnDimensionKind::Ordinate, "ordinate"},
+    {DrawnDimensionKind::Leader, "leader"},
+};
+
+// The dimension constraint measuring the same thing, for the kinds that have one.
+std::optional<ConstraintType> constraintKind(DrawnDimensionKind kind)
+{
+    switch (kind) {
+        case DrawnDimensionKind::Aligned: return ConstraintType::Distance;
+        case DrawnDimensionKind::Horizontal: return ConstraintType::HorizontalDistance;
+        case DrawnDimensionKind::Vertical: return ConstraintType::VerticalDistance;
+        case DrawnDimensionKind::Radius: return ConstraintType::Radius;
+        case DrawnDimensionKind::Diameter: return ConstraintType::Diameter;
+        case DrawnDimensionKind::Angle: return ConstraintType::Angle;
+        default: return std::nullopt;
+    }
+}
+}  // namespace
+
+const char* toString(DrawnDimensionKind kind)
+{
+    for (const auto& [k, name] : kDrawnKinds) {
+        if (k == kind) {
+            return name;
+        }
+    }
+    return "?";
+}
+
+bool drawnDimensionKindFromString(const std::string& name, DrawnDimensionKind& out)
+{
+    for (const auto& [k, n] : kDrawnKinds) {
+        if (name == n) {
+            out = k;
+            return true;
+        }
+    }
+    return false;
+}
+
+void Sketch::checkDrawnDimension(DrawnDimension& d) const
+{
+    for (Id r : d.refs) {
+        if (!hasEntity(r)) {
+            throw SketchError("a dimension can only measure geometry (" + std::to_string(r) + " isn't)");
+        }
+    }
+    if (const auto type = constraintKind(d.kind)) {
+        normalize(*type, d.refs);
+        validate(*type, d.refs, 1.0);  // (as that dimension would be)
+    }
+    else if (d.kind == DrawnDimensionKind::ArcLength) {
+        if (d.refs.size() != 1 || kindOf(d.refs[0]) != EntityKind::Arc) {
+            throw SketchError("an arc length measures an arc");
+        }
+    }
+    else if (d.kind == DrawnDimensionKind::Ordinate) {
+        if (d.refs.size() != 2 || kindOf(d.refs[0]) != EntityKind::Point || kindOf(d.refs[1]) != EntityKind::Point) {
+            throw SketchError("an ordinate dimension measures a point from an origin point");
+        }
+    }
+    else if (d.refs.size() > 1) {
+        throw SketchError("a leader points at one thing");
+    }
+    if (!(d.textHeight > 0.0) || d.decimals < -1 || d.decimals > 6 || d.style.width < 0.0) {
+        throw SketchError("a dimension's text height must be positive, its decimals -1 to 6");
+    }
+}
+
+Id Sketch::addDrawnDimension(const DrawnDimension& dimension)
+{
+    DrawnDimension d = dimension;
+    checkDrawnDimension(d);
+    requireLayer(d.refs, activeLayer());
+    d.id = nextId();
+    d.sublayer = m_activeSublayer;
+    m_drawnDimensions.emplace(d.id, std::move(d));
+    return m_nextId - 1;
+}
+
+void Sketch::setDrawnDimension(const DrawnDimension& dimension)
+{
+    const auto it = m_drawnDimensions.find(dimension.id);
+    if (it == m_drawnDimensions.end()) {
+        throw SketchError("unknown dimension " + std::to_string(dimension.id));
+    }
+    DrawnDimension d = dimension;
+    checkDrawnDimension(d);
+    requireLayer(d.refs, layerOf(d.id));
+    d.sublayer = it->second.sublayer;
+    it->second = std::move(d);
+}
+
+void Sketch::insertDrawnDimension(const DrawnDimension& dimension)
+{
+    const Id id = dimension.id;
+    if (id == kNoId || hasEntity(id) || hasConstraint(id) || hasFill(id) || hasText(id) || hasImage(id)
+        || hasDrawnDimension(id)) {
+        throw SketchError("duplicate or invalid id " + std::to_string(id));
+    }
+    DrawnDimension d = dimension;
+    checkDrawnDimension(d);
+    m_drawnDimensions.emplace(id, std::move(d));
+    m_nextId = std::max(m_nextId, id + 1);
+}
+
+const DrawnDimension& Sketch::drawnDimension(Id id) const
+{
+    const auto it = m_drawnDimensions.find(id);
+    if (it == m_drawnDimensions.end()) {
+        throw SketchError("unknown dimension " + std::to_string(id));
+    }
+    return it->second;
+}
+
+void Sketch::setDimensionDecimals(int places)
+{
+    if (places < 0 || places > 6) {
+        throw SketchError("decimals must be 0 to 6");
+    }
+    m_dimensionDecimals = places;
+}
+
 bool Sketch::removeIfUnused(Id point)
 {
     if (!hasEntity(point) || isReference(point) || isPointUsed(point)) {
@@ -2096,6 +2241,23 @@ void Sketch::retarget(Id from, Id to)
         validate(c.type, c.refs, hasValue(c.type) ? c.value : 1.0, c.params);
     }
     m_constraints = std::move(updated);
+    // Drawn dimensions follow too; one that no longer makes sense (an arc length on what's now a
+    // circle) goes, rather than stopping the edit.
+    for (auto it = m_drawnDimensions.begin(); it != m_drawnDimensions.end();) {
+        DrawnDimension& d = it->second;
+        if (std::ranges::find(d.refs, from) == d.refs.end()) {
+            ++it;
+            continue;
+        }
+        std::ranges::replace(d.refs, from, to);
+        try {
+            checkDrawnDimension(d);
+            ++it;
+        }
+        catch (const SketchError&) {
+            it = m_drawnDimensions.erase(it);
+        }
+    }
 }
 
 void Sketch::clear()
@@ -2106,6 +2268,8 @@ void Sketch::clear()
     m_fills.clear();
     m_texts.clear();
     m_images.clear();
+    m_drawnDimensions.clear();
+    m_dimensionDecimals = 2;
     m_page.reset();
     m_sublayers = {{1, "Sublayer 1", true, 1}};
     m_activeSublayer = 1;

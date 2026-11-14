@@ -420,6 +420,44 @@ struct Image
     bool operator==(const Image&) const = default;
 };
 
+// A dimension (or a note) drawn on the drawing: it measures the geometry, never drives it, and is
+// shown and exported with the drawing (in its own colour and line width) rather than being part
+// of the sketch's constraints. See core/Annotations.h for measuring and laying it out.
+enum class DrawnDimensionKind
+{
+    Aligned,     // (point, point), (point, line), or (line): the distance between, along them
+    Horizontal,  // (point, point) or (line)
+    Vertical,    // (point, point) or (line)
+    Radius,      // (circle|arc|ellipse)
+    Diameter,    // (circle|arc)
+    Angle,       // (line, line): which of the four angles by `flip` (as a Constraint's)
+    ArcLength,   // (arc): the length along it
+    Ordinate,    // (point, origin point): the point's x (or with alongY, its y) from the origin's
+    Leader,      // an arrow to (point), to (curve) at parameter `along`, or to `tip` (no refs); its
+                 // text is a note
+};
+const char* toString(DrawnDimensionKind kind);
+bool drawnDimensionKindFromString(const std::string& name, DrawnDimensionKind& out);
+
+struct DrawnDimension
+{
+    Id id = kNoId;
+    DrawnDimensionKind kind = DrawnDimensionKind::Aligned;
+    std::vector<Id> refs;
+    double labelX = 0.0;  // the label's offset from where it's anchored (zero: a default place)
+    double labelY = 0.0;
+    std::uint8_t flip = 0;  // Angle: which of the four (see Constraint::flip)
+    bool alongY = false;    // Ordinate: measures y (else x)
+    double along = 0.0;     // Leader on a curve: where on it (the curve's parameter)
+    Point tip;              // Leader with nothing to point at: where it points
+    std::string text = "<>";  // what it says, <> standing for the measured value (a Leader's: its note)
+    std::string font;         // family
+    int decimals = -1;        // places after the point; -1: the drawing's (Sketch::dimensionDecimals)
+    double textHeight = 3.5;  // capital letter height, mm
+    StrokeStyle style;        // colour (lines, arrows and text) and line width
+    Id sublayer = kNoId;
+};
+
 // ---------------------------------------------------------------------------------------------
 // Sketch: owns geometry and constraints. Solving lives in Solver.
 // ---------------------------------------------------------------------------------------------
@@ -502,6 +540,18 @@ public:
     bool hasImage(Id id) const { return m_images.contains(id); }
     const Image& image(Id id) const;
     const std::map<Id, Image>& images() const { return m_images; }
+
+    // Drawn dimensions share the id space too. Deleting what one measures deletes it; remove()
+    // deletes one. Their references are checked (and put in order) as a dimension's would be.
+    Id addDrawnDimension(const DrawnDimension& dimension);  // .id ignored; into the active sublayer
+    void setDrawnDimension(const DrawnDimension& dimension);  // replaces an existing one (by id)
+    void insertDrawnDimension(const DrawnDimension& dimension);  // with its id (loading)
+    bool hasDrawnDimension(Id id) const { return m_drawnDimensions.contains(id); }
+    const DrawnDimension& drawnDimension(Id id) const;
+    const std::map<Id, DrawnDimension>& drawnDimensions() const { return m_drawnDimensions; }
+    // How many places after the point drawn dimensions show unless they say (0 to 6).
+    int dimensionDecimals() const { return m_dimensionDecimals; }
+    void setDimensionDecimals(int places);
 
     // --- sublayers ---
     // Always at least one. New items go into the active one.
@@ -662,6 +712,9 @@ private:
     std::map<Id, Fill> m_fills;
     std::map<Id, Text> m_texts;
     std::map<Id, Image> m_images;
+    std::map<Id, DrawnDimension> m_drawnDimensions;
+    int m_dimensionDecimals = 2;
+    void checkDrawnDimension(DrawnDimension& d) const;  // throws unless valid; puts refs in order
     // Throws unless every one of these items is in `layer` (or is the origin/axes).
     void requireLayer(const std::vector<Id>& items, Id layer) const;
 
