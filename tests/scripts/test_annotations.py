@@ -58,6 +58,24 @@ for bad in (lambda: s.annotate("arc_length", hole), lambda: s.annotate("radius",
 s.delete(hole)
 assert not d.exists and not note.exists and w.exists
 
+# --- exported: in the SVG, DXF and PDF unless asked not to -------------------------------------
+import os
+import tempfile
+
+svg = doc.to_svg()
+assert ">50.00</text>" in svg and "text-anchor=\"middle\"" in svg, svg[-2000:]
+assert ">20.0 TYP</text>" in svg
+assert "50.00" not in doc.to_svg(dimensions=False)
+dxf = doc.to_dxf()
+assert "DIMENSIONS" in dxf and "SOLID" in dxf
+assert re.search(r"\n50\.00\r?\n", dxf)  # (a TEXT's words)
+assert not re.search(r"\n50\.00\r?\n", doc.to_dxf(dimensions=False))
+folder = tempfile.mkdtemp()
+with_dims, without = os.path.join(folder, "with.pdf"), os.path.join(folder, "without.pdf")
+doc.export_pdf(with_dims)
+doc.export_pdf(without, dimensions=False)
+assert os.path.getsize(with_dims) > os.path.getsize(without)  # (their lines and text)
+
 # --- recorded: the history makes them again ------------------------------------------------------
 lines = [l for l in doc.history if "annotat" in l or "dimension_decimals" in l]
 assert any(l.startswith("n") and "= s.annotate(\"horizontal\"" in l for l in lines), lines

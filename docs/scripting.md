@@ -284,6 +284,22 @@ s.dof                 r = s.solve()  ->  r.ok, r.dof, r.conflicting, r.redundant
 e.fully_constrained
 ```
 
+### Annotations (dimensions and notes on the drawing)
+Driven: they measure the geometry and never change it. They're shown in presentation view and
+exported (SVG, PDF, DXF; `dimensions=False` on an export leaves them out).
+```python
+n = s.annotate("horizontal", line, at=(20, -8))       # also "aligned", "vertical" (two points, a point and a line, or a line)
+s.annotate("diameter", circle, text="2× Ø<> THRU")     # <> is the value; "radius", "angle" ([l1, l2], flip=0-3)
+s.annotate("arc_length", arc)
+s.annotate("ordinate", point, along_y=True)            # from the origin (or [point, origin_point])
+s.annotate("leader", curve, along=0.5, text="Polish")  # or a point; or tip=(x, y) with no refs
+#   decimals= (None: the drawing's), text_height= (3.5 mm), width= (0.25 mm), color= ("#000000"), font=
+s.edit_annotation(n, at=(20, -12), decimals=3)         # any of annotate's settings
+n.kind, n.refs, n.value, n.label, n.at, n.text, n.decimals, n.text_height, n.width, n.color
+s.annotations                                          # all of them
+s.dimension_decimals = 1                               # the drawing's (2 to start with)
+```
+
 ### Measuring
 What the Measure tool shows. Nothing is changed.
 ```python

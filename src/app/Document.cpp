@@ -895,10 +895,11 @@ bool Document::exportSvg(const QString& path, const core::exporter::SvgOptions& 
     if (!writeExport(path, [&] { return core::exporter::toSvg(m_sketch, o); }, error)) {
         return false;
     }
-    announce(QStringLiteral("doc.export_svg(%1, fills=%2, undecorated=%3, construction=%4, margin=%5%6%7)")
+    announce(QStringLiteral("doc.export_svg(%1, fills=%2, undecorated=%3, construction=%4, margin=%5%6%7%8)")
                  .arg(pyString(path), pyBool(o.fills), pyBool(o.undecorated), pyBool(o.construction),
                       Editor::number(o.margin), o.textAsOutlines ? QStringLiteral(", text_as_outlines=True") : QString(),
-                      o.hatchLines ? QStringLiteral(", hatch_lines=True") : QString()));
+                      o.hatchLines ? QStringLiteral(", hatch_lines=True") : QString(),
+                      o.dimensions ? QString() : QStringLiteral(", dimensions=False")));
     return true;
 }
 
@@ -907,10 +908,11 @@ bool Document::exportDxf(const QString& path, const core::exporter::DxfOptions& 
     if (!writeExport(path, [&] { return core::exporter::toDxf(m_sketch, o); }, error)) {
         return false;
     }
-    announce(QStringLiteral("doc.export_dxf(%1, styles=%2, construction=%3%4%5)")
+    announce(QStringLiteral("doc.export_dxf(%1, styles=%2, construction=%3%4%5%6)")
                  .arg(pyString(path), pyBool(o.styles), pyBool(o.construction),
                       o.fills ? QString() : QStringLiteral(", fills=False"),
-                      o.textAsOutlines ? QStringLiteral(", text_as_outlines=True") : QString()));
+                      o.textAsOutlines ? QStringLiteral(", text_as_outlines=True") : QString(),
+                      o.dimensions ? QString() : QStringLiteral(", dimensions=False")));
     return true;
 }
 
@@ -985,15 +987,21 @@ bool Document::exportPdf(const QString& path, const core::exporter::SvgOptions& 
                 painter.setFont(font);
                 painter.setPen(QColor(r.color.r, r.color.g, r.color.b, r.color.a));
                 const QString text = QString::fromStdString(r.text);
+                const QFontMetricsF metrics(font, painter.device());
+                const double extra = r.tracking * 100.0 / r.size;
+                // Where it starts: its left end at (x, y), or its middle, or its right end.
+                double x = 0.0;
+                if (r.align != 0) {
+                    const QList<uint> letters = text.toUcs4();
+                    const double width = metrics.horizontalAdvance(text) + extra * std::max<qsizetype>(letters.size() - 1, 0);
+                    x = -width * r.align / 2.0;
+                }
                 if (std::abs(r.tracking) < 1e-9) {
-                    painter.drawText(QPointF(0, 0), text);
+                    painter.drawText(QPointF(x, 0), text);
                 }
                 else {
                     // Letter by letter, each moved on by its advance and the tracking (QFont's own
                     // letter spacing goes by the PDF's device pixels, not the font's).
-                    const QFontMetricsF metrics(font, painter.device());
-                    const double extra = r.tracking * 100.0 / r.size;
-                    double x = 0.0;
                     for (char32_t c : text.toUcs4()) {
                         const QString letter = QString::fromUcs4(&c, 1);
                         painter.drawText(QPointF(x, 0), letter);
@@ -1011,10 +1019,11 @@ bool Document::exportPdf(const QString& path, const core::exporter::SvgOptions& 
         }
         return false;
     }
-    announce(QStringLiteral("doc.export_pdf(%1, fills=%2, undecorated=%3, construction=%4, margin=%5%6%7)")
+    announce(QStringLiteral("doc.export_pdf(%1, fills=%2, undecorated=%3, construction=%4, margin=%5%6%7%8)")
                  .arg(pyString(path), pyBool(o.fills), pyBool(o.undecorated), pyBool(o.construction),
                       Editor::number(o.margin), o.page ? QString() : QStringLiteral(", page=False"),
-                      o.textAsOutlines ? QStringLiteral(", text_as_outlines=True") : QString()));
+                      o.textAsOutlines ? QStringLiteral(", text_as_outlines=True") : QString(),
+                      o.dimensions ? QString() : QStringLiteral(", dimensions=False")));
     return true;
 }
 

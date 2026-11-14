@@ -478,11 +478,15 @@ void MainWindow::exportSvg()
     auto* hatchLines = new QCheckBox(tr("Hatches as lines (for plotters and cutters)"), &dialog);
     hatchLines->setObjectName(QStringLiteral("svgHatchLines"));
     hatchLines->setChecked(m_svgOptions.hatchLines);
+    auto* dimensions = new QCheckBox(tr("Dimensions and notes (from Annotate)"), &dialog);
+    dimensions->setObjectName(QStringLiteral("svgDimensions"));
+    dimensions->setChecked(m_svgOptions.dimensions);
     form->addRow(fills);
     form->addRow(plain);
     form->addRow(construction);
     form->addRow(outlines);
     form->addRow(hatchLines);
+    form->addRow(dimensions);
     form->addRow(onPage);
     form->addRow(tr("Margin"), margin);
     auto marginUsed = [onPage, margin] { margin->setEnabled(!(onPage->isEnabled() && onPage->isChecked())); };
@@ -502,6 +506,7 @@ void MainWindow::exportSvg()
     m_svgOptions.margin = margin->value();
     m_svgOptions.textAsOutlines = outlines->isChecked();
     m_svgOptions.hatchLines = hatchLines->isChecked();
+    m_svgOptions.dimensions = dimensions->isChecked();
     if (onPage->isEnabled()) {
         m_svgOptions.page = onPage->isChecked();
     }
@@ -539,10 +544,14 @@ void MainWindow::exportDxf()
     auto* outlines = new QCheckBox(tr("Text as outlines (exact shapes, but no longer editable text)"), &dialog);
     outlines->setObjectName(QStringLiteral("dxfTextOutlines"));
     outlines->setChecked(m_dxfOptions.textAsOutlines);
+    auto* dimensions = new QCheckBox(tr("Dimensions and notes (drawn out as lines and text, on their own layer)"), &dialog);
+    dimensions->setObjectName(QStringLiteral("dxfDimensions"));
+    dimensions->setChecked(m_dxfOptions.dimensions);
     form->addRow(styles);
     form->addRow(fills);
     form->addRow(construction);
     form->addRow(outlines);
+    form->addRow(dimensions);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
     buttons->button(QDialogButtonBox::Ok)->setText(tr("Export..."));
     form->addRow(buttons);
@@ -555,6 +564,7 @@ void MainWindow::exportDxf()
     m_dxfOptions.fills = fills->isChecked();
     m_dxfOptions.construction = construction->isChecked();
     m_dxfOptions.textAsOutlines = outlines->isChecked();
+    m_dxfOptions.dimensions = dimensions->isChecked();
 
     const QString path = exportPath(QStringLiteral("dxf"), tr("Export DXF"), tr("DXF drawings (*.dxf)"));
     if (path.isEmpty()) {
@@ -596,6 +606,9 @@ void MainWindow::exportPdf()
     auto* outlines = new QCheckBox(tr("Text as outlines (exact shapes, but no longer selectable text)"), &dialog);
     outlines->setObjectName(QStringLiteral("pdfTextOutlines"));
     outlines->setChecked(m_pdfOptions.textAsOutlines);
+    auto* dimensions = new QCheckBox(tr("Dimensions and notes (from Annotate)"), &dialog);
+    dimensions->setObjectName(QStringLiteral("pdfDimensions"));
+    dimensions->setChecked(m_pdfOptions.dimensions);
     auto* margin = new ExpressionSpinBox(&dialog);
     margin->setObjectName(QStringLiteral("pdfMargin"));
     margin->setRange(0.0, 1000.0);
@@ -606,6 +619,7 @@ void MainWindow::exportPdf()
     form->addRow(plain);
     form->addRow(construction);
     form->addRow(outlines);
+    form->addRow(dimensions);
     if (!m_doc->sketch().page()) {
         form->addRow(tr("Margin"), margin);
     }
@@ -624,6 +638,7 @@ void MainWindow::exportPdf()
     m_pdfOptions.undecorated = plain->isChecked();
     m_pdfOptions.construction = construction->isChecked();
     m_pdfOptions.textAsOutlines = outlines->isChecked();
+    m_pdfOptions.dimensions = dimensions->isChecked();
     m_pdfOptions.margin = margin->value();
     m_pdfOptions.page = true;  // (the page whenever there is one)
 

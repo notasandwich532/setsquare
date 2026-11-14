@@ -33,6 +33,8 @@ struct SvgOptions
     // Hatches as their lines, cut to their areas (for plotters and cutters), rather than as
     // <pattern>s (one repeating tile: small, and editable as a pattern elsewhere).
     bool hatchLines = false;
+    // The dimensions and notes drawn on the drawing (see DrawnDimension), in their colours.
+    bool dimensions = true;
 };
 
 // SVG of the drawing as Presentation view shows it: fills (with their holes) under strokes, in
@@ -56,6 +58,7 @@ struct PlacedTextRun
     double size = 0.0;        // em height, mm
     double tracking = 0.0;    // extra space after each letter, mm
     Color color;
+    int align = 0;            // (x, y) is its left end (0), middle (1) or right end (2)
 };
 // The SVG export cut where each text in its font would be (for the PDF: Qt's SVG renderer draws
 // <text> as shapes, so the PDF draws these itself, as text). Every piece is a whole SVG of the
@@ -76,12 +79,15 @@ struct DxfOptions
     // Text as its letters' outlines (closed polylines and splines) rather than TEXT in its font.
     // Text that can't be text (mirrored, merged or thickened outlines) is outlines anyway.
     bool textAsOutlines = false;
+    // The dimensions and notes drawn on the drawing, as their lines, arcs, arrowheads (SOLIDs) and
+    // TEXT, in their colours (the same everywhere; not editable as dimensions).
+    bool dimensions = true;
 };
 
 // DXF (AutoCAD 2004, AC1018) of the drawing in millimetres, y up, every curve exact: LINE, CIRCLE,
 // ARC, ELLIPSE, SPLINE; TEXT in its font; fills as HATCH (solid, or the hatch's own pattern). Layers:
 // GEOMETRY (curves without a stroke), STROKES (with one: its colour, as true colour and the nearest
-// AutoCAD colour, line style and weight), TEXT, FILLS, CONSTRUCTION (optional, off).
+// AutoCAD colour, line style and weight), TEXT, FILLS, DIMENSIONS, CONSTRUCTION (optional, off).
 // Throws SketchError if there's nothing to export.
 std::string toDxf(const Sketch& sketch, const DxfOptions& options = {});
 

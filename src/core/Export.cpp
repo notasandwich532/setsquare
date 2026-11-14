@@ -1,5 +1,6 @@
 #include "Export.h"
 
+#include "Annotations.h"
 #include "Curves.h"
 #include "Geometry.h"
 #include "Gradient.h"
@@ -493,13 +494,17 @@ std::string writeSvg(const Sketch& s, const SvgOptions& o, SvgPieces* pieces)
         Gradient gradient;
         std::vector<TextContour> contours;  // in world coordinates (lines and curves)
     };
-    // A sublayer's part: its texts, lines (stroked, then plain), construction.
+    // A sublayer's part: its texts, lines (stroked, then plain), construction, dimensions.
     struct Sub
     {
         const Sublayer* sublayer = nullptr;
         std::vector<Item> strokes, plain, construction;
         std::vector<TextArea> texts;
-        bool empty() const { return strokes.empty() && plain.empty() && construction.empty() && texts.empty(); }
+        std::vector<std::pair<const DrawnDimension*, annotation::Graphics>> dims;
+        bool empty() const
+        {
+            return strokes.empty() && plain.empty() && construction.empty() && texts.empty() && dims.empty();
+        }
     };
     struct Group
     {
@@ -564,6 +569,16 @@ std::string writeSvg(const Sketch& s, const SvgOptions& o, SvgPieces* pieces)
                 }
             }
         }
+        if (o.dimensions && !o.canvas) {
+            for (const auto& [id, d] : s.drawnDimensions()) {
+                if (s.layerOf(id) != it->id) {
+                    continue;
+                }
+                if (annotation::Graphics dg = annotation::graphics(s, d); dg.valid) {
+                    subOf(d.sublayer).dims.emplace_back(&d, std::move(dg));
+                }
+            }
+        }
         // Texts: their letters in world coordinates, filled.
         for (const auto& [id, t] : s.texts()) {
             if (t.shape.empty() || !s.hasEntity(t.anchor) || s.layerOf(id) != it->id) {
@@ -617,6 +632,36 @@ std::string writeSvg(const Sketch& s, const SvgOptions& o, SvgPieces* pieces)
                 for (const auto& contour : t.contours) {
                     for (const Point& p : contour.points) {
                         include({p.x, p.y}, 0.0);  // (control points too: a little generous at worst)
+                    }
+                }
+            }
+            for (const auto& [d, dg] : sub.dims) {
+                const double pad = std::max(d->style.width, kHairline) / 2;
+                for (const auto& l : dg.lines) {
+                    include(l[0], pad);
+                    include(l[1], pad);
+                }
+                for (const auto& a : dg.arcs) {
+                    for (int i = 0; i <= 16; ++i) {
+                        const double angle = a.start + a.sweep * i / 16.0;
+                        include({a.center.x + a.radius * std::cos(angle), a.center.y + a.radius * std::sin(angle)}, pad);
+                    }
+                }
+                for (const auto& arrow : dg.arrows) {
+                    for (const Vec2& p : arrow) {
+                        include(p, 0.0);
+                    }
+                }
+                // Its text: at most about 0.9 of a capital wide a letter (no fonts here to measure it).
+                const annotation::Graphics::Text& t = dg.text;
+                const auto letters = std::ranges::count_if(t.text, [](char c) { return (c & 0xC0) != 0x80; });  // (UTF-8)
+                const double length = t.height * 0.9 * static_cast<double>(letters);
+                const double start = -length * t.align / 2.0;
+                const double angle = t.angle * kPi / 180;
+                for (double along : {start, start + length}) {
+                    for (double up : {-0.3 * t.height, 1.1 * t.height}) {
+                        include({t.at.x + along * std::cos(angle) - up * std::sin(angle),
+                                 t.at.y + along * std::sin(angle) + up * std::cos(angle)}, 0.0);
                     }
                 }
             }
@@ -1024,6 +1069,59 @@ std::string writeSvg(const Sketch& s, const SvgOptions& o, SvgPieces* pieces)
                 close();
                 indent = outer;
             }
+            // Drawn dimensions: their lines and arcs, arrowheads, then their text.
+            for (const auto& [d, dg] : sub.dims) {
+                const Color& c = d->style.color;
+                const std::string opacity = c.a < 255 ? num(c.a / 255.0) : std::string();
+                std::string lines;
+                for (const auto& l : dg.lines) {
+                    lines += "M" + xy(l[0]) + " L" + xy(l[1]) + ' ';
+                }
+                for (const auto& a : dg.arcs) {
+                    // (y down: counter-clockwise is sweep-flag 0, as for arcs)
+                    const Vec2 from{a.center.x + a.radius * std::cos(a.start), a.center.y + a.radius * std::sin(a.start)};
+                    const double end = a.start + a.sweep;
+                    const Vec2 to{a.center.x + a.radius * std::cos(end), a.center.y + a.radius * std::sin(end)};
+                    lines += "M" + xy(from) + " A" + num(a.radius) + ',' + num(a.radius) + " 0 "
+                        + (std::abs(a.sweep) > kPi ? "1" : "0") + ',' + (a.sweep > 0 ? "0 " : "1 ") + xy(to) + ' ';
+                }
+                if (!lines.empty()) {
+                    lines.pop_back();
+                    out << indent << "  <path d=\"" << lines << "\" fill=\"none\" stroke=\"" << rgb(c) << '"'
+                        << (opacity.empty() ? std::string() : " stroke-opacity=\"" + opacity + '"') << " stroke-width=\""
+                        << num(d->style.width > 0 ? d->style.width : kHairline) << "\" stroke-linecap=\"round\"/>\n";
+                }
+                std::string arrows;
+                for (const auto& arrow : dg.arrows) {
+                    arrows += "M" + xy(arrow[0]) + " L" + xy(arrow[1]) + " L" + xy(arrow[2]) + " Z ";
+                }
+                if (!arrows.empty()) {
+                    arrows.pop_back();
+                    out << indent << "  <path d=\"" << arrows << "\" fill=\"" << rgb(c) << '"'
+                        << (opacity.empty() ? std::string() : " fill-opacity=\"" + opacity + '"') << " stroke=\"none\"/>\n";
+                }
+                const annotation::Graphics::Text& t = dg.text;
+                if (t.text.empty()) {
+                    continue;
+                }
+                const double em = t.height / annotation::kCapHeight;
+                if (pieces) {
+                    // (cut out, to be drawn in its font: see toSvgPieces)
+                    pieces->svgs.push_back(out.str() + "    </g>\n  </g>\n");
+                    out.str({});
+                    out << "  <g>\n    <g>\n";
+                    pieces->texts.push_back({{t.text, d->font, false, false, t.at.x - x0 + m, y1 - t.at.y + m, -t.angle,
+                                              em, 0.0, c, t.align}});
+                    continue;
+                }
+                static const char* const anchors[] = {"start", "middle", "end"};
+                out << indent << "  <text xml:space=\"preserve\" x=\"0\" y=\"0\" transform=\"translate(" << X(t.at.x)
+                    << ' ' << Y(t.at.y) << ')' << (std::abs(t.angle) > 1e-9 ? " rotate(" + num(-t.angle) + ')' : std::string())
+                    << "\" font-family=\"'" << xmlEscape(d->font) << "'\" font-size=\"" << num(em) << "\" text-anchor=\""
+                    << anchors[std::clamp(t.align, 0, 2)] << "\" fill=\"" << rgb(c) << '"'
+                    << (opacity.empty() ? std::string() : " fill-opacity=\"" + opacity + '"') << '>' << xmlEscape(t.text)
+                    << "</text>\n";
+            }
             close();
         }
         out << "  </g>\n";
@@ -1349,7 +1447,30 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
             }
         }
     }
-    if (items.empty() && texts.empty() && fills.empty()) {
+    struct DimItem
+    {
+        const DrawnDimension* dim;
+        annotation::Graphics g;
+        Look look;
+    };
+    std::vector<DimItem> dims;
+    if (o.dimensions) {
+        for (const auto& [id, d] : s.drawnDimensions()) {
+            if (!layerShown(s, id)) {
+                continue;
+            }
+            if (annotation::Graphics g = annotation::graphics(s, d); g.valid) {
+                Look l;  // (their colour is part of them: kept even without styles)
+                l.aci = nearestAci(d.style.color);
+                l.color = d.style.color;
+                if (o.styles) {
+                    l.weight = lineWeight(d.style.width);
+                }
+                dims.push_back({&d, std::move(g), l});
+            }
+        }
+    }
+    if (items.empty() && texts.empty() && fills.empty() && dims.empty()) {
         throw SketchError("there's nothing to export");
     }
 
@@ -1379,6 +1500,19 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
             include(p);
         }
     }
+    for (const DimItem& di : dims) {
+        for (const auto& l : di.g.lines) {
+            include(l[0]);
+            include(l[1]);
+        }
+        for (const auto& a : di.g.arcs) {
+            for (int i = 0; i <= 16; ++i) {
+                const double angle = a.start + a.sweep * i / 16.0;
+                include({a.center.x + a.radius * std::cos(angle), a.center.y + a.radius * std::sin(angle)});
+            }
+        }
+        include(di.g.text.at);
+    }
     if (x0 > x1) {
         x0 = y0 = x1 = y1 = 0.0;
     }
@@ -1400,24 +1534,30 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
         bool bold = false, italic = false;
     };
     std::vector<Style> styles{{"Standard", "", false, false}};
-    auto styleFor = [&](const Text& t) -> const std::string& {
+    auto styleForFont = [&](const std::string& font, bool bold, bool italic) -> std::string {
         for (const Style& st : styles) {
-            if (st.family == t.font && st.bold == t.bold && st.italic == t.italic) {
+            if (st.family == font && st.bold == bold && st.italic == italic) {
                 return st.name;
             }
         }
-        std::string name = t.font + (t.bold ? " Bold" : "") + (t.italic ? " Italic" : "");
+        std::string name = font + (bold ? " Bold" : "") + (italic ? " Italic" : "");
         for (char& c : name) {
             if (std::string_view("<>/\\\":;?*|,=`").find(c) != std::string_view::npos || static_cast<unsigned char>(c) >= 0x80) {
                 c = '_';
             }
         }
-        styles.push_back({name, t.font, t.bold, t.italic});
-        return styles.back().name;
+        styles.push_back({name, font, bold, italic});
+        return name;
     };
+    auto styleFor = [&](const Text& t) { return styleForFont(t.font, t.bold, t.italic); };
     for (const TextItem& t : texts) {
         if (t.asText) {
             styleFor(*t.text);
+        }
+    }
+    for (const DimItem& di : dims) {
+        if (!di.dim->font.empty()) {
+            styleForFont(di.dim->font, false, false);
         }
     }
 
@@ -1697,7 +1837,7 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
         const Text& t = *ti.text;
         const Point& anchor = s.point(t.anchor);
         if (ti.asText) {
-            const std::string& style = styleFor(t);
+            const std::string style = styleFor(t);
             auto writeText = [&](const std::vector<char32_t>& cps, Point at, double turn) {
                 const std::string words = dxfText(cps);
                 if (words.find_first_not_of(' ') == std::string::npos) {
@@ -1775,6 +1915,54 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
             }
             writeSpline(pieces, "TEXT", ti.look);
         }
+    }
+
+    // Drawn dimensions: drawn out (the same in every program), on their own layer.
+    for (const DimItem& di : dims) {
+        for (const auto& l : di.g.lines) {
+            begin("LINE", "DIMENSIONS", di.look);
+            e.pair(100, "AcDbLine");
+            e.point(10, l[0]);
+            e.point(11, l[1]);
+        }
+        for (const auto& a : di.g.arcs) {
+            // (counter-clockwise from its start, as DXF arcs go)
+            const double start = a.sweep < 0 ? a.start + a.sweep : a.start;
+            begin("ARC", "DIMENSIONS", di.look);
+            e.pair(100, "AcDbCircle");
+            e.point(10, a.center);
+            e.real(40, a.radius);
+            e.pair(100, "AcDbArc");
+            e.real(50, degrees(start));
+            e.real(51, degrees(start + std::abs(a.sweep)));
+        }
+        for (const auto& arrow : di.g.arrows) {
+            begin("SOLID", "DIMENSIONS", di.look);
+            e.pair(100, "AcDbTrace");
+            e.point(10, arrow[0]);
+            e.point(11, arrow[1]);
+            e.point(12, arrow[2]);
+            e.point(13, arrow[2]);  // (a triangle: its last corner twice)
+        }
+        const annotation::Graphics::Text& t = di.g.text;
+        const std::string words = dxfText(codePoints(t.text));
+        if (words.find_first_not_of(' ') == std::string::npos) {
+            continue;
+        }
+        begin("TEXT", "DIMENSIONS", di.look);
+        e.pair(100, "AcDbText");
+        e.point(10, t.at);
+        e.real(40, t.height);  // (capitals' height, as DXF's)
+        e.pair(1, words);
+        if (std::abs(t.angle) > 1e-9) {
+            e.real(50, std::fmod(std::fmod(t.angle, 360.0) + 360.0, 360.0));
+        }
+        e.pair(7, di.dim->font.empty() ? std::string("Standard") : styleForFont(di.dim->font, false, false));
+        if (t.align != 0) {
+            e.pair(72, t.align);  // centred / right: on the alignment point
+            e.point(11, t.at);
+        }
+        e.pair(100, "AcDbText");
     }
     const std::string entities = e.str();
 
@@ -1925,7 +2113,8 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
         const char* lineType;
     };
     const LayerDef layers[] = {{"0", 7, "CONTINUOUS"},     {"GEOMETRY", 7, "CONTINUOUS"}, {"STROKES", 7, "CONTINUOUS"},
-                               {"TEXT", 7, "CONTINUOUS"},  {"FILLS", 7, "CONTINUOUS"},    {"CONSTRUCTION", -8, "DASHED"}};
+                               {"TEXT", 7, "CONTINUOUS"},  {"FILLS", 7, "CONTINUOUS"},    {"DIMENSIONS", 7, "CONTINUOUS"},
+                               {"CONSTRUCTION", -8, "DASHED"}};
     table("LAYER", hLayerTable, static_cast<int>(std::size(layers)));
     for (const LayerDef& l : layers) {
         entry("LAYER", hLayerTable, "AcDbLayerTableRecord", l.name);

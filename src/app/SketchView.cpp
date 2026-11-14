@@ -1178,8 +1178,8 @@ void SketchView::fitAll()
                 include({a.center.x + a.radius * std::cos(angle), a.center.y + a.radius * std::sin(angle)});
             }
         }
-        // Its text (about as long as it has letters, each about 0.75 of a capital wide).
-        const double length = g.text.height * 0.75 * static_cast<double>(QString::fromStdString(g.text.text).size());
+        // Its text (about as long as it has letters, each at most about 0.9 of a capital wide).
+        const double length = g.text.height * 0.9 * static_cast<double>(QString::fromStdString(g.text.text).size());
         const double start = -length * g.text.align / 2.0;
         const double angle = g.text.angle * std::numbers::pi / 180;
         for (double along : {start, start + length}) {
