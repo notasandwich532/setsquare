@@ -134,6 +134,48 @@ TEST_CASE("Drawn dimensions are laid out as lines, arrowheads and text, in mm", 
     }
 }
 
+TEST_CASE("Drawn dimensions go in their layer's own sublayer, made with the first", "[annotations]")
+{
+    Sketch s;
+    const Id working = s.activeSublayer();
+    const Id line = s.addLine(s.addPoint(0, 0), s.addPoint(30, 0));
+    CHECK(s.annotationSublayer(s.activeLayer()) == kNoId);
+    const Id a = s.addDrawnDimension(make(DrawnDimensionKind::Aligned, {line}));
+    const Id sub = s.annotationSublayer(s.activeLayer());
+    REQUIRE(sub != kNoId);
+    CHECK(s.sublayer(sub).name == "Annotations");
+    CHECK(s.sublayer(sub).annotations);
+    CHECK(s.sublayerOf(a) == sub);
+    CHECK(s.activeSublayer() == working);  // (still drawing where you were)
+    CHECK(s.sublayerOf(line) == working);
+
+    // The next goes in the same one.
+    const Id b = s.addDrawnDimension(make(DrawnDimensionKind::Leader, {line}, "x"));
+    CHECK(s.sublayerOf(b) == sub);
+    CHECK(s.sublayersOf(s.activeLayer()).size() == 2);
+
+    // Hiding it hides them.
+    s.setSublayerVisible(sub, false);
+    CHECK_FALSE(s.isShown(a));
+
+    // Another layer: its own (named apart from a sublayer already called that).
+    const Id other = s.addLayer("Layer 2", "Annotations");
+    s.setActiveLayer(other);
+    const Id l2 = s.addLine(s.addPoint(0, 10), s.addPoint(30, 10));
+    const Id c = s.addDrawnDimension(make(DrawnDimensionKind::Aligned, {l2}));
+    const Id sub2 = s.annotationSublayer(other);
+    REQUIRE(sub2 != kNoId);
+    CHECK(sub2 != sub);
+    CHECK(s.sublayer(sub2).name == "Annotations 2");
+    CHECK(s.sublayerOf(c) == sub2);
+
+    // Saved: it's still theirs (and renaming it doesn't matter).
+    s.renameSublayer(sub, "Dims");
+    const Sketch loaded = fromJson(toJson(s));
+    CHECK(loaded.annotationSublayer(s.layerOfSublayer(sub)) == sub);
+    CHECK(loaded.annotationSublayer(other) == sub2);
+}
+
 TEST_CASE("Drawn dimensions follow their geometry, go with it, and save", "[annotations]")
 {
     Sketch s;

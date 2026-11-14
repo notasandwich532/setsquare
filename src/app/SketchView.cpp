@@ -1830,7 +1830,9 @@ void SketchView::drawSketch(QPainter& painter, core::Id only) const
         else if (id == m_hovered) {
             color = colors.hover;
         }
-        else if (!m_presentation && d.sublayer != sketch.activeSublayer()) {
+        else if (!m_presentation && d.sublayer != sketch.activeSublayer()
+                 && !(layer == activeLayer && sketch.hasSublayer(d.sublayer) && sketch.sublayer(d.sublayer).annotations)) {
+            // (Not those in their layer's own annotations sublayer: they belong with whatever's being worked on.)
             color.setAlphaF(color.alphaF() * (layer == activeLayer ? kOtherSublayerAlpha : kOtherLayerAlpha));
         }
         drawAnnotation(painter, d, color);

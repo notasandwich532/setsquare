@@ -28,6 +28,10 @@ assert note.label == "2 holes" and note.value == 0
 free = s.annotate("leader", tip=(60, 60), at=(70, 70), text="here")
 assert free.label == "here" and free.refs == []
 assert len(s.annotations) == 10
+# (all in the layer's own sublayer for them; the active one is still where the geometry is)
+assert {a.sublayer.name for a in s.annotations} == {"Annotations"}, {a.sublayer.name for a in s.annotations}
+assert w.sublayer.annotations and not s.sublayer.annotations  # (s.sublayer: the active one)
+assert sides[0].sublayer == s.sublayer
 
 # Their look: black and 0.25 mm unless given; changed with edit_annotation.
 assert w.color == "#000000" and isclose(w.width, 0.25) and isclose(w.text_height, 3.5)

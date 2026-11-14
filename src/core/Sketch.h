@@ -117,6 +117,8 @@ struct Sublayer
     std::string name;
     bool visible = true;
     Id layer = 1;  // the layer it's part of
+    // Its layer's annotations' own (see Sketch::addDrawnDimension): made with the first of them.
+    bool annotations = false;
 };
 
 // A sketch of its own, drawn over the layers below it (the first in the list is the top). Its
@@ -543,7 +545,10 @@ public:
 
     // Drawn dimensions share the id space too. Deleting what one measures deletes it; remove()
     // deletes one. Their references are checked (and put in order) as a dimension's would be.
-    Id addDrawnDimension(const DrawnDimension& dimension);  // .id ignored; into the active sublayer
+    // New ones go in their layer's own sublayer for them (an "Annotations" one, made with the
+    // first; the active sublayer stays as it is), so they're shown, hidden and kept apart together.
+    Id addDrawnDimension(const DrawnDimension& dimension);  // .id ignored; in the active layer
+    Id annotationSublayer(Id layer) const;  // that sublayer (kNoId: none yet)
     void setDrawnDimension(const DrawnDimension& dimension);  // replaces an existing one (by id)
     void insertDrawnDimension(const DrawnDimension& dimension);  // with its id (loading)
     bool hasDrawnDimension(Id id) const { return m_drawnDimensions.contains(id); }

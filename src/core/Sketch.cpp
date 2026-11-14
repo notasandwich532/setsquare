@@ -2166,13 +2166,40 @@ void Sketch::checkDrawnDimension(DrawnDimension& d) const
     }
 }
 
+Id Sketch::annotationSublayer(Id layer) const
+{
+    for (const Sublayer& l : m_sublayers) {
+        if (l.layer == layer && l.annotations) {
+            return l.id;
+        }
+    }
+    return kNoId;
+}
+
 Id Sketch::addDrawnDimension(const DrawnDimension& dimension)
 {
     DrawnDimension d = dimension;
     checkDrawnDimension(d);
     requireLayer(d.refs, activeLayer());
+    // Into the layer's annotations sublayer, made if it isn't there (named apart from the others).
+    Id sub = annotationSublayer(activeLayer());
+    if (sub == kNoId) {
+        std::string name = "Annotations";
+        for (int n = 2; std::ranges::any_of(m_sublayers, [&](const Sublayer& l) {
+                 return l.layer == activeLayer() && l.name == name;
+             });
+             ++n) {
+            name = "Annotations " + std::to_string(n);
+        }
+        sub = addSublayer(name);
+        for (Sublayer& l : m_sublayers) {
+            if (l.id == sub) {
+                l.annotations = true;
+            }
+        }
+    }
     d.id = nextId();
-    d.sublayer = m_activeSublayer;
+    d.sublayer = sub;
     m_drawnDimensions.emplace(d.id, std::move(d));
     return m_nextId - 1;
 }

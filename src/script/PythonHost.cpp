@@ -843,8 +843,15 @@ PYBIND11_EMBEDDED_MODULE(setsquare, m)
                     ids.push_back(id);
                 }
             }
+            for (const auto& [id, d] : sketch().drawnDimensions()) {
+                if (d.sublayer == l.id) {
+                    ids.push_back(id);
+                }
+            }
             return wrapAll(ids);
-        }, "Its geometry, constraints and texts.")
+        }, "Its geometry, constraints, texts and annotations.")
+        .def_property_readonly("annotations", [](const SublayerH& l) { return sketch().sublayer(l.id).annotations; },
+                               "Whether it's its layer's own for annotations (where new ones go).")
         .def("__eq__", [](const SublayerH& a, py::handle b) {
             return py::isinstance<SublayerH>(b) && a.id == b.cast<SublayerH&>().id;
         })

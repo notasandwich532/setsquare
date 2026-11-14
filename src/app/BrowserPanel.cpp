@@ -88,13 +88,25 @@ QString contents(const core::Sketch& s, Id sublayer)
     for (const auto& [id, t] : s.texts()) {
         texts += t.sublayer == sublayer;
     }
-    return QObject::tr("%1 curves, %2 points, %3 constraints, %4 texts").arg(curves).arg(points).arg(constraints).arg(texts);
+    int annotations = 0;
+    for (const auto& [id, d] : s.drawnDimensions()) {
+        annotations += d.sublayer == sublayer;
+    }
+    if (s.hasSublayer(sublayer) && s.sublayer(sublayer).annotations) {
+        return QObject::tr("This layer's annotations (dimensions and notes): %1").arg(annotations);
+    }
+    QString out = QObject::tr("%1 curves, %2 points, %3 constraints, %4 texts").arg(curves).arg(points).arg(constraints).arg(texts);
+    if (annotations > 0) {
+        out += QObject::tr(", %1 annotations").arg(annotations);
+    }
+    return out;
 }
 
 bool sublayerEmpty(const core::Sketch& s, Id sublayer)
 {
     return std::ranges::none_of(s.entities(), [&](const auto& kv) { return kv.second.sublayer == sublayer; })
-        && std::ranges::none_of(s.texts(), [&](const auto& kv) { return kv.second.sublayer == sublayer; });
+        && std::ranges::none_of(s.texts(), [&](const auto& kv) { return kv.second.sublayer == sublayer; })
+        && std::ranges::none_of(s.drawnDimensions(), [&](const auto& kv) { return kv.second.sublayer == sublayer; });
 }
 }  // namespace
 

@@ -600,6 +600,9 @@ std::string toJson(const Sketch& sketch, bool compact, const std::vector<std::st
         if (!l.visible) {
             j["visible"] = false;
         }
+        if (l.annotations) {
+            j["annotations"] = true;
+        }
         sublayers.push_back(std::move(j));
     }
     doc["sublayers"] = std::move(sublayers);
@@ -673,7 +676,7 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
             std::vector<Sublayer> sublayers;
             for (const json& j : doc.at("sublayers")) {
                 sublayers.push_back({j.at("id").get<Id>(), j.value("name", std::string()), j.value("visible", true),
-                                     j.value("layer", Id{1})});
+                                     j.value("layer", Id{1}), j.value("annotations", false)});
             }
             sketch.setSublayers(std::move(sublayers), doc.value("active_sublayer", Id{kNoId}));
         }
