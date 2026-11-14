@@ -71,6 +71,8 @@ add_library(setsquare_lib STATIC
     tools/GradientTool.h
     tools/ImageTool.cpp
     tools/ImageTool.h
+    tools/MeasureTool.cpp
+    tools/MeasureTool.h
     tools/Tool.h
     tools/Handles.cpp
     tools/Handles.h

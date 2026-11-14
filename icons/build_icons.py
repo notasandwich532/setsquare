@@ -1169,6 +1169,27 @@ def icon_eyedropper():
     return finish("eyedropper")
 
 
+def icon_measure():
+    """A ruler, a red arrow measured off along it."""
+    start()
+    ruler = s.rectangle((2, 3), (22, 10))
+    stroke(ruler, GREY, width=1.5)
+    pin(ruler[0].p1, 2, 3)
+    s.distance(ruler[0], value=20)
+    s.distance(ruler[1], value=7)
+    for i, x in enumerate((6, 10, 14, 18)):
+        tick = line((x, 10), (x, 7 if i % 2 else 5.5), GREY, width=1.5)
+        pin(tick.p1, x, 10)
+        pin(tick.p2, x, 7 if i % 2 else 5.5)
+    span = line((3, 17), (21, 17), RED, width=1.5)
+    pin(span.p1, 3, 17)
+    s.horizontal(span)
+    s.distance(span, value=18)
+    arrowhead(span.p1, span, 4.5, 6)
+    arrowhead(span.p2, span, 4.5, 6)
+    return finish("measure")
+
+
 def icon_presentation():
     """An eye: the drawing as it will be seen."""
     start()
@@ -1200,7 +1221,7 @@ ICONS.update({
               icon_slot_overall, icon_slot_center_point, icon_arc_slot, icon_arc_slot_3point, icon_trim,
               icon_trim_construction, icon_extend, icon_break, icon_fillet, icon_chamfer_equal, icon_chamfer_2distances,
               icon_chamfer_angle, icon_move, icon_scale, icon_mirror, icon_rectangular_pattern, icon_circular_pattern,
-              icon_offset, icon_divide, icon_stroke_brush, icon_fill, icon_gradient, icon_hatch, icon_reset_fill, icon_image, icon_eyedropper, icon_presentation]
+              icon_offset, icon_divide, icon_stroke_brush, icon_fill, icon_gradient, icon_hatch, icon_reset_fill, icon_image, icon_eyedropper, icon_presentation, icon_measure]
 })
 
 wanted = sys.argv[1:] or list(ICONS)

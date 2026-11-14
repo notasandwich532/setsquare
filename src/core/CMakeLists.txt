@@ -13,6 +13,8 @@ add_library(drawcore STATIC
     Geometry.h
     Gradient.cpp
     Hatch.cpp
+    Measure.cpp
+    Measure.h
     Gradient.h
     Groups.cpp
     Groups.h

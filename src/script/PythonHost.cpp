@@ -19,6 +19,7 @@
 #include <core/Gradient.h>
 #include <core/Hatch.h>
 #include <core/Regions.h>
+#include <core/Measure.h>
 #include <core/Modify.h>
 #include <core/Serialize.h>
 #include <core/Solver.h>
@@ -1829,6 +1830,30 @@ PYBIND11_EMBEDDED_MODULE(setsquare, m)
            "colour, or a gradient (setsquare.linear / setsquare.radial). hatch: a setsquare.hatch, to draw the area with "
            "its lines in the colour instead. "
            "Raises ValueError if `at` isn't enclosed: see loose_ends().")
+        .def("measure_length", [](const SketchH&, py::handle curves) {
+            const std::vector<Id> ids = itemsOf(curves);
+            for (Id id : ids) {
+                if (!sketch().hasEntity(id) || sketch().entity(id).kind() == core::EntityKind::Point) {
+                    throw py::value_error("measure_length takes curves (lines, arcs, circles, ellipses, splines)");
+                }
+            }
+            return core::measuring::length(sketch(), ids);
+        }, py::arg("curves"),
+           "The length of a curve, or the total of a list of them, in mm (as the Measure tool shows).")
+        .def("measure_between", [](const SketchH&, py::handle a, py::handle b) {
+            const core::measuring::Separation d = core::measuring::between(vecArg(a), vecArg(b));
+            return py::make_tuple(d.distance, d.dx, d.dy);
+        }, py::arg("a"), py::arg("b"),
+           "From point a to point b (points of the sketch, or (x, y)): (distance, dx, dy), dx and dy being b - a.")
+        .def("measure_area", [](const SketchH&, py::handle at) -> py::object {
+            const auto region = core::measuring::areaAt(sketch(), sketch().activeLayer(), vecArg(at));
+            if (!region) {
+                return py::none();
+            }
+            return py::float_(core::measuring::area(*region));
+        }, py::arg("at"),
+           "The size of the closed area around `at` (of the active layer's geometry), in mm^2, its holes taken off; "
+           "None if `at` isn't enclosed.")
         .def("text", [](const SketchH&, const std::string& text, py::object at, double height, py::object font,
                         double angle, bool bold, bool italic, const std::string& outline, double minThickness,
                         py::object color, double spacing, const std::string& align, py::object valign,

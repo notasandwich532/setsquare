@@ -13,6 +13,7 @@ add_executable(core_tests
     core/test_export.cpp
     core/test_features.cpp
     core/test_geometry.cpp
+    core/test_measure.cpp
     core/test_modify.cpp
     core/test_planegcs.cpp
     core/test_regions.cpp
@@ -42,6 +43,7 @@ add_executable(app_tests
     app/test_paint_cache.cpp
     app/test_import.cpp
     app/test_mainwindow.cpp
+    app/test_measure_tool.cpp
     app/test_modify_tools.cpp
     app/test_page.cpp
     app/test_project_tool.cpp

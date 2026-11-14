@@ -81,6 +81,7 @@ enum class ToolKind
     Eyedropper,
     Group,
     Hatch,
+    Measure,
 };
 
 struct ToolEvent

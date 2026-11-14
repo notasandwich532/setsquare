@@ -218,6 +218,7 @@ const std::pair<ToolKind, const char*> kToolNames[] = {
     {ToolKind::Image, "image"},
     {ToolKind::Eyedropper, "eyedropper"},
     {ToolKind::Group, "group"},
+    {ToolKind::Measure, "measure"},
 };
 
 QString macrosFolder()
@@ -990,6 +991,14 @@ void MainWindow::createActions()
                                 {ToolKind::Fix, tr("Fix/Unfix"), QKeySequence(Qt::Key_F)},
                                 {ToolKind::Group, tr("Group"), QKeySequence(Qt::CTRL | Qt::Key_G)},
                             });
+    // Inspecting, after a group divider: Measure.
+    {
+        auto* divider = new GroupDivider(constraintBar);
+        divider->setObjectName(QStringLiteral("MeasureDivider"));
+        divider->setFixedWidth(toolbar->widgetForAction(m_insertImage)->sizeHint().width());
+        constraintBar->addWidget(divider);
+    }
+    addTools(constraintBar, {{ToolKind::Measure, tr("Measure"), {}}});
 
     sketchMenu->addSeparator();
     auto* construction = sketchMenu->addAction(tr("Toggle &Construction"));

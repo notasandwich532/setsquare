@@ -17,6 +17,7 @@
 #include "tools/GradientTool.h"
 #include "tools/HatchTool.h"
 #include "tools/ImageTool.h"
+#include "tools/MeasureTool.h"
 #include "tools/StyleTools.h"
 #include "tools/TextTool.h"
 #include "tools/TransformTools.h"
@@ -144,7 +145,8 @@ void SketchView::setTool(ToolKind kind)
         m_tool.reset();  // before the new one starts (a command tidies up as it goes)
     }
     if (kind != ToolKind::Select && kind != ToolKind::StrokeBrush && kind != ToolKind::Fill && kind != ToolKind::Gradient
-        && kind != ToolKind::ResetFill && kind != ToolKind::Eyedropper && kind != ToolKind::Hatch) {
+        && kind != ToolKind::ResetFill && kind != ToolKind::Eyedropper && kind != ToolKind::Hatch
+        && kind != ToolKind::Measure) {
         setPresentation(false);  // editing geometry: see it (and its constraints) properly
     }
     showOptionsPanel(kind);
@@ -219,6 +221,7 @@ void SketchView::setTool(ToolKind kind)
         case ToolKind::SplineFit: m_tool = std::make_unique<SplineTool>(*this, core::SplineKind::Fit); break;
         case ToolKind::SplineControl: m_tool = std::make_unique<SplineTool>(*this, core::SplineKind::Control); break;
         case ToolKind::Dimension: m_tool = std::make_unique<DimensionTool>(*this); break;
+        case ToolKind::Measure: m_tool = std::make_unique<MeasureTool>(*this); break;
         default: m_tool = std::make_unique<ConstraintTool>(*this, kind); break;
     }
     m_toolKind = kind;
