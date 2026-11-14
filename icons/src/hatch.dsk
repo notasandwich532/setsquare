@@ -307,7 +307,7 @@
       ]
     }
   ],
-  "format": "drawing_app.sketch",
+  "format": "setsquare.sketch",
   "history": [
     "p6 = s.point(24, 24)\ns.rectangle(s.origin, p6)",
     "l9.construction = True",
@@ -322,7 +322,7 @@
     "d32 = s.vertical_distance(s.origin, p19, value=3)",
     "d33 = s.distance(l23, value=18)",
     "d34 = s.distance(l24, value=18)",
-    "f35 = s.fill(at=(12, 12), color=\"#f2b33d\", hatch=drawapp.hatch(\"ANSI31\", scale=1.5, width=1.3))"
+    "f35 = s.fill(at=(12, 12), color=\"#f2b33d\", hatch=setsquare.hatch(\"ANSI31\", scale=1.5, width=1.3))"
   ],
   "layers": [
     {

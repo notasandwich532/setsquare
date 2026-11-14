@@ -24,7 +24,7 @@
 
 #pragma once
 
-#include "SketcherGlobal.h"  // drawing_app: was "../../SketcherGlobal.h"
+#include "SketcherGlobal.h"  // setsquare: was "../../SketcherGlobal.h"
 #include "Geo.h"
 #include <optional>
 

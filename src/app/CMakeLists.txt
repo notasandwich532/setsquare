@@ -14,10 +14,10 @@ add_library(drawdoc STATIC
 )
 target_include_directories(drawdoc PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(drawdoc PUBLIC drawcore Qt6::Core Qt6::Gui)
-drawapp_warnings(drawdoc)
+setsquare_warnings(drawdoc)
 
 # Everything else except main() lives in a library so GUI tests can drive the real widgets.
-add_library(drawapp_lib STATIC
+add_library(setsquare_lib STATIC
     ColorBar.cpp
     ColorBar.h
     GradientEditor.cpp
@@ -79,50 +79,50 @@ add_library(drawapp_lib STATIC
     tools/TransformTools.cpp
     tools/TransformTools.h
 )
-target_include_directories(drawapp_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(drawapp_lib PUBLIC drawdoc drawscript Qt6::Widgets Qt6::Svg)
+target_include_directories(setsquare_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(setsquare_lib PUBLIC drawdoc drawscript Qt6::Widgets Qt6::Svg)
 
 # Tool icons (made by icons/build_icons.py), compiled in as :/icons/<name>.svg.
 file(GLOB tool_icons CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/icons/*.svg")
-qt_add_resources(drawapp_lib "tool_icons" PREFIX "/icons" BASE "${PROJECT_SOURCE_DIR}/icons" FILES ${tool_icons})
-# The app's own icon (drawn with the app: drawings/app_icon.dsk), as :/icons/app/drawapp.svg.
-qt_add_resources(drawapp_lib "app_icon" PREFIX "/icons" BASE "${PROJECT_SOURCE_DIR}/icons" FILES "${PROJECT_SOURCE_DIR}/icons/app/drawapp.svg")
+qt_add_resources(setsquare_lib "tool_icons" PREFIX "/icons" BASE "${PROJECT_SOURCE_DIR}/icons" FILES ${tool_icons})
+# The app's own icon (drawn with the app: drawings/app_icon.dsk), as :/icons/app/setsquare.svg.
+qt_add_resources(setsquare_lib "app_icon" PREFIX "/icons" BASE "${PROJECT_SOURCE_DIR}/icons" FILES "${PROJECT_SOURCE_DIR}/icons/app/setsquare.svg")
 if(WIN32)
-    target_link_libraries(drawapp_lib PRIVATE dxgi dwmapi)  # vblank pacing (FrameClock)
+    target_link_libraries(setsquare_lib PRIVATE dxgi dwmapi)  # vblank pacing (FrameClock)
 endif()
-drawapp_warnings(drawapp_lib)
+setsquare_warnings(setsquare_lib)
 
-qt_add_executable(drawapp main.cpp)
+qt_add_executable(setsquare main.cpp)
 if(WIN32)
-    target_sources(drawapp PRIVATE drawapp.rc)  # the .exe's icon (icons/app/drawapp.ico)
+    target_sources(setsquare PRIVATE setsquare.rc)  # the .exe's icon (icons/app/setsquare.ico)
 endif()
-target_link_libraries(drawapp PRIVATE drawapp_lib)
-drawapp_warnings(drawapp)
-drawapp_embeds_python(drawapp)
-add_dependencies(drawapp python_runtime)
+target_link_libraries(setsquare PRIVATE setsquare_lib)
+setsquare_warnings(setsquare)
+setsquare_embeds_python(setsquare)
+add_dependencies(setsquare python_runtime)
 
-set_target_properties(drawapp PROPERTIES
+set_target_properties(setsquare PROPERTIES
     WIN32_EXECUTABLE ON
     MACOSX_BUNDLE ON
 )
 
-# Copies Qt's DLLs and plugins next to drawapp.exe after each build, so it starts on a
-# double-click. The test programs and drawapp-cli in the same folder then load Qt from there too,
+# Copies Qt's DLLs and plugins next to setsquare.exe after each build, so it starts on a
+# double-click. The test programs and setsquare-cli in the same folder then load Qt from there too,
 # so the "offscreen" platform they run headless on is deployed as well.
 if(WIN32)
     find_program(WINDEPLOYQT windeployqt HINTS "${QT6_INSTALL_PREFIX}/bin" "$ENV{QT_ROOT_DIR}/bin")
     if(WINDEPLOYQT)
-        add_custom_command(TARGET drawapp POST_BUILD
+        add_custom_command(TARGET setsquare POST_BUILD
             COMMAND "${WINDEPLOYQT}" --no-translations --no-compiler-runtime --verbose 0
-                    --include-plugins qoffscreen "$<TARGET_FILE:drawapp>"
-            COMMENT "Deploying Qt next to drawapp.exe"
+                    --include-plugins qoffscreen "$<TARGET_FILE:setsquare>"
+            COMMENT "Deploying Qt next to setsquare.exe"
             VERBATIM)
     endif()
 endif()
 
-# Remakes icons/app/drawapp.ico from icons/app/drawapp.svg (not built by default):
+# Remakes icons/app/setsquare.ico from icons/app/setsquare.svg (not built by default):
 #   cmake --build --preset windows-msvc --target make_app_icon
-#   make_app_icon icons/app/drawapp.svg icons/app/drawapp.ico [preview.png]
+#   make_app_icon icons/app/setsquare.svg icons/app/setsquare.ico [preview.png]
 add_executable(make_app_icon EXCLUDE_FROM_ALL "${PROJECT_SOURCE_DIR}/tools/make_app_icon.cpp")
 target_link_libraries(make_app_icon PRIVATE Qt6::Gui Qt6::Svg)
-drawapp_warnings(make_app_icon)
+setsquare_warnings(make_app_icon)

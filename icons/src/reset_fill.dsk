@@ -413,7 +413,7 @@
       ]
     }
   ],
-  "format": "drawing_app.sketch",
+  "format": "setsquare.sketch",
   "history": [
     "p6 = s.point(24, 24)\ns.rectangle(s.origin, p6)",
     "l9.construction = True",

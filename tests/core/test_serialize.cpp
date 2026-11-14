@@ -95,22 +95,30 @@ TEST_CASE("Bad files are rejected with a readable error", "[serialize]")
 {
     using Catch::Matchers::ContainsSubstring;
     CHECK_THROWS_WITH(fromJson("{not json"), ContainsSubstring("malformed"));
-    CHECK_THROWS_WITH(fromJson(R"({"format":"something else"})"), ContainsSubstring("not a drawing_app"));
-    CHECK_THROWS_WITH(fromJson(R"({"format":"drawing_app.sketch","version":99,"entities":[],"constraints":[]})"),
+    CHECK_THROWS_WITH(fromJson(R"({"format":"something else"})"), ContainsSubstring("not a Setsquare"));
+    CHECK_THROWS_WITH(fromJson(R"({"format":"setsquare.sketch","version":99,"entities":[],"constraints":[]})"),
                       ContainsSubstring("version 99"));
     CHECK_THROWS_WITH(
-        fromJson(R"({"format":"drawing_app.sketch","version":1,
+        fromJson(R"({"format":"setsquare.sketch","version":1,
                      "entities":[{"id":1,"type":"line","p1":7,"p2":8}],"constraints":[]})"),
         ContainsSubstring("missing point"));
     CHECK_THROWS_WITH(
-        fromJson(R"({"format":"drawing_app.sketch","version":1,
+        fromJson(R"({"format":"setsquare.sketch","version":1,
                      "entities":[{"id":1,"type":"point","x":0,"y":0}],
                      "constraints":[{"id":2,"type":"glue","refs":[1]}]})"),
         ContainsSubstring("unknown constraint type"));
-    CHECK_THROWS_AS(fromJson(R"({"format":"drawing_app.sketch","version":1,
+    CHECK_THROWS_AS(fromJson(R"({"format":"setsquare.sketch","version":1,
                                  "entities":[{"id":1,"type":"point","x":0,"y":0},{"id":1,"type":"point","x":1,"y":1}],
                                  "constraints":[]})"),
                     SketchError);
+}
+
+TEST_CASE("Files saved before the app was named Setsquare still open", "[serialize]")
+{
+    const Sketch s = fromJson(R"({"format":"drawing_app.sketch","version":1,
+                                  "entities":[{"id":1,"type":"point","x":3,"y":4}],"constraints":[]})");
+    CHECK(s.hasEntity(1));
+    CHECK(toJson(s).find("\"setsquare.sketch\"") != std::string::npos);  // (saved again under the new name)
 }
 
 TEST_CASE("Axes: fixed lines you can constrain and dimension against", "[origin][axes]")

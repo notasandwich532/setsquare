@@ -1930,7 +1930,7 @@ SolveStatus System::solve(Algorithm alg, bool isRedundantsolving)
         else if (subSystemsAux[cid]) {
             part = solve(subSystemsAux[cid], alg, isRedundantsolving);
         }
-        // (drawapp) The worst of the parts, not just the last one's.
+        // (setsquare) The worst of the parts, not just the last one's.
         if (static_cast<int>(part) > static_cast<int>(status)) {
             status = part;
         }
@@ -5555,7 +5555,7 @@ void System::identifyConflictingRedundantConstraints(
                 auto tag1 = pair1.first->getTag();
                 auto tag2 = pair2.first->getTag();
 
-                // (drawapp) Optional parts of a constraint are the first to go.
+                // (setsquare) Optional parts of a constraint are the first to go.
                 const bool optional1 = tag1 >= OptionalTagBase, optional2 = tag2 >= OptionalTagBase;
                 if (optional1 != optional2) {
                     return optional2;

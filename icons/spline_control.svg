@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" version="1.1"
      width="24" height="24" viewBox="0 0 24 24">
-  <!-- Drawing App icon -->
+  <!-- Setsquare icon -->
   <g id="fills" inkscape:groupmode="layer" inkscape:label="Fills">
     <path d="M3.2598,18.75 L3.2321,18.8719 L3.2049,18.9945 L3.1779,19.1178 L3.1514,19.2418 L3.1252,19.3664 L3.0994,19.4918 L3.074,19.6178 L3.0489,19.7445 L3.0243,19.8719 L3,20 L3.2344,18.75 L1.75,18.75 L1.75,21.25 L4.25,21.25 L4.25,18.75 Z" fill="#4da3ff" fill-rule="evenodd" stroke="none"/>
     <path d="M5.7656,5.25 L6,4 L7.25,4 L7.25,2.75 L4.75,2.75 L4.75,5.25 Z" fill="#4da3ff" fill-rule="evenodd" stroke="none"/>

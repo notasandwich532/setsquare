@@ -26,7 +26,7 @@
 
 #include <Eigen/QR>
 
-#include "SketcherGlobal.h"  // drawing_app: was "../../SketcherGlobal.h"
+#include "SketcherGlobal.h"  // setsquare: was "../../SketcherGlobal.h"
 #include "SubSystem.h"
 
 
@@ -103,7 +103,7 @@ enum SpecialTag
     DefaultTemporaryConstraint = -1
 };
 
-// (drawapp) Tags from here up mark optional parts of a constraint (tag - OptionalTagBase is the
+// (setsquare) Tags from here up mark optional parts of a constraint (tag - OptionalTagBase is the
 // constraint's own tag): when a set of equations is redundant, these are chosen to go first.
 constexpr int OptionalTagBase = 1 << 29;
 

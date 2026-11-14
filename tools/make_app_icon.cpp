@@ -1,6 +1,6 @@
-// Makes the Windows .ico for the app from its SVG (icons/app/drawapp.svg), and a preview PNG:
+// Makes the Windows .ico for the app from its SVG (icons/app/setsquare.svg), and a preview PNG:
 //
-//   make_app_icon icons/app/drawapp.svg icons/app/drawapp.ico [preview.png]
+//   make_app_icon icons/app/setsquare.svg icons/app/setsquare.ico [preview.png]
 //
 // Build it with `cmake --build --preset windows-msvc --target make_app_icon` (it isn't built by
 // default) and run it with Qt's bin directory on PATH. Each size is drawn from the SVG (not

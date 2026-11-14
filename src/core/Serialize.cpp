@@ -13,7 +13,8 @@ using nlohmann::json;
 
 namespace
 {
-constexpr const char* kFormat = "drawing_app.sketch";
+constexpr const char* kFormat = "setsquare.sketch";
+constexpr const char* kOldFormat = "drawing_app.sketch";  // (files saved before the app was named Setsquare)
 
 // {"type": "linear", "spread": "pad", "stops": [[0, "#ff0000"], [1, "#0000ff80"]], "start": id, "end": id}
 // or {"type": "radial", ..., "shape": id, "focal": id (optional)}: the sketch geometry placing it.
@@ -624,8 +625,9 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
 {
     try {
         const json doc = json::parse(text);
-        if (doc.value("format", std::string()) != kFormat) {
-            throw SketchError("not a drawing_app sketch file");
+        const std::string format = doc.value("format", std::string());
+        if (format != kFormat && format != kOldFormat) {
+            throw SketchError("not a Setsquare sketch file");
         }
         const int version = doc.value("version", 0);
         if (version < 1 || version > kFileVersion) {

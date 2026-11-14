@@ -1,6 +1,6 @@
 #pragma once
 
-// With DRAWAPP_SNAPSHOT_DIR set, saves a picture of a widget named after the running test,
+// With SETSQUARE_SNAPSHOT_DIR set, saves a picture of a widget named after the running test,
 // for eyeballing rendering changes.
 
 #include <catch2/interfaces/catch_interfaces_capture.hpp>
@@ -11,7 +11,7 @@
 
 inline void saveSnapshot(QWidget& widget, const QString& suffix = {})
 {
-    const QString dir = qEnvironmentVariable("DRAWAPP_SNAPSHOT_DIR");
+    const QString dir = qEnvironmentVariable("SETSQUARE_SNAPSHOT_DIR");
     if (dir.isEmpty()) {
         return;
     }

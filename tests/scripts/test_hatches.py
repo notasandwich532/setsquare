@@ -9,19 +9,19 @@ from math import cos, hypot, isclose, pi, sin
 RED = "#ff0000"
 
 # --- the patterns -------------------------------------------------------------------------------
-names = [n for n, _ in drawapp.hatch_patterns()]
+names = [n for n, _ in setsquare.hatch_patterns()]
 assert {"ANSI31", "ANSI37", "NET", "DOTS", "BRICK"} <= set(names), names
-h = drawapp.hatch("ansi31", angle=15, scale=2, width=0.25)  # (any case)
+h = setsquare.hatch("ansi31", angle=15, scale=2, width=0.25)  # (any case)
 assert h.pattern == "ANSI31" and h.angle == 15 and h.scale == 2 and h.width == 0.25
 assert h.lines == [(45.0, 0.0, 0.0, 0.0, 3.175, [])], h.lines
 assert eval(repr(h)) == h, repr(h)
-own = drawapp.hatch("TILES", lines=[(0, 0, 0, 0, 5, [4, -1]), (90, 0, 0, 0, 5, [4, -1])], scale=0.5)
+own = setsquare.hatch("TILES", lines=[(0, 0, 0, 0, 5, [4, -1]), (90, 0, 0, 0, 5, [4, -1])], scale=0.5)
 assert own.pattern == "TILES" and len(own.lines) == 2 and eval(repr(own)) == own, repr(own)
-for bad in (lambda: drawapp.hatch("NO SUCH"),
-            lambda: drawapp.hatch("ANSI31", scale=0),
-            lambda: drawapp.hatch("ANSI31", width=-1),
-            lambda: drawapp.hatch("X", lines=[(0, 0, 0, 0, 0)]),
-            lambda: drawapp.hatch("X", lines=[])):
+for bad in (lambda: setsquare.hatch("NO SUCH"),
+            lambda: setsquare.hatch("ANSI31", scale=0),
+            lambda: setsquare.hatch("ANSI31", width=-1),
+            lambda: setsquare.hatch("X", lines=[(0, 0, 0, 0, 0)]),
+            lambda: setsquare.hatch("X", lines=[])):
     try:
         bad()
         raise AssertionError("accepted a bad hatch")
@@ -30,14 +30,14 @@ for bad in (lambda: drawapp.hatch("NO SUCH"),
 
 # --- a hatched fill ---------------------------------------------------------------------------------
 sides = s.rectangle((0, 0), (40, 20))
-plain = drawapp.hatch("ANSI31")
+plain = setsquare.hatch("ANSI31")
 f = s.fill(at=(5, 5), color=RED, hatch=plain)
 assert f.hatch == plain and f.gradient is None and f.color == RED and "hatch" in repr(f)
 f.hatch = None
 assert f.hatch is None and f.color == RED
 f.hatch = plain
 # A gradient takes the hatch off, and a hatch the gradient.
-f.gradient = drawapp.linear([RED, "#0000ff"], start=sides[0].p1, end=sides[0].p2)
+f.gradient = setsquare.linear([RED, "#0000ff"], start=sides[0].p1, end=sides[0].p2)
 assert f.hatch is None
 f.hatch = plain
 assert f.gradient is None
@@ -89,13 +89,13 @@ for a, b in segments(svg()):
         assert hypot(x - 20, y - 10) > 6 - 0.05, (x, y)  # (ends on the ring at most: its polygon)
 
 # Dashes and dots; and the DXF: a HATCH with the pattern's own lines (on the FILLS layer).
-f.hatch = drawapp.hatch("DOTS", scale=4)
+f.hatch = setsquare.hatch("DOTS", scale=4)
 dots = segments(svg())
 assert dots and all(a == b for a, b in dots), dots[:5]
 dxf = doc.to_dxf().replace("\r\n", "\n")
 hatches = dxf.split("\nHATCH\n")[1:]
 assert any("\n2\nDOTS\n" in h and "\n78\n1\n" in h for h in hatches), hatches[:1]
-f.hatch = drawapp.hatch("DASH", scale=2, width=0.3)
+f.hatch = setsquare.hatch("DASH", scale=2, width=0.3)
 dashed = segments(svg())
 lengths = [hypot(b[0] - a[0], b[1] - a[1]) for a, b in dashed]
 assert all(l <= 6.35 + 1e-3 for l in lengths), lengths  # (dashes 6.35 long; cut short at the edges and hole)
@@ -111,7 +111,7 @@ s.solve()
 assert len(segments(svg())) > before
 
 # Too fine to lay out line by line: filled solid in the exports instead of failing.
-f.hatch = drawapp.hatch("LINE", scale=1e-6)
+f.hatch = setsquare.hatch("LINE", scale=1e-6)
 assert 'fill="#ff0000"' in svg()
 assert 'fill="#ff0000"' in doc.to_svg(undecorated=False, margin=0)  # (no pattern that fine either)
 
@@ -126,12 +126,12 @@ assert s.fills[-1].hatch == own, s.fills[-1].hatch
 # --- recorded: the history makes it again --------------------------------------------------------
 doc.new()
 sides = s.rectangle((0, 0), (40, 20))
-f = s.fill(at=(5, 5), color=RED, hatch=drawapp.hatch("ANSI37", angle=10, scale=1.5))
+f = s.fill(at=(5, 5), color=RED, hatch=setsquare.hatch("ANSI37", angle=10, scale=1.5))
 f.hatch = own
-g = s.fill(at=(5, 5), color="#00ff00", hatch=drawapp.hatch("NET"))
+g = s.fill(at=(5, 5), color="#00ff00", hatch=setsquare.hatch("NET"))
 lines = doc.history
-assert any("hatch=drawapp.hatch(\"ANSI37\", angle=10, scale=1.5)" in l for l in lines), lines
-assert any(".hatch = drawapp.hatch(\"TILES\", lines=[" in l for l in lines), lines
+assert any("hatch=setsquare.hatch(\"ANSI37\", angle=10, scale=1.5)" in l for l in lines), lines
+assert any(".hatch = setsquare.hatch(\"TILES\", lines=[" in l for l in lines), lines
 expected = svg()
 
 

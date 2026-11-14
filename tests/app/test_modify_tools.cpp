@@ -235,7 +235,7 @@ TEST_CASE("Replaying recorded modify tools reproduces the sketch", "[modify][rec
     INFO(f.recorded.join('\n').toStdString());
     INFO(err.toStdString());
     REQUIRE(r.ok);
-    if (const QString dir = qEnvironmentVariable("DRAWAPP_DEBUG_DIR"); !dir.isEmpty()) {
+    if (const QString dir = qEnvironmentVariable("SETSQUARE_DEBUG_DIR"); !dir.isEmpty()) {
         QFile script(dir + "/recorded.py");
         if (script.open(QIODevice::WriteOnly)) {
             script.write(f.recorded.join('\n').toUtf8());

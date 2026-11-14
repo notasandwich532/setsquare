@@ -19,8 +19,8 @@ def build():
     oval = s.ellipse((45, -20), (55, -20), 4)
     s.stroke(oval, color=RED, width=0.25)
     body = s.fill(at=(5, 25), color=RED)
-    body.gradient = drawapp.linear([RED, BLUE], start=sides[0].p1, end=sides[0].p2)
-    s.fill(at=(15, 15), color="#00aa00", hatch=drawapp.hatch("ANSI31", angle=15, scale=0.5))
+    body.gradient = setsquare.linear([RED, BLUE], start=sides[0].p1, end=sides[0].p2)
+    s.fill(at=(15, 15), color="#00aa00", hatch=setsquare.hatch("ANSI31", angle=15, scale=0.5))
     s.text("Hello there", at=(20, 2), height=4, font="Arial", color="#000000")
     s.text("Two\nlines", at=(2, -10), height=3, font="Arial")
     return [t.text for t in s.texts]

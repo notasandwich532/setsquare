@@ -556,7 +556,7 @@ QString Editor::gradientCall(const core::Sketch& sketch, const core::Gradient& g
     if (g.spread != core::GradientSpread::Pad) {
         args << QStringLiteral("spread=\"%1\"").arg(QString::fromLatin1(core::toString(g.spread)));
     }
-    return QStringLiteral("drawapp.%1(%2)").arg(radial ? QStringLiteral("radial") : QStringLiteral("linear"),
+    return QStringLiteral("setsquare.%1(%2)").arg(radial ? QStringLiteral("radial") : QStringLiteral("linear"),
                                                 args.join(QStringLiteral(", ")));
 }
 
@@ -1132,7 +1132,7 @@ QString Editor::hatchCall(const core::Hatch& h)
     if (h.width != 0.0) {
         args << QStringLiteral("width=%1").arg(number(h.width));
     }
-    return QStringLiteral("drawapp.hatch(%1)").arg(args.join(QStringLiteral(", ")));
+    return QStringLiteral("setsquare.hatch(%1)").arg(args.join(QStringLiteral(", ")));
 }
 
 Id Editor::fill(core::Vec2 at, const core::Color& givenColor, const core::Gradient& givenGradient, const core::Hatch& hatch)

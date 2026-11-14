@@ -1,4 +1,4 @@
-// drawing_app shim: minimal stand-in for FreeCAD's Base/Console.h.
+// setsquare shim: minimal stand-in for FreeCAD's Base/Console.h.
 // Solver log chatter is dropped; warnings go to stderr.
 #pragma once
 

@@ -10,7 +10,7 @@
 
 class Document;
 
-// The embedded Python interpreter (one per process) and the `drawapp` module it exposes.
+// The embedded Python interpreter (one per process) and the `setsquare` module it exposes.
 //
 // Python is bundled with the app: initialise() points the interpreter at the standard library
 // copied next to the executable, in isolated mode, so whatever Python is installed on the
@@ -18,7 +18,7 @@ class Document;
 namespace script
 {
 
-// UI hooks for `drawapp.app`; absent when running headless.
+// UI hooks for `setsquare.app`; absent when running headless.
 struct UiHooks
 {
     std::function<void()> fit;
@@ -37,7 +37,7 @@ bool initialise(QString* error = nullptr, const QString& pythonHome = {});
 void shutdown();
 bool isInitialised();
 
-// The document scripts act on (drawapp.document(), `doc` / `s` in scripts and the console).
+// The document scripts act on (setsquare.document(), `doc` / `s` in scripts and the console).
 void setDocument(Document* document);
 Document* document();
 void setUiHooks(UiHooks hooks);  // empty hooks = headless
@@ -52,7 +52,7 @@ struct RunResult
     QString error;     // traceback text when !ok
 };
 
-// Runs a .py file with `drawapp`, `doc`, `s` and `app` predefined, as one undo step.
+// Runs a .py file with `setsquare`, `doc`, `s` and `app` predefined, as one undo step.
 RunResult runFile(const QString& path, const QStringList& argv = {});
 
 // Runs source code the same way (name is used in tracebacks).

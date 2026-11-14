@@ -68,7 +68,7 @@ TEST_CASE("Opening a bad file reports an error and keeps the current sketch", "[
     {
         QFile f(path);
         REQUIRE(f.open(QIODevice::WriteOnly));
-        f.write("{ \"format\": \"drawing_app.sketch\", \"version\": 1, \"entities\": [ {\"id\": 1} ] }");
+        f.write("{ \"format\": \"setsquare.sketch\", \"version\": 1, \"entities\": [ {\"id\": 1} ] }");
     }
     Document doc;
     doc.modify("p", [](Sketch& s) { s.addPoint(5, 5); });
@@ -88,7 +88,7 @@ TEST_CASE("Files without an origin get one when opened", "[document][files]")
     {
         QFile f(path);
         REQUIRE(f.open(QIODevice::WriteOnly));
-        f.write(R"({"format":"drawing_app.sketch","version":1,
+        f.write(R"({"format":"setsquare.sketch","version":1,
                     "entities":[{"id":1,"type":"point","x":3,"y":4}],"constraints":[]})");
     }
     Document doc;

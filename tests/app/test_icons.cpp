@@ -86,9 +86,9 @@ TEST_CASE("Every create tool has an icon that renders", "[icons]")
 
 TEST_CASE("Icon contact sheet", "[icons][snapshot]")
 {
-    // With DRAWAPP_SNAPSHOT_DIR set, writes every icon at 16, 24 and 48 px on the dark theme, and
+    // With SETSQUARE_SNAPSHOT_DIR set, writes every icon at 16, 24 and 48 px on the dark theme, and
     // the active version on the green button, for checking by eye.
-    const QString dir = qEnvironmentVariable("DRAWAPP_SNAPSHOT_DIR");
+    const QString dir = qEnvironmentVariable("SETSQUARE_SNAPSHOT_DIR");
     const QStringList names = QDir(QStringLiteral(":/icons")).entryList({QStringLiteral("*.svg")}, QDir::Files, QDir::Name);
     REQUIRE(!names.isEmpty());
     if (dir.isEmpty()) {

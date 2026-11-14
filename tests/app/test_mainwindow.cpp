@@ -153,7 +153,7 @@ TEST_CASE("The sketch toolbar shows one icon per kind of tool, the rest in its m
     CHECK(view->toolKind() == ToolKind::Circle);
     CHECK(circles->isChecked());
 
-    if (const QString dir = qEnvironmentVariable("DRAWAPP_SNAPSHOT_DIR"); !dir.isEmpty()) {
+    if (const QString dir = qEnvironmentVariable("SETSQUARE_SNAPSHOT_DIR"); !dir.isEmpty()) {
         circles->menu()->popup(circles->mapToGlobal(QPoint(0, circles->height())));
         QImage shot = window.grab().toImage();
         QPainter painter(&shot);

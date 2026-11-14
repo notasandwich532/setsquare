@@ -54,7 +54,7 @@ assert len(s.fills) == 1 and isclose(s.fills[0].area, 50 * 40)  # the fill, now 
 again = s.add_sublayer("Square")
 assert again.name != "Square"
 
-path = os.path.join(tempfile.gettempdir(), "drawapp_sublayers.dsk")
+path = os.path.join(tempfile.gettempdir(), "setsquare_sublayers.dsk")
 doc.save(path)
 doc.open(path)
 assert [l.name for l in s.sublayers] == ["Square", again.name]

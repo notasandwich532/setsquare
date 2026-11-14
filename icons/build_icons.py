@@ -1,8 +1,8 @@
 # Builds the tool icons: each is drawn as a fully constrained sketch on a 24 x 24 grid, saved as
 # an editable source (src/<name>.dsk) and exported as SVG (<name>.svg).
 #
-#   drawapp-cli icons/build_icons.py            (all of them)
-#   drawapp-cli icons/build_icons.py tangent    (just some)
+#   setsquare-cli icons/build_icons.py            (all of them)
+#   setsquare-cli icons/build_icons.py tangent    (just some)
 #
 # Style (after Fusion's, simplified, with thicker lines so they read when small): what the tool
 # acts on is RED, what it acts against is GREY; for create tools, the shape is GREY and where you
@@ -1087,7 +1087,7 @@ def icon_gradient():
     s.distance(r[0], value=18)
     s.distance(r[1], value=16)
     s.solve()
-    s.fill(at=(12, 12), color=drawapp.linear([AMBER, AMBER + "00"], start=r[0].p1, end=r[0].p2))
+    s.fill(at=(12, 12), color=setsquare.linear([AMBER, AMBER + "00"], start=r[0].p1, end=r[0].p2))
     # The handle: a dot at each end (the first in the paint) and the line between them.
     handle = line((8.3, 12), (15.7, 12), GREY, width=1)
     pin(handle.p1, 8.3, 12)
@@ -1109,7 +1109,7 @@ def icon_hatch():
     s.distance(r[0], value=18)
     s.distance(r[1], value=18)
     s.solve()
-    s.fill(at=(12, 12), color=AMBER, hatch=drawapp.hatch("ANSI31", scale=1.5, width=1.3))
+    s.fill(at=(12, 12), color=AMBER, hatch=setsquare.hatch("ANSI31", scale=1.5, width=1.3))
     return finish("hatch")
 
 

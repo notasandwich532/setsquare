@@ -26,7 +26,7 @@
 
 #include "Util.h"
 #include <boost/math/constants/constants.hpp>
-#include "SketcherGlobal.h"  // drawing_app: was "../../SketcherGlobal.h"
+#include "SketcherGlobal.h"  // setsquare: was "../../SketcherGlobal.h"
 
 #ifdef _MSC_VER
 # pragma warning(disable : 4251)

@@ -11,7 +11,7 @@
 - `GCS.h`/`GCS.cpp`: `OptionalTagBase`. Tags at or above it mark optional parts of a constraint
   (e.g. a symmetry's "square to the line", implied when the points are already level), and the
   redundancy heuristic in `System::identifyConflictingRedundantConstraints` picks them first.
-  Search for "(drawapp)".
+  Search for "(setsquare)".
 - `GCS.cpp`, `System::solve(Algorithm, bool)`: returns the worst status of the independent parts,
   not just the last part's (one part failing used to be reported as success when a later one
   solved).

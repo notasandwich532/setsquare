@@ -13,22 +13,22 @@ ring.construction = True
 spot = s.point(16, 12)
 
 # --- making them ----------------------------------------------------------------------------
-g = drawapp.linear([RED, BLUE], start=a, end=b)
+g = setsquare.linear([RED, BLUE], start=a, end=b)
 assert g.type == "linear" and g.stops == [(0.0, RED), (1.0, BLUE)], g.stops
 assert g.start == a and g.end == b and g.shape is None and g.spread == "pad"
 assert g.color_at(0.5) == "#800080", g.color_at(0.5)
-r = drawapp.radial([RED, (0.25, "#00ff0080"), BLUE], shape=ring, focal=spot, spread="reflect")
+r = setsquare.radial([RED, (0.25, "#00ff0080"), BLUE], shape=ring, focal=spot, spread="reflect")
 assert r.type == "radial" and r.shape == ring and r.focal == spot and r.stops[1] == (0.25, "#00ff0080")
 assert eval(repr(r).replace(f"c{ring.id}", "ring").replace(f"p{spot.id}", "spot")) == r
 # Only sketch geometry places them: points for the ends and focal point, a round curve for radial.
-for bad in (lambda: drawapp.linear([RED, BLUE], start=(0, 0), end=b),
-            lambda: drawapp.linear([RED, BLUE], start=a, end=a),
-            lambda: drawapp.linear([RED, BLUE], start=sides[0], end=b),
-            lambda: drawapp.radial([RED, BLUE], shape=sides[0]),
-            lambda: drawapp.radial([RED, BLUE], shape=ring, focal=ring),
-            lambda: drawapp.linear([], start=a, end=b),
-            lambda: drawapp.linear([(2, RED)], start=a, end=b),
-            lambda: drawapp.linear([RED], start=a, end=b, spread="sideways")):
+for bad in (lambda: setsquare.linear([RED, BLUE], start=(0, 0), end=b),
+            lambda: setsquare.linear([RED, BLUE], start=a, end=a),
+            lambda: setsquare.linear([RED, BLUE], start=sides[0], end=b),
+            lambda: setsquare.radial([RED, BLUE], shape=sides[0]),
+            lambda: setsquare.radial([RED, BLUE], shape=ring, focal=ring),
+            lambda: setsquare.linear([], start=a, end=b),
+            lambda: setsquare.linear([(2, RED)], start=a, end=b),
+            lambda: setsquare.linear([RED], start=a, end=b, spread="sideways")):
     try:
         bad()
         raise AssertionError("accepted a bad gradient")
@@ -86,17 +86,17 @@ assert 'r="9"' in svg()
 # An ellipse makes it elliptical: turned and squashed to the ellipse.
 oval = s.ellipse((60, 10), (66, 10), 3)
 oval.construction = True
-f.gradient = drawapp.radial([RED, BLUE], shape=oval)
+f.gradient = setsquare.radial([RED, BLUE], shape=oval)
 tag = re.search(r'<radialGradient [^>]*>', svg()).group(0)
 assert 'r="6"' in tag and "scale(1 0.5)" in tag and "fx=" not in tag, tag
 
 # See-through stops keep their opacity.
-f.gradient = drawapp.linear([RED, BLUE + "40"], start=a, end=b)
+f.gradient = setsquare.linear([RED, BLUE + "40"], start=a, end=b)
 assert 'stop-color="#0000ff" stop-opacity="0.251"' in svg()
 
 # Its geometry deleted: painted in its average colour; the next edit makes that its plain colour.
 gone = s.point(5, 5)
-f.gradient = drawapp.linear([RED, BLUE], start=a, end=gone)
+f.gradient = setsquare.linear([RED, BLUE], start=a, end=gone)
 saved = f.gradient
 s.delete(gone)
 assert "<linearGradient" not in svg() and 'fill="#800080"' in svg(), svg()[:900]
@@ -109,7 +109,7 @@ other = s.add_layer("Other")
 far = s.point(1, 1)
 s.layer = base
 try:
-    f.gradient = drawapp.linear([RED, BLUE], start=a, end=far)
+    f.gradient = setsquare.linear([RED, BLUE], start=a, end=far)
     raise AssertionError("used another layer's point")
 except ValueError as e:
     assert "layer" in str(e), e
@@ -139,7 +139,7 @@ copied = copies[1].stroke["gradient"]
 assert copied.start not in (a, b) and copied.end not in (a, b), copied
 assert abs(copied.start.y - (a.y - 50)) < 1e-9
 partial = s.copy([ring], dx=100)  # the stroke's points weren't copied: still the originals
-f.gradient = drawapp.radial([RED, BLUE], shape=ring)
+f.gradient = setsquare.radial([RED, BLUE], shape=ring)
 
 # --- saved and opened -------------------------------------------------------------------------
 before = (f.gradient, sides[1].stroke, t.gradient)
@@ -154,12 +154,12 @@ doc.new()
 sides = s.rectangle((0, 0), (40, 20))
 ring = s.circle((20, 10), 8)
 ring.construction = True
-f = s.fill(at=(2, 2), color=drawapp.radial([RED, BLUE], shape=ring, focal=sides[0].p1))
-s.stroke(sides[:2], color=drawapp.linear([RED, BLUE], start=sides[0].p1, end=sides[1].p2), width=0.5)
-f.gradient = drawapp.linear([BLUE, RED], start=sides[0].p1, end=sides[0].p2, spread="repeat")
+f = s.fill(at=(2, 2), color=setsquare.radial([RED, BLUE], shape=ring, focal=sides[0].p1))
+s.stroke(sides[:2], color=setsquare.linear([RED, BLUE], start=sides[0].p1, end=sides[1].p2), width=0.5)
+f.gradient = setsquare.linear([BLUE, RED], start=sides[0].p1, end=sides[0].p2, spread="repeat")
 lines = doc.history
-assert any("drawapp.radial(" in l and "shape=c" in l for l in lines), lines
-assert any(".gradient = drawapp.linear(" in l for l in lines), lines
+assert any("setsquare.radial(" in l and "shape=c" in l for l in lines), lines
+assert any(".gradient = setsquare.linear(" in l for l in lines), lines
 expected = svg()
 
 

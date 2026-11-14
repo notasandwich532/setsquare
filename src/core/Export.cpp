@@ -645,7 +645,7 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
            "xmlns:inkscape=\"http://www.inkscape.org/namespaces/inkscape\" version=\"1.1\"\n"
         << "     width=\"" << num(width) << unit << "\" height=\"" << num(height) << unit << "\" viewBox=\"0 0 "
         << num(width) << ' ' << num(height) << "\">\n"
-        << (o.canvas ? "  <!-- Drawing App icon -->\n" : "  <!-- Drawing App export: 1 unit = 1 mm -->\n");
+        << (o.canvas ? "  <!-- Setsquare icon -->\n" : "  <!-- Setsquare export: 1 unit = 1 mm -->\n");
     // The drawing goes in after the gradients it uses (collected as it's written).
     const std::string head = out.str();
     out.str({});

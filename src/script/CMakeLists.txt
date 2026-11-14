@@ -23,24 +23,24 @@ message(STATUS "Bundled Python ${Python_VERSION}: ${Python_LIBRARIES}")
 set(PYBIND11_FINDPYTHON ON)  # pybind11: use the Python found above
 find_package(pybind11 CONFIG REQUIRED)
 
-# The embedded interpreter and the `drawapp` Python module.
+# The embedded interpreter and the `setsquare` Python module.
 add_library(drawscript STATIC
     PythonHost.cpp
     PythonHost.h
 )
 target_include_directories(drawscript PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(drawscript PUBLIC drawdoc PRIVATE pybind11::embed)
-drawapp_warnings(drawscript)
+setsquare_warnings(drawscript)
 if(MSVC)
     target_compile_options(drawscript PRIVATE /bigobj)  # (the Python bindings are one big file)
 endif()
 
-# Headless script runner (console program; an offscreen GUI app, for fonts): drawapp-cli script.py [args...]
-add_executable(drawapp-cli cli.cpp)
-target_link_libraries(drawapp-cli PRIVATE drawscript Qt6::Core Qt6::Gui)
-drawapp_warnings(drawapp-cli)
-drawapp_embeds_python(drawapp-cli)
-add_dependencies(drawapp-cli python_runtime)
+# Headless script runner (console program; an offscreen GUI app, for fonts): setsquare-cli script.py [args...]
+add_executable(setsquare-cli cli.cpp)
+target_link_libraries(setsquare-cli PRIVATE drawscript Qt6::Core Qt6::Gui)
+setsquare_warnings(setsquare-cli)
+setsquare_embeds_python(setsquare-cli)
+add_dependencies(setsquare-cli python_runtime)
 
 # --- Bundled Python standard library ----------------------------------------------------------
 # vcpkg builds CPython for us; its standard library is copied next to the executables as

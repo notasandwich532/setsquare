@@ -122,7 +122,7 @@ s.trim(e, near=(0, 10))
 arcs = [x for x in s.entities if type(x).__name__ == "EllipseArc"]
 s.rectangular_pattern(arcs, count=3, spacing=50)
 healthy("patterned")
-path = os.path.join(tempfile.gettempdir(), "drawapp_curves.dsk")
+path = os.path.join(tempfile.gettempdir(), "setsquare_curves.dsk")
 doc.save(path)
 doc.open(path)
 assert sorted(type(x).__name__ for x in s.entities if type(x).__name__ not in ("Point", "Line")) == ["EllipseArc"] * 3

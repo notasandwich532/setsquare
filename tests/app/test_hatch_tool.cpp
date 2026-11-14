@@ -93,7 +93,7 @@ TEST_CASE("Hatch tool: hatching areas, and changing them all from the panel", "[
     CHECK(f.fillAt(20, 20).color == f.view.paint().color2);
     f.click(60, 20);
     CHECK(f.tool().items().size() == 2);
-    CHECK(f.recorded.last().contains(QStringLiteral("hatch=drawapp.hatch(\"ANSI31\")")));
+    CHECK(f.recorded.last().contains(QStringLiteral("hatch=setsquare.hatch(\"ANSI31\")")));
 
     // The panel changes them both: pattern, angle, scale, width.
     auto* pattern = f.input<QComboBox>("hatchPattern");

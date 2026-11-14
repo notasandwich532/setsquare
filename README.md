@@ -1,4 +1,4 @@
-# Drawing App
+# Setsquare
 
 A personal 2D parametric drawing app: Fusion-style constrained sketching, built on FreeCAD's PlaneGCS solver, with colours and other features layered on top. C++20 / Qt 6, dark mode by default, Windows and Linux.
 
@@ -21,13 +21,13 @@ Linux: use the `linux-gcc` preset instead.
 
 The first configure builds Eigen, Boost.Graph and Catch2 through vcpkg, which takes a few minutes.
 
-On Windows, `windeployqt build\windows-msvc\drawapp.exe` copies the Qt DLLs next to the exe. Alternatively, add `%QT_ROOT_DIR%\bin` to PATH.
+On Windows, `windeployqt build\windows-msvc\setsquare.exe` copies the Qt DLLs next to the exe. Alternatively, add `%QT_ROOT_DIR%\bin` to PATH.
 
 ## Scripting
 Everything in the UI can be done from Python (bundled CPython 3.14, no system Python needed), and UI actions are recorded as Python in the console. You can run Python in three places:
 - the in-app **Python** dock
 - **Macros → Run Script…**
-- headless, with `drawapp-cli script.py`
+- headless, with `setsquare-cli script.py`
 
 See [docs/scripting.md](docs/scripting.md).
 
@@ -35,5 +35,5 @@ See [docs/scripting.md](docs/scripting.md).
 - `third_party/planegcs/`: vendored solver (see its README for the local patches)
 - `src/core/`: sketch model, solver adapter, geometry, file format (no Qt)
 - `src/app/`: `Document` + the recording `Editor` (the command layer), and the Qt application
-- `src/script/`: embedded Python host, the `drawapp` module, and `drawapp-cli`
+- `src/script/`: embedded Python host, the `setsquare` module, and `setsquare-cli`
 - `tests/`: Catch2 unit/GUI tests, plus `tests/scripts/*.py` run headless

@@ -13,11 +13,11 @@ environment variables, never get involved.
 |---|---|
 | **Console** | The *Python* dock (View → Python). Enter runs; Shift+Enter adds a line; Up/Down recall history. |
 | **Macros** | Macros → Run Script… (Ctrl+Shift+R). Scripts in the macros folder are listed under Macros → Macros Folder. |
-| **Startup** | `drawapp --script setup.py [part.dsk]` |
-| **Headless** | `drawapp-cli script.py [args]`, `drawapp-cli --open part.dsk script.py`, or `drawapp-cli -c "print(s.dof)"`. The exit code is 0 on success and 1 on an uncaught exception, and a traceback goes to stderr. |
+| **Startup** | `setsquare --script setup.py [part.dsk]` |
+| **Headless** | `setsquare-cli script.py [args]`, `setsquare-cli --open part.dsk script.py`, or `setsquare-cli -c "print(s.dof)"`. The exit code is 0 on success and 1 on an uncaught exception, and a traceback goes to stderr. |
 
-In all of these, `doc` (the document), `s` (its sketch), `app` (the window) and `drawapp` are
-predefined. Elsewhere, start with `import drawapp; doc = drawapp.document(); s = doc.sketch`.
+In all of these, `doc` (the document), `s` (its sketch), `app` (the window) and `setsquare` are
+predefined. Elsewhere, start with `import setsquare; doc = setsquare.document(); s = doc.sketch`.
 
 **Undo:**
 - A script or macro run is **one undo step**.
@@ -302,7 +302,7 @@ app.fit()  app.selection = [l, c]  app.tool = "line"  app.message("hi")   # need
 - Dimensions and constraints: dimension, coincident, horizontal_vertical, parallel, perpendicular, tangent, equal, midpoint, concentric, symmetric, collinear, fix
 
 ## Tests
-Each `tests/scripts/test_*.py` is a CTest test run through `drawapp-cli`. The GUI test
+Each `tests/scripts/test_*.py` is a CTest test run through `setsquare-cli`. The GUI test
 *"Replaying recorded UI actions reproduces the sketch"* drives the real tools, replays what they
 recorded, and checks the result is identical. It's there to keep "the UI and Python can do the
 same things" true.

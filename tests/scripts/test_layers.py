@@ -67,7 +67,7 @@ s.break_link([right])
 assert not right.projected and not right.fixed
 
 # Saving keeps it all.
-path = os.path.join(tempfile.gettempdir(), "drawapp_layers.dsk")
+path = os.path.join(tempfile.gettempdir(), "setsquare_layers.dsk")
 doc.save(path)
 doc.open(path)
 assert [l.name for l in s.layers] == ["Top", "Layer 1"] and s.layer.name == "Top"

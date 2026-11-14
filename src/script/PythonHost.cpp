@@ -1,4 +1,4 @@
-// The embedded interpreter and the `drawapp` Python module.
+// The embedded interpreter and the `setsquare` Python module.
 //
 // The module lives in this file (not a separate one) because PYBIND11_EMBEDDED_MODULE registers
 // itself from a static initialiser, and a linker would drop an otherwise-unreferenced object
@@ -57,7 +57,7 @@ bool g_initialised = false;
 // Python objects owned by the host; released before the interpreter shuts down.
 struct HostObjects
 {
-    py::object helpers;  // the _drawapp_host helper module
+    py::object helpers;  // the _setsquare_host helper module
     py::dict consoleGlobals;
     py::object consoleLocals;
 };
@@ -262,7 +262,7 @@ core::Color colorArg(py::handle h)
     throw py::type_error("a colour is '#rrggbb' or an (r, g, b[, a]) tuple");
 }
 
-// A colour argument that may also be a gradient (drawapp.linear / drawapp.radial).
+// A colour argument that may also be a gradient (setsquare.linear / setsquare.radial).
 struct PaintArg
 {
     core::Color color;
@@ -560,10 +560,10 @@ void dragPoints(const std::vector<Id>& points, double dx, double dy)
 // The module
 // =============================================================================================
 
-PYBIND11_EMBEDDED_MODULE(drawapp, m)
+PYBIND11_EMBEDDED_MODULE(setsquare, m)
 {
     using namespace script;
-    m.doc() = "Scripting API for the drawing app. Everything the UI does can be done from here.";
+    m.doc() = "Scripting API for Setsquare. Everything the UI does can be done from here.";
 
     py::register_exception_translator([](std::exception_ptr p) {
         try {
@@ -586,8 +586,8 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
         return out;
     };
     py::class_<core::Gradient>(m, "Gradient",
-                               "A gradient, for any colour of a fill, stroke or text: made by drawapp.linear or "
-                               "drawapp.radial, placed by sketch geometry (it follows it).")
+                               "A gradient, for any colour of a fill, stroke or text: made by setsquare.linear or "
+                               "setsquare.radial, placed by sketch geometry (it follows it).")
         .def_property_readonly("type", [](const core::Gradient& g) { return std::string(core::toString(g.kind)); },
                                "'linear' or 'radial'.")
         .def_property_readonly("stops", stopsOut, "[(offset, '#rrggbb'), ...]")
@@ -609,7 +609,7 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
     // --- hatches -----------------------------------------------------------------------------
 
     py::class_<core::Hatch>(m, "Hatch",
-                            "A hatch for a fill: lines in a pattern instead of a solid colour (made by drawapp.hatch).")
+                            "A hatch for a fill: lines in a pattern instead of a solid colour (made by setsquare.hatch).")
         .def_property_readonly("pattern", [](const core::Hatch& h) { return h.pattern; }, "Its pattern's name.")
         .def_property_readonly("lines", [](const core::Hatch& h) {
             py::list out;
@@ -617,7 +617,7 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
                 out.append(py::make_tuple(l.angle, l.x, l.y, l.dx, l.dy, l.dashes));
             }
             return out;
-        }, "The pattern, at scale 1: [(angle, x, y, dx, dy, [dashes]), ...] (see drawapp.hatch).")
+        }, "The pattern, at scale 1: [(angle, x, y, dx, dy, [dashes]), ...] (see setsquare.hatch).")
         .def_property_readonly("angle", [](const core::Hatch& h) { return h.angle; }, "Degrees, the pattern turned.")
         .def_property_readonly("scale", [](const core::Hatch& h) { return h.scale; })
         .def_property_readonly("width", [](const core::Hatch& h) { return h.width; }, "Its lines' width, mm (0: hairlines).")
@@ -628,7 +628,7 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
         if (lines.is_none()) {
             const auto known = core::hatch::builtin(pattern, angle, scale, width);
             if (!known) {
-                throw py::value_error("no pattern called '" + pattern + "' (see drawapp.hatch_patterns()); give lines= for one of your own");
+                throw py::value_error("no pattern called '" + pattern + "' (see setsquare.hatch_patterns()); give lines= for one of your own");
             }
             h = *known;
         }
@@ -885,7 +885,7 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
                 }
                 return d;
             }, "The curve's stroke as {'color', 'width', 'dash'}, or None (see Sketch.stroke); with a gradient "
-               "colouring the line instead of color, also 'gradient' (a drawapp.Gradient).");
+               "colouring the line instead of color, also 'gradient' (a setsquare.Gradient).");
     };
 
     py::class_<PointH, Item> point(m, "Point");
@@ -1106,7 +1106,7 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
                 const PaintArg p = paintArg(color);
                 editReturningId("Fill", [&](Editor& ed) { return ed.fill({seed.x, seed.y}, p.color, p.gradient); });
             },
-            "'#rrggbb' (or '#rrggbbaa'); set it to recolour (or to a drawapp.linear / drawapp.radial gradient).")
+            "'#rrggbb' (or '#rrggbbaa'); set it to recolour (or to a setsquare.linear / setsquare.radial gradient).")
         .def_property(
             "gradient", [fillOf](const FillH& f) -> py::object {
                 const core::Fill& fill = fillOf(f.id);
@@ -1118,7 +1118,7 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
                 if (!gradient.is_none()) {
                     g = paintArg(gradient).gradient;
                     if (!g.active()) {
-                        throw py::type_error("gradient: a drawapp.linear / drawapp.radial gradient, or None");
+                        throw py::type_error("gradient: a setsquare.linear / setsquare.radial gradient, or None");
                     }
                 }
                 editReturningId("Gradient", [&](Editor& ed) {
@@ -1126,7 +1126,7 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
                     return f.id;
                 });
             },
-            "Its gradient (drawapp.Gradient), or None for its plain colour. Set it to change; None takes it off.")
+            "Its gradient (setsquare.Gradient), or None for its plain colour. Set it to change; None takes it off.")
         .def_property(
             "hatch", [fillOf](const FillH& f) -> py::object {
                 const core::Fill& fill = fillOf(f.id);
@@ -1140,7 +1140,7 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
                     return f.id;
                 });
             },
-            "Its hatch (drawapp.Hatch: the area drawn with lines in its colour), or None (filled solid). Set it to "
+            "Its hatch (setsquare.Hatch: the area drawn with lines in its colour), or None (filled solid). Set it to "
             "change; None takes it off.")
         .def_property_readonly("at", [fillOf](const FillH& f) {
             const core::Fill& fill = fillOf(f.id);
@@ -1302,7 +1302,7 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
         .def_property_readonly("gradient", [textOf](const TextH& t) -> py::object {
             const core::Text& text = textOf(t.id);
             return text.hasColor && text.gradient.active() ? py::cast(text.gradient) : py::none();
-        }, "Its gradient (drawapp.Gradient; set with color= in Sketch.edit_text), or None.")
+        }, "Its gradient (setsquare.Gradient; set with color= in Sketch.edit_text), or None.")
         .def_property_readonly("anchor", [textOf](const TextH& t) { return wrap(textOf(t.id).anchor); },
                                "The point at the start of its baseline.")
         .def_property_readonly("contours", [textOf](const TextH& t) {
@@ -1817,8 +1817,8 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
         }, py::arg("curves"), py::arg("color") = py::none(), py::arg("width") = py::none(),
            py::arg("dash") = py::none(),
            "Give curves a stroke: color as '#rrggbb' (or '#rrggbbaa', or an (r, g, b[, a]) tuple), width in mm "
-           "(0 = hairline; \"none\": no line, e.g. for a fill without an outline; color may be a drawapp.linear / "
-           "drawapp.radial gradient), dash 'solid', 'dashed', 'dotted', 'dash_dot' or 'dash_dot_dot'.")
+           "(0 = hairline; \"none\": no line, e.g. for a fill without an outline; color may be a setsquare.linear / "
+           "setsquare.radial gradient), dash 'solid', 'dashed', 'dotted', 'dash_dot' or 'dash_dot_dot'.")
         .def("fill", [](const SketchH&, py::handle at, py::handle color, py::object hatch) {
             const core::Vec2 where = vecArg(at);
             const PaintArg p = paintArg(color);
@@ -1826,7 +1826,7 @@ PYBIND11_EMBEDDED_MODULE(drawapp, m)
             return wrap(editReturningId("Fill", [&](Editor& ed) { return ed.fill(where, p.color, p.gradient, h); }));
         }, py::arg("at"), py::arg("color") = "#c3c3c3", py::arg("hatch") = py::none(),
            "Fill the closed area around `at` (as a paint bucket would; a fill already there is recoloured). color: a "
-           "colour, or a gradient (drawapp.linear / drawapp.radial). hatch: a drawapp.hatch, to draw the area with "
+           "colour, or a gradient (setsquare.linear / setsquare.radial). hatch: a setsquare.hatch, to draw the area with "
            "its lines in the colour instead. "
            "Raises ValueError if `at` isn't enclosed: see loose_ends().")
         .def("text", [](const SketchH&, const std::string& text, py::object at, double height, py::object font,
@@ -2701,7 +2701,9 @@ import re
 import sys
 import traceback
 
-import drawapp
+import setsquare
+
+sys.modules["drawapp"] = setsquare  # (the old name, for scripts written before the app was named Setsquare)
 
 
 class _Writer:
@@ -2710,7 +2712,7 @@ class _Writer:
 
     def write(self, text):
         if text:
-            drawapp._emit(text, self._is_error)
+            setsquare._emit(text, self._is_error)
         return len(text)
 
     def flush(self):
@@ -2728,10 +2730,11 @@ def base_globals(name, path=None):
     g = {
         "__name__": name,
         "__builtins__": builtins,
-        "drawapp": drawapp,
-        "doc": drawapp.document(),
-        "s": drawapp.document().sketch,
-        "app": drawapp.app,
+        "setsquare": setsquare,
+        "drawapp": setsquare,  # (the old name)
+        "doc": setsquare.document(),
+        "s": setsquare.document().sketch,
+        "app": setsquare.app,
     }
     if path:
         g["__file__"] = path
@@ -2799,7 +2802,7 @@ class ConsoleNamespace(dict):
         m = _NAME.match(key)
         if m:
             try:
-                return drawapp.document().sketch[int(m.group(2))]
+                return setsquare.document().sketch[int(m.group(2))]
             except (KeyError, ValueError):
                 pass
         raise KeyError(key)
@@ -2898,7 +2901,7 @@ bool initialise(QString* error, const QString& pythonHome)
 
     try {
         g_objects = std::make_unique<HostObjects>();
-        py::module_ helpers = py::module_::import("types").attr("ModuleType")("_drawapp_host");
+        py::module_ helpers = py::module_::import("types").attr("ModuleType")("_setsquare_host");
         py::exec(kHelpers, helpers.attr("__dict__"));
         g_objects->helpers = helpers;
     }

@@ -53,8 +53,8 @@ private:
 int main(int argc, char* argv[])
 {
     SafeApplication app(argc, argv);
-    QApplication::setApplicationName("drawing_app");
-    QApplication::setOrganizationName("drawing_app");
+    QApplication::setApplicationName("Setsquare");
+    QApplication::setOrganizationName("Setsquare");
     QApplication::setWindowIcon(icons::appIcon());
 
     QCommandLineParser parser;

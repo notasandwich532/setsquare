@@ -17,7 +17,7 @@ QIcon forName(const QString& name);
 // The icon's SVG for a state: QIcon::On gives the white version. Empty if there's none.
 QByteArray svg(const QString& name, QIcon::State state = QIcon::Off);
 
-// The app's own icon (icons/app/drawapp.svg), drawn at the usual window/taskbar sizes.
+// The app's own icon (icons/app/setsquare.svg), drawn at the usual window/taskbar sizes.
 QIcon appIcon();
 
 }  // namespace icons

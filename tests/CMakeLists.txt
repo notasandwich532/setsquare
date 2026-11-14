@@ -24,7 +24,7 @@ add_executable(core_tests
 )
 target_link_libraries(core_tests PRIVATE drawcore planegcs Catch2::Catch2WithMain)
 set_target_properties(core_tests PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
-drawapp_warnings(core_tests)
+setsquare_warnings(core_tests)
 catch_discover_tests(core_tests)
 
 # --- App: drives the real view and tools with simulated input, headless ---
@@ -53,9 +53,9 @@ add_executable(app_tests
     app/test_tools.cpp
     app/test_transform_tools.cpp
 )
-target_link_libraries(app_tests PRIVATE drawapp_lib Qt6::Test Qt6::Svg Catch2::Catch2)
-drawapp_warnings(app_tests)
-drawapp_embeds_python(app_tests)
+target_link_libraries(app_tests PRIVATE setsquare_lib Qt6::Test Qt6::Svg Catch2::Catch2)
+setsquare_warnings(app_tests)
+setsquare_embeds_python(app_tests)
 add_dependencies(app_tests python_runtime)
 catch_discover_tests(app_tests
     DL_PATHS "${QT_BIN_DIR}"
@@ -66,7 +66,7 @@ catch_discover_tests(app_tests
 file(GLOB script_tests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_*.py")
 foreach(script IN LISTS script_tests)
     get_filename_component(name "${script}" NAME_WE)
-    add_test(NAME "script: ${name}" COMMAND drawapp-cli "${script}")
+    add_test(NAME "script: ${name}" COMMAND setsquare-cli "${script}")
     set_tests_properties("script: ${name}" PROPERTIES
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${QT_BIN_DIR}"
     )

@@ -1,8 +1,8 @@
-// drawapp-cli: runs Python scripts against a sketch without opening a window.
+// setsquare-cli: runs Python scripts against a sketch without opening a window.
 //
-//   drawapp-cli script.py [args...]          run a script (sys.argv = [script.py, args...])
-//   drawapp-cli --open part.dsk script.py    ...on an existing file
-//   drawapp-cli -c "print(s.dof)"            run a snippet
+//   setsquare-cli script.py [args...]          run a script (sys.argv = [script.py, args...])
+//   setsquare-cli --open part.dsk script.py    ...on an existing file
+//   setsquare-cli -c "print(s.dof)"            run a snippet
 //
 // The exit code is the script's: 0 on success, 1 after an uncaught exception (the traceback
 // goes to stderr), or whatever sys.exit() was given. Used by the test suite.
@@ -20,7 +20,7 @@ namespace
 {
 void usage()
 {
-    std::fputs("usage: drawapp-cli [--open FILE.dsk] (SCRIPT.py [ARGS...] | -c CODE)\n", stderr);
+    std::fputs("usage: setsquare-cli [--open FILE.dsk] (SCRIPT.py [ARGS...] | -c CODE)\n", stderr);
 }
 }  // namespace
 

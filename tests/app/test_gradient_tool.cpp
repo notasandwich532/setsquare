@@ -147,7 +147,7 @@ TEST_CASE("A gradient is placed by sketch geometry picked on the canvas", "[grad
     CHECK(f.fillGradient().end == f.opposite);
     CHECK(f.tool().current() == fill);
     const QString script = f.recorded.join('\n');
-    CHECK(script.contains(QStringLiteral("color=drawapp.linear([(0, ")));
+    CHECK(script.contains(QStringLiteral("color=setsquare.linear([(0, ")));
     CHECK(script.contains(QStringLiteral("start=p%1, end=p%2").arg(f.corner).arg(f.opposite)));
 
     // It follows the geometry.

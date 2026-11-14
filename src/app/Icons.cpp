@@ -70,7 +70,7 @@ public:
     }
 
     QIconEngine* clone() const override { return new SvgIconEngine(m_normal); }
-    QString key() const override { return QStringLiteral("drawapp-svg"); }
+    QString key() const override { return QStringLiteral("setsquare-svg"); }
 
 private:
     QByteArray m_normal;
@@ -89,7 +89,7 @@ QIcon forName(const QString& name)
 
 QIcon appIcon()
 {
-    QSvgRenderer renderer(QStringLiteral(":/icons/app/drawapp.svg"));
+    QSvgRenderer renderer(QStringLiteral(":/icons/app/setsquare.svg"));
     if (!renderer.isValid()) {
         return {};
     }

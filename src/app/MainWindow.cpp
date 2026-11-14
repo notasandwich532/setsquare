@@ -92,7 +92,7 @@ MainWindow::MainWindow(QWidget* parent)
     , m_solveLabel(new QLabel(this))
     , m_cursorLabel(new QLabel(this))
 {
-    setWindowTitle(tr("Drawing App"));
+    setWindowTitle(tr("Setsquare"));
     setCentralWidget(m_view);
     // 1280x800, but never bigger than the screen we open on (high-DPI laptops, small monitors).
     const QRect available = screen() ? screen()->availableGeometry() : QRect(0, 0, 1280, 800);
@@ -258,7 +258,7 @@ void MainWindow::updateTitle()
     const QString path = m_doc->filePath();
     const QString name = path.isEmpty() ? tr("Untitled") : QFileInfo(path).fileName();
     setWindowTitle(QStringLiteral("%1%2 - %3").arg(name, m_doc->isModified() ? QStringLiteral("*") : QString(),
-                                                   tr("Drawing App")));
+                                                   tr("Setsquare")));
 }
 
 bool MainWindow::maybeSave()
@@ -349,7 +349,7 @@ void MainWindow::newSketch()
 
 namespace
 {
-const QString kSketchMime = QStringLiteral("application/x-drawapp-sketch");
+const QString kSketchMime = QStringLiteral("application/x-setsquare-sketch");
 }
 
 void MainWindow::importDrawing(const QString& given)
@@ -613,7 +613,7 @@ void MainWindow::showHistory()
             QMessageBox::critical(&dialog, tr("Save failed"), file.errorString());
             return;
         }
-        file.write((QStringLiteral("# Command history from Drawing App. Run in a new sketch to rebuild it.\n") + history
+        file.write((QStringLiteral("# Command history from Setsquare. Run in a new sketch to rebuild it.\n") + history
                     + QLatin1Char('\n'))
                        .toUtf8());
     });
@@ -1103,7 +1103,7 @@ void MainWindow::createActions()
             QMessageBox::critical(this, tr("Save failed"), file.errorString());
             return;
         }
-        const QString body = QStringLiteral("# Recorded with Drawing App. `doc` and `s` (the sketch) are predefined.\n")
+        const QString body = QStringLiteral("# Recorded with Setsquare. `doc` and `s` (the sketch) are predefined.\n")
             + m_console->recording().join(QLatin1Char('\n')) + QLatin1Char('\n');
         file.write(body.toUtf8());
     });

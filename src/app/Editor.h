@@ -104,7 +104,7 @@ public:
     // A fill's hatch (an inactive one: back to filled solid). Throws SketchError for a scale of 0
     // or less.
     void setFillHatch(core::Id fill, const core::Hatch& hatch);
-    // e.g. drawapp.hatch("ANSI31", angle=45, scale=2) (a pattern that isn't built in: its lines=)
+    // e.g. setsquare.hatch("ANSI31", angle=45, scale=2) (a pattern that isn't built in: its lines=)
     static QString hatchCall(const core::Hatch& hatch);
     // Paint edits check their gradient (its geometry of the right kinds, in the layer; see
     // core::gradient::check, which throws). One whose geometry has been deleted is dropped: the
@@ -112,7 +112,7 @@ public:
     void settleGradient(core::Gradient& gradient, core::Color& color, core::Id layer) const;
     // A fill's gradient (an inactive one: back to its plain colour).
     void setFillGradient(core::Id fill, const core::Gradient& gradient);
-    // e.g. drawapp.linear([(0, "#ff0000"), (1, "#0000ff")], start=p6, end=p7)
+    // e.g. setsquare.linear([(0, "#ff0000"), (1, "#0000ff")], start=p6, end=p7)
     static QString gradientCall(const core::Sketch& sketch, const core::Gradient& gradient);
 
     // Sublayers (named uniquely; scripts refer to them by name). A new one becomes the active one.

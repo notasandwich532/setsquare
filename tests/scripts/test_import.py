@@ -475,7 +475,7 @@ healthy()
 assert len([l for l in s.lines if near(l.p1.pos, (0, 0)) or near(l.p2.pos, (0, 0))]) == 2, "the outline doubled"
 by_pattern = {f.hatch.pattern: f for f in s.fills if f.hatch}
 ansi = by_pattern["ANSI31"].hatch
-assert ansi == drawapp.hatch("ANSI31"), ansi  # (one of ours: its angle and scale can be changed)
+assert ansi == setsquare.hatch("ANSI31"), ansi  # (one of ours: its angle and scale can be changed)
 assert isclose(by_pattern["ANSI31"].area, 40 * 20 - pi * 25, rel_tol=1e-3), by_pattern["ANSI31"].area  # (the island left out)
 mine = by_pattern["MINE"].hatch
 (angle, x, y, dx, dy, dashes), = mine.lines
