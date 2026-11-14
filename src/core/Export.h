@@ -43,6 +43,31 @@ struct SvgOptions
 // repeats in a tile, else their lines. Throws SketchError if there's nothing to export.
 std::string toSvg(const Sketch& sketch, const SvgOptions& options = {});
 
+// A run of text (a line, or a letter along a path) to draw in its font, in the SVG's units: mm
+// from its top-left corner, y down.
+struct PlacedTextRun
+{
+    std::string text;
+    std::string font;
+    bool bold = false;
+    bool italic = false;
+    double x = 0.0, y = 0.0;  // where its baseline starts
+    double rotation = 0.0;    // degrees, clockwise (as SVG's rotate)
+    double size = 0.0;        // em height, mm
+    double tracking = 0.0;    // extra space after each letter, mm
+    Color color;
+};
+// The SVG export cut where each text in its font would be (for the PDF: Qt's SVG renderer draws
+// <text> as shapes, so the PDF draws these itself, as text). Every piece is a whole SVG of the
+// same size; drawn in order, each followed by its texts, they make what toSvg does. Texts that
+// have to be outlines anyway (and ones with gradients) stay in the SVG as outlines.
+struct SvgPieces
+{
+    std::vector<std::string> svgs;
+    std::vector<std::vector<PlacedTextRun>> texts;  // texts[i]: drawn after svgs[i]
+};
+SvgPieces toSvgPieces(const Sketch& sketch, const SvgOptions& options = {});
+
 struct DxfOptions
 {
     bool styles = true;         // strokes keep their colour, line style and weight (else all plain)

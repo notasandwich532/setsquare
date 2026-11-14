@@ -2594,6 +2594,25 @@ PYBIND11_EMBEDDED_MODULE(setsquare, m)
            "stroke in thin black; construction only if asked; text as text in its font (text_as_outlines=True: "
            "as its letters' shapes); hatches as <pattern>s (hatch_lines=True: their lines, cut to their areas). With a page set (and page=True), the SVG is the page; else fitted round the "
            "drawing with `margin`. canvas=(x0, y0, x1, y1) frames a fixed area in its own units instead (for icons).")
+        .def("export_pdf", [](const DocumentH&, const std::string& path, bool fills, bool undecorated,
+                              bool construction, double margin, bool page, bool textAsOutlines) {
+            core::exporter::SvgOptions o;
+            o.fills = fills;
+            o.undecorated = undecorated;
+            o.construction = construction;
+            o.margin = margin;
+            o.page = page;
+            o.textAsOutlines = textAsOutlines;
+            Document::SilentRecording quiet(doc());
+            QString error;
+            if (!doc().exportPdf(QString::fromStdString(path), o, &error)) {
+                throw std::runtime_error(error.toStdString());
+            }
+        }, py::arg("path"), py::arg("fills") = true, py::arg("undecorated") = true, py::arg("construction") = false,
+           py::arg("margin") = 2.0, py::arg("page") = true, py::arg("text_as_outlines") = false,
+           "Write the drawing as a PDF, at true size: with a page set (and page=True), the PDF's page is it (what's "
+           "off it cut off); else a page fitted round the drawing with `margin`. As export_svg draws it, text as "
+           "selectable text in its embedded font (text_as_outlines=True: as its letters' shapes), hatches as lines.")
         .def("to_svg", [](const DocumentH&, bool fills, bool undecorated, bool construction, double margin, bool page,
                           bool textAsOutlines, bool hatchLines) {
             core::exporter::SvgOptions o;

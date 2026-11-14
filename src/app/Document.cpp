@@ -15,7 +15,12 @@
 #include <set>
 #include <QFile>
 #include <QFontDatabase>
+#include <QFileInfo>
+#include <QPageLayout>
+#include <QPainter>
+#include <QPdfWriter>
 #include <QSaveFile>
+#include <QSvgRenderer>
 
 namespace
 {
@@ -871,6 +876,110 @@ bool Document::exportDxf(const QString& path, const core::exporter::DxfOptions& 
     announce(QStringLiteral("doc.export_dxf(%1, styles=%2, construction=%3%4%5)")
                  .arg(pyString(path), pyBool(o.styles), pyBool(o.construction),
                       o.fills ? QString() : QStringLiteral(", fills=False"),
+                      o.textAsOutlines ? QStringLiteral(", text_as_outlines=True") : QString()));
+    return true;
+}
+
+bool Document::exportPdf(const QString& path, const core::exporter::SvgOptions& options, QString* error)
+{
+    core::exporter::SvgOptions o = options;
+    o.hatchLines = true;  // (Qt's SVG renderer doesn't draw <pattern>s; on paper, lines are what they are anyway)
+    o.canvas.reset();
+    // In pieces, the text in its font drawn between them by the PDF's own painter: Qt's SVG renderer
+    // would draw it as shapes (not selectable, not searchable).
+    core::exporter::SvgPieces pieces;
+    try {
+        pieces = core::exporter::toSvgPieces(m_sketch, o);
+    }
+    catch (const core::SketchError& e) {
+        if (error) {
+            *error = tr("Couldn't export: %1").arg(errorText(e));
+        }
+        return false;
+    }
+    const QSizeF mm = QSvgRenderer(QByteArray::fromStdString(pieces.svgs.front())).viewBoxF().size();  // (in mm)
+    if (mm.isEmpty()) {
+        if (error) {
+            *error = tr("Couldn't export: there's nothing to put on the page");
+        }
+        return false;
+    }
+
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) {
+        if (error) {
+            *error = tr("Couldn't write %1: %2").arg(path, file.errorString());
+        }
+        return false;
+    }
+    {
+        QPdfWriter pdf(&file);
+        pdf.setTitle(QFileInfo(path).completeBaseName());
+        pdf.setCreator(QStringLiteral("Setsquare"));
+        pdf.setResolution(1200);
+        // The page exactly the drawing's size (a landscape one as it is, not turned), no margins.
+        pdf.setPageLayout(QPageLayout(QPageSize(mm, QPageSize::Millimeter, QString(), QPageSize::ExactMatch),
+                                      QPageLayout::Portrait, QMarginsF()));
+        QPainter painter;
+        if (!painter.begin(&pdf)) {
+            if (error) {
+                *error = tr("Couldn't write %1").arg(path);
+            }
+            return false;
+        }
+        painter.setRenderHint(QPainter::Antialiasing);
+        // True size: millimetres from the resolution (the page itself is whole points, as Qt writes
+        // it, so up to half a point off the drawing's size; the drawing isn't stretched to it).
+        const double perMm = pdf.resolution() / 25.4;
+        const QRectF pageRect(0, 0, mm.width() * perMm, mm.height() * perMm);
+        for (size_t i = 0; i < pieces.svgs.size(); ++i) {
+            QSvgRenderer(QByteArray::fromStdString(pieces.svgs[i])).render(&painter, pageRect);
+            for (const core::exporter::PlacedTextRun& r : pieces.texts[i]) {
+                if (r.size <= 0.0 || r.text.empty()) {
+                    continue;
+                }
+                // At a 100 px font, scaled down to its size (fonts take whole pixel sizes).
+                painter.save();
+                painter.scale(perMm, perMm);
+                painter.translate(r.x, r.y);
+                painter.rotate(r.rotation);
+                painter.scale(r.size / 100.0, r.size / 100.0);
+                QFont font(QString::fromStdString(r.font));
+                font.setPixelSize(100);
+                font.setBold(r.bold);
+                font.setItalic(r.italic);
+                painter.setFont(font);
+                painter.setPen(QColor(r.color.r, r.color.g, r.color.b, r.color.a));
+                const QString text = QString::fromStdString(r.text);
+                if (std::abs(r.tracking) < 1e-9) {
+                    painter.drawText(QPointF(0, 0), text);
+                }
+                else {
+                    // Letter by letter, each moved on by its advance and the tracking (QFont's own
+                    // letter spacing goes by the PDF's device pixels, not the font's).
+                    const QFontMetricsF metrics(font, painter.device());
+                    const double extra = r.tracking * 100.0 / r.size;
+                    double x = 0.0;
+                    for (char32_t c : text.toUcs4()) {
+                        const QString letter = QString::fromUcs4(&c, 1);
+                        painter.drawText(QPointF(x, 0), letter);
+                        x += metrics.horizontalAdvance(letter) + extra;
+                    }
+                }
+                painter.restore();
+            }
+        }
+        painter.end();
+    }
+    if (!file.commit()) {
+        if (error) {
+            *error = tr("Couldn't write %1: %2").arg(path, file.errorString());
+        }
+        return false;
+    }
+    announce(QStringLiteral("doc.export_pdf(%1, fills=%2, undecorated=%3, construction=%4, margin=%5%6%7)")
+                 .arg(pyString(path), pyBool(o.fills), pyBool(o.undecorated), pyBool(o.construction),
+                      Editor::number(o.margin), o.page ? QString() : QStringLiteral(", page=False"),
                       o.textAsOutlines ? QStringLiteral(", text_as_outlines=True") : QString()));
     return true;
 }

@@ -128,6 +128,9 @@ public:
     // Writes the drawing as SVG (see core/Export.h). Doesn't change the document.
     bool exportSvg(const QString& path, const core::exporter::SvgOptions& options, QString* error = nullptr);
     bool exportDxf(const QString& path, const core::exporter::DxfOptions& options, QString* error = nullptr);
+    // A PDF of the drawing as the SVG export makes it (the page, at true size; or fitted round the
+    // drawing): vectors, and text as text in its embedded font. Hatches are always their lines.
+    bool exportPdf(const QString& path, const core::exporter::SvgOptions& options, QString* error = nullptr);
     void newSketch();
 
 signals:

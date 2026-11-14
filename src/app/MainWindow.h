@@ -54,6 +54,7 @@ private:
     void pageSetup();    // File > Page Setup
     void exportSvg();    // options, then where to
     void exportDxf();
+    void exportPdf();
     // Where to export to (next to the sketch file, with this suffix); empty if cancelled.
     QString exportPath(const QString& suffix, const QString& title, const QString& filter);
     void copySelection();
@@ -73,5 +74,6 @@ private:
     class ToolSearch* m_search = nullptr;
     core::exporter::SvgOptions m_svgOptions;  // as last used
     core::exporter::DxfOptions m_dxfOptions;
+    core::exporter::SvgOptions m_pdfOptions;  // (the PDF is drawn from the SVG export)
     QAction* m_insertImage = nullptr;
 };

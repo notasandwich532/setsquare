@@ -296,7 +296,9 @@ s.measure_area(at=(x, y))          # mm^2 of the closed area there, its holes ta
 ```python
 doc.save(path)  doc.open(path)  doc.new()  doc.undo()  doc.redo()  doc.path  doc.modified
 doc.export_svg(path, fills=True, undecorated=True, construction=False, margin=2)  # as presentation view, in mm
-doc.export_dxf(path, styles=True, construction=False)  # exact geometry, DXF R12, mm; no fills
+doc.export_dxf(path, styles=True, construction=False, fills=True)  # exact geometry, DXF 2004, mm
+doc.export_pdf(path, fills=True, undecorated=True, construction=False, margin=2)  # the page, true size; text selectable
+#   (text_as_outlines=True on any of them: text as its letters' shapes)
 doc.to_svg(...), doc.to_dxf(...)                       # the same, as strings
 doc.history      # the commands that built the sketch, one per edit (saved in the .setsq; undo
                  # takes commands off); run them in a new sketch to rebuild it

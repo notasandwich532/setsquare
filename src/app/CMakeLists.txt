@@ -13,7 +13,7 @@ add_library(drawdoc STATIC
     TextShapes.h
 )
 target_include_directories(drawdoc PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(drawdoc PUBLIC drawcore Qt6::Core Qt6::Gui)
+target_link_libraries(drawdoc PUBLIC drawcore Qt6::Core Qt6::Gui Qt6::Svg)  # (Svg: the PDF export draws the SVG export)
 setsquare_warnings(drawdoc)
 
 # Everything else except main() lives in a library so GUI tests can drive the real widgets.

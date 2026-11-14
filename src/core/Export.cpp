@@ -455,7 +455,27 @@ std::vector<double> dashPattern(Dash dash)
 }
 }  // namespace
 
+namespace
+{
+std::string writeSvg(const Sketch& s, const SvgOptions& o, SvgPieces* pieces);
+}
+
 std::string toSvg(const Sketch& s, const SvgOptions& o)
+{
+    return writeSvg(s, o, nullptr);
+}
+
+SvgPieces toSvgPieces(const Sketch& s, const SvgOptions& o)
+{
+    SvgPieces pieces;
+    writeSvg(s, o, &pieces);
+    return pieces;
+}
+
+namespace
+{
+// toSvg; with `pieces`, also cut where each text in its font goes (see toSvgPieces).
+std::string writeSvg(const Sketch& s, const SvgOptions& o, SvgPieces* pieces)
 {
     // What goes in: per layer (bottom first; hidden ones left out), by kind.
     struct Area
@@ -874,10 +894,10 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
                 // round caps on no length).
                 std::optional<std::string> pattern =
                     a.hatch.active() && !o.hatchLines ? hatchPaint(a.hatch, a.color) : std::nullopt;
-                std::vector<hatch::Segment> pieces;
-                if (a.hatch.active() && !pattern && hatch::within(a.hatch, a.region, 2000000, pieces)) {
+                std::vector<hatch::Segment> segments;
+                if (a.hatch.active() && !pattern && hatch::within(a.hatch, a.region, 2000000, segments)) {
                     std::string lines;
-                    for (const hatch::Segment& p : pieces) {
+                    for (const hatch::Segment& p : segments) {
                         lines += "M" + X(p.a.x) + ',' + Y(p.a.y) + (p.a.x == p.b.x && p.a.y == p.b.y ? std::string(" l0,0 ") : " L" + X(p.b.x) + ',' + Y(p.b.y) + ' ');
                     }
                     if (!lines.empty()) {
@@ -919,7 +939,23 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
             }
             group("sublayer" + std::to_string(sub.sublayer->id), sub.sublayer->name);
             for (const TextArea& t : sub.texts) {
-                if (t.asText) {
+                if (t.asText && pieces && !t.gradient.active()) {
+                    // A cut: what's written so far is a piece (its open groups closed: they're only
+                    // names), then this text's runs, then on in fresh groups.
+                    pieces->svgs.push_back(out.str() + "    </g>\n  </g>\n");
+                    out.str({});
+                    out << "  <g>\n    <g>\n";
+                    const Text& tx = *t.text;
+                    std::vector<PlacedTextRun> runs;
+                    for (const TextRun& r : tx.runs) {
+                        const Point w = textToWorld(s.point(tx.anchor), tx.angle, r.at);
+                        runs.push_back({r.text, tx.font, tx.bold, tx.italic, w.x - x0 + m, y1 - w.y + m,
+                                        -(tx.angle + r.angle), r.size, r.tracking, t.color});
+                    }
+                    pieces->texts.push_back(std::move(runs));
+                    continue;
+                }
+                if (t.asText && !pieces) {
                     // Each run (a line, or a letter along a path) as a <text>, placed and turned.
                     const Text& tx = *t.text;
                     std::string font = " font-family=\"'" + xmlEscape(tx.font) + "'\"";
@@ -993,8 +1029,19 @@ std::string toSvg(const Sketch& s, const SvgOptions& o)
         out << "  </g>\n";
     }
     out << "</svg>\n";
-    return head + (defs.empty() ? std::string() : "  <defs>\n" + defs + "  </defs>\n") + out.str();
+    const std::string defsPart = defs.empty() ? std::string() : "  <defs>\n" + defs + "  </defs>\n";
+    if (pieces) {
+        // Each piece a whole SVG: the same head and definitions (all of them: cheap, and whichever
+        // it uses are there).
+        for (std::string& piece : pieces->svgs) {
+            piece = head + defsPart + piece + "</svg>\n";
+        }
+        pieces->svgs.push_back(head + defsPart + out.str());
+        pieces->texts.emplace_back();  // (nothing after the last)
+    }
+    return head + defsPart + out.str();
 }
+}  // namespace
 // ---------------------------------------------------------------------------------------------
 // DXF
 // ---------------------------------------------------------------------------------------------

@@ -567,6 +567,77 @@ void MainWindow::exportDxf()
     statusBar()->showMessage(tr("Exported %1").arg(QDir::toNativeSeparators(path)), 4000);
 }
 
+void MainWindow::exportPdf()
+{
+    QDialog dialog(this);
+    dialog.setObjectName(QStringLiteral("exportPdfDialog"));
+    dialog.setWindowTitle(tr("Export PDF"));
+    auto* form = new QFormLayout(&dialog);
+    QString what;
+    if (const auto& page = m_doc->sketch().page()) {
+        what = tr("The page (%1 × %2 mm) as presentation view shows it, at true size: what's off it is cut off.")
+                   .arg(page->width)
+                   .arg(page->height);
+    }
+    else {
+        what = tr("No page is set (File > Page Setup), so the PDF's page is the drawing's size, with the margin "
+                  "round it. At true size.");
+    }
+    auto* note = new QLabel(what, &dialog);
+    note->setWordWrap(true);
+    form->addRow(note);
+    auto* fills = new QCheckBox(tr("Fills"), &dialog);
+    fills->setChecked(m_pdfOptions.fills);
+    auto* plain = new QCheckBox(tr("Curves without a stroke (thin black)"), &dialog);
+    plain->setChecked(m_pdfOptions.undecorated);
+    auto* construction = new QCheckBox(tr("Construction geometry (grey, dashed)"), &dialog);
+    construction->setChecked(m_pdfOptions.construction);
+    auto* outlines = new QCheckBox(tr("Text as outlines (exact shapes, but no longer selectable text)"), &dialog);
+    outlines->setObjectName(QStringLiteral("pdfTextOutlines"));
+    outlines->setChecked(m_pdfOptions.textAsOutlines);
+    auto* margin = new ExpressionSpinBox(&dialog);
+    margin->setObjectName(QStringLiteral("pdfMargin"));
+    margin->setRange(0.0, 1000.0);
+    margin->setDecimals(2);
+    margin->setSuffix(QStringLiteral(" mm"));
+    margin->setValue(m_pdfOptions.margin);
+    form->addRow(fills);
+    form->addRow(plain);
+    form->addRow(construction);
+    form->addRow(outlines);
+    if (!m_doc->sketch().page()) {
+        form->addRow(tr("Margin"), margin);
+    }
+    else {
+        margin->hide();  // (the page is the page)
+    }
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    buttons->button(QDialogButtonBox::Ok)->setText(tr("Export..."));
+    form->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    m_pdfOptions.fills = fills->isChecked();
+    m_pdfOptions.undecorated = plain->isChecked();
+    m_pdfOptions.construction = construction->isChecked();
+    m_pdfOptions.textAsOutlines = outlines->isChecked();
+    m_pdfOptions.margin = margin->value();
+    m_pdfOptions.page = true;  // (the page whenever there is one)
+
+    const QString path = exportPath(QStringLiteral("pdf"), tr("Export PDF"), tr("PDF documents (*.pdf)"));
+    if (path.isEmpty()) {
+        return;
+    }
+    QString error;
+    if (!m_doc->exportPdf(path, m_pdfOptions, &error)) {
+        QMessageBox::critical(this, tr("Export failed"), error);
+        return;
+    }
+    statusBar()->showMessage(tr("Exported %1").arg(QDir::toNativeSeparators(path)), 4000);
+}
+
 QString MainWindow::exportPath(const QString& suffix, const QString& title, const QString& filter)
 {
     const QFileInfo current(m_doc->filePath());
@@ -725,6 +796,10 @@ void MainWindow::createActions()
     auto* exportDxfAction = exportMenu->addAction(tr("&DXF..."));
     exportDxfAction->setToolTip(tr("Exact geometry for CAD and CAM, in millimetres"));
     connect(exportDxfAction, &QAction::triggered, this, &MainWindow::exportDxf);
+    auto* exportPdfAction = exportMenu->addAction(tr("&PDF..."));
+    exportPdfAction->setObjectName(QStringLiteral("exportPdfAction"));
+    exportPdfAction->setToolTip(tr("The page as presentation view shows it, at true size, to print or share"));
+    connect(exportPdfAction, &QAction::triggered, this, &MainWindow::exportPdf);
     auto* historyAction = fileMenu->addAction(tr("Command &History..."));
     historyAction->setToolTip(tr("The commands that built this drawing (saved with it)"));
     connect(historyAction, &QAction::triggered, this, &MainWindow::showHistory);
