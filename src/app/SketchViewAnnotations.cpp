@@ -15,6 +15,7 @@
 #include <QLocale>
 #include <QPainter>
 #include <QPainterPath>
+#include <QSvgRenderer>
 
 #include <cmath>
 #include <functional>
@@ -39,24 +40,108 @@ constexpr double kArrowHalfWidth = 3.0;
 constexpr double kRadToDeg = 180.0 / std::numbers::pi;
 
 const QColor kGlyphColor(0xa8, 0xb2, 0xbf);
-const QColor kGlyphBackground(0x2a, 0x2d, 0x33, 225);
+
+// Each constraint's symbol: line drawings on a 16 x 16 grid, in kGlyphInk (swapped for the colour
+// they're shown in). No box round them: a halo in the canvas colour keeps them clear of what's
+// under them.
+const QByteArray kGlyphInk = "#a8b2bf";
 
 QString symbolFor(ConstraintType type)
 {
     switch (type) {
-        case ConstraintType::Coincident: return QStringLiteral("•");     // •
-        case ConstraintType::Horizontal: return QStringLiteral("H");
-        case ConstraintType::Vertical: return QStringLiteral("V");
-        case ConstraintType::Parallel: return QStringLiteral("∥");       // ∥
-        case ConstraintType::Perpendicular: return QStringLiteral("⊥");  // ⊥
-        case ConstraintType::Tangent: return QStringLiteral("T");
-        case ConstraintType::Equal: return QStringLiteral("=");
-        case ConstraintType::Midpoint: return QStringLiteral("△");       // △
-        case ConstraintType::Concentric: return QStringLiteral("◎");     // ◎
-        case ConstraintType::Symmetric: return QStringLiteral("⇔");      // ⇔
-        case ConstraintType::Collinear: return QStringLiteral("⋯");      // ⋯
+        case ConstraintType::Coincident: return QStringLiteral("coincident");
+        case ConstraintType::Horizontal: return QStringLiteral("horizontal");
+        case ConstraintType::Vertical: return QStringLiteral("vertical");
+        case ConstraintType::Parallel: return QStringLiteral("parallel");
+        case ConstraintType::Perpendicular: return QStringLiteral("perpendicular");
+        case ConstraintType::Tangent: return QStringLiteral("tangent");
+        case ConstraintType::Equal: return QStringLiteral("equal");
+        case ConstraintType::Midpoint: return QStringLiteral("midpoint");
+        case ConstraintType::Concentric: return QStringLiteral("concentric");
+        case ConstraintType::Symmetric: return QStringLiteral("symmetric");
+        case ConstraintType::Collinear: return QStringLiteral("collinear");
         default: return {};
     }
+}
+
+// A symbol's drawing (empty if `name` isn't one).
+QByteArray symbolSvg(const QString& name)
+{
+    static const std::map<QString, QByteArray> bodies = {
+        // A level: a bar with its ends ticked.
+        {QStringLiteral("horizontal"), "<path d='M2 8H14M2 5V11M14 5V11'/>"},
+        {QStringLiteral("vertical"), "<path d='M8 2V14M5 2H11M5 14H11'/>"},
+        // A point on a point: a dot in a ring.
+        {QStringLiteral("coincident"), "<circle cx='8' cy='8' r='5'/><circle cx='8' cy='8' r='2' fill='#a8b2bf'/>"},
+        {QStringLiteral("parallel"), "<path d='M3.5 13.5L8.5 2.5M7.5 13.5L12.5 2.5'/>"},
+        {QStringLiteral("perpendicular"), "<path d='M2.5 13.5H13.5M8 13.5V2.5'/>"},
+        // A circle with a line along its top.
+        {QStringLiteral("tangent"), "<circle cx='8' cy='10' r='4'/><path d='M1.5 6H14.5'/>"},
+        {QStringLiteral("equal"), "<path d='M3 5.5H13M3 10.5H13'/>"},
+        // A line with a marker pointing at its middle.
+        {QStringLiteral("midpoint"), "<path d='M1.5 12H14.5'/><path d='M5 4.5H11L8 9.5Z' fill='#a8b2bf'/>"},
+        {QStringLiteral("concentric"), "<circle cx='8' cy='8' r='6'/><circle cx='8' cy='8' r='2.5'/>"},
+        // Two halves mirrored about a dashed line.
+        {QStringLiteral("symmetric"),
+         "<path d='M8 1.5V14.5' stroke-dasharray='2 1.6'/><path d='M1.5 4L5.5 8L1.5 12ZM14.5 4L10.5 8L14.5 12Z' "
+         "fill='#a8b2bf'/>"},
+        // Two pieces of one line.
+        {QStringLiteral("collinear"), "<path d='M1.5 14.5L6.5 9.5M9.5 6.5L14.5 1.5'/><circle cx='8' cy='8' r='1.1' "
+                                      "fill='#a8b2bf'/>"},
+    };
+    const auto it = bodies.find(name);
+    if (it == bodies.end()) {
+        return {};
+    }
+    return "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><g fill='none' stroke='#a8b2bf' "
+           "stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'>"
+        + it->second + "</g></svg>";
+}
+
+// A marker drawn ready to show, at `size` px: its SVG in `color` (or its own colours, if none),
+// with a halo in the canvas colour round it. Cached: drawn once per look.
+QPixmap glyphPixmap(const QByteArray& svg, const QString& key, std::optional<QColor> color, double size, qreal ratio)
+{
+    static std::unordered_map<std::string, QPixmap> cache;
+    const QColor halo = theme::canvas().background;
+    const std::string k = key.toStdString() + '|' + (color ? color->name(QColor::HexArgb).toStdString() : "own") + '|'
+        + std::to_string(size) + '|' + std::to_string(ratio) + '|' + halo.name().toStdString();
+    if (const auto it = cache.find(k); it != cache.end()) {
+        return it->second;
+    }
+    auto inColour = [&](const QColor& c) {
+        QByteArray s = svg;
+        for (const QByteArray& ink : {kGlyphInk, QByteArray("#e8615c"), QByteArray("#d5d9de"), QByteArray("#4da3ff"),
+                                      QByteArray("#5cc97b"), QByteArray("#f2b33d")}) {
+            s.replace(ink, c.name().toLatin1());
+        }
+        return s;
+    };
+    const int pad = 2;  // (room for the halo)
+    const QSize pixels(static_cast<int>(std::ceil((size + 2 * pad) * ratio)), static_cast<int>(std::ceil((size + 2 * pad) * ratio)));
+    QImage image(pixels, QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    {
+        QPainter p(&image);
+        p.setRenderHint(QPainter::Antialiasing);
+        p.scale(ratio, ratio);
+        const QRectF at(pad, pad, size, size);
+        // The halo: the symbol in the canvas colour, nudged round in a ring under it.
+        QSvgRenderer under(inColour(halo));
+        p.setOpacity(0.9);
+        for (int i = 0; i < 8; ++i) {
+            const double a = i * std::numbers::pi / 4;
+            under.render(&p, at.translated(1.6 * std::cos(a), 1.6 * std::sin(a)));
+        }
+        p.setOpacity(1.0);
+        QSvgRenderer(color ? inColour(*color) : svg).render(&p, at);
+    }
+    QPixmap pm = QPixmap::fromImage(image);
+    pm.setDevicePixelRatio(ratio);
+    if (cache.size() > 500) {
+        cache.clear();
+    }
+    return cache.emplace(k, pm).first->second;
 }
 
 // Which entities carry a symbol for this constraint.
@@ -498,15 +583,38 @@ void SketchView::drawAnnotations(QPainter& painter, Id only) const
             continue;
         }
         const QColor color = annotationColor(a.id, kGlyphColor);
-        painter.setPen(QPen(color, 1.0));
-        painter.setBrush(kGlyphBackground);
-        painter.drawRoundedRect(a.rect, 3, 3);
-        painter.setBrush(Qt::NoBrush);
+        const bool plain = color == kGlyphColor;  // (not selected, hovered or in conflict)
+        const qreal ratio = painter.device() ? painter.device()->devicePixelRatioF() : 1.0;
+        // Drawn a little bigger than the box they're picked by (with no box round them, they can be).
+        const double drawn = kGlyphSize + 2;
+        const QPointF corner = a.rect.center() - QPointF(drawn / 2 + 2, drawn / 2 + 2);  // (+ the halo's room)
         if (!a.icon.isEmpty()) {
-            icons::forName(a.icon).paint(&painter, a.rect.adjusted(1.5, 1.5, -1.5, -1.5).toRect());
+            // A tool's icon: the padlock and the group keep their red; the features are grey like
+            // the symbols.
+            const bool ownColours = a.icon == QStringLiteral("fix") || a.icon == QStringLiteral("group");
+            const std::optional<QColor> tint = plain && ownColours ? std::nullopt : std::optional<QColor>(color);
+            painter.drawPixmap(corner, glyphPixmap(icons::svg(a.icon), QStringLiteral("icon:") + a.icon, tint,
+                                                   drawn, ratio));
             continue;
         }
-        painter.drawText(a.rect, Qt::AlignCenter, a.text);
+        if (const QByteArray svg = symbolSvg(a.text); !svg.isEmpty()) {
+            painter.drawPixmap(corner, glyphPixmap(svg, a.text, color, drawn, ratio));
+            continue;
+        }
+        // Text (a ratio's shares): haloed the same way.
+        QPainterPath path;
+        const QFontMetricsF fm(painter.font());
+        path.addText(a.rect.center() + QPointF(-fm.horizontalAdvance(a.text) / 2, (fm.ascent() - fm.descent()) / 2),
+                     painter.font(), a.text);
+        QColor halo = theme::canvas().background;
+        halo.setAlphaF(0.9f);
+        painter.setPen(QPen(halo, 3.2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.setBrush(Qt::NoBrush);
+        painter.drawPath(path);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(color);
+        painter.drawPath(path);
+        painter.setBrush(Qt::NoBrush);
     }
 }
 
