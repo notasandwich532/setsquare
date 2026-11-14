@@ -2937,8 +2937,6 @@ import traceback
 
 import setsquare
 
-sys.modules["drawapp"] = setsquare  # (the old name, for scripts written before the app was named Setsquare)
-
 
 class _Writer:
     def __init__(self, is_error):
@@ -2965,7 +2963,6 @@ def base_globals(name, path=None):
         "__name__": name,
         "__builtins__": builtins,
         "setsquare": setsquare,
-        "drawapp": setsquare,  # (the old name)
         "doc": setsquare.document(),
         "s": setsquare.document().sketch,
         "app": setsquare.app,

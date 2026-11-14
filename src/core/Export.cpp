@@ -587,11 +587,6 @@ std::string writeSvg(const Sketch& s, const SvgOptions& o, SvgPieces* pieces)
             TextArea area{&t, asText(t, o.textAsOutlines), t.hasColor ? t.color : o.plain.color,
                           t.hasColor ? t.gradient : Gradient{}, {}};
             std::vector<TextContour> letters = t.letters;
-            if (letters.empty()) {  // (made without the curves: its points)
-                for (const auto& poly : t.shape) {
-                    letters.push_back({poly, std::string(poly.empty() ? 0 : poly.size() - 1, 'L')});
-                }
-            }
             for (TextContour& c : letters) {
                 for (Point& p : c.points) {
                     p = textToWorld(s.point(t.anchor), t.angle, p);  // (turning and moving keeps curves exact)
@@ -1413,7 +1408,7 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
     };
     std::vector<TextItem> texts;
     for (const auto& [id, t] : s.texts()) {
-        if (!s.hasEntity(t.anchor) || !layerShown(s, id) || (t.letters.empty() && t.shape.empty() && t.runs.empty())) {
+        if (!s.hasEntity(t.anchor) || !layerShown(s, id) || (t.letters.empty() && t.runs.empty())) {
             continue;
         }
         Look l;
@@ -1870,13 +1865,7 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
             continue;
         }
         // Outlines: a closed polyline where a contour is all straight, else a spline (exact).
-        std::vector<TextContour> letters = t.letters;
-        if (letters.empty()) {
-            for (const auto& poly : t.shape) {
-                letters.push_back({poly, std::string(poly.empty() ? 0 : poly.size() - 1, 'L')});
-            }
-        }
-        for (const TextContour& c : letters) {
+        for (const TextContour& c : t.letters) {
             if (c.points.size() < 2) {
                 continue;
             }

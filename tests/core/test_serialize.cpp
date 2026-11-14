@@ -113,12 +113,15 @@ TEST_CASE("Bad files are rejected with a readable error", "[serialize]")
                     SketchError);
 }
 
-TEST_CASE("Files saved before the app was named Setsquare still open", "[serialize]")
+TEST_CASE("Files in older forms are refused, saying what's wrong", "[serialize]")
 {
-    const Sketch s = fromJson(R"({"format":"drawing_app.sketch","version":1,
-                                  "entities":[{"id":1,"type":"point","x":3,"y":4}],"constraints":[]})");
-    CHECK(s.hasEntity(1));
-    CHECK(toJson(s).find("\"setsquare.sketch\"") != std::string::npos);  // (saved again under the new name)
+    using Catch::Matchers::ContainsSubstring;
+    // (from before the app's name, sublayers, layers or letters as curves: re-saved since)
+    CHECK_THROWS_WITH(fromJson(R"({"format":"drawing_app.sketch","version":1,"entities":[],"constraints":[]})"),
+                      ContainsSubstring("not a Setsquare"));
+    CHECK_THROWS_WITH(fromJson(R"({"format":"setsquare.sketch","version":1,
+                                   "entities":[{"id":1,"type":"point","x":3,"y":4}],"constraints":[]})"),
+                      ContainsSubstring("sublayer that isn't in the file"));
 }
 
 TEST_CASE("Axes: fixed lines you can constrain and dimension against", "[origin][axes]")

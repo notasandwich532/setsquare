@@ -40,23 +40,6 @@ TEST_CASE("Save and open round-trip a sketch", "[document][files]")
     CHECK_FALSE(b.canUndo());
 }
 
-TEST_CASE("Sketches saved as .dsk (before the app was named Setsquare) still open", "[document][files]")
-{
-    QTemporaryDir dir;
-    REQUIRE(dir.isValid());
-    const QString path = dir.filePath("older.dsk");
-    {
-        QFile f(path);
-        REQUIRE(f.open(QIODevice::WriteOnly));
-        f.write(R"({"format":"drawing_app.sketch","version":1,
-                    "entities":[{"id":1,"type":"point","x":3,"y":4}],"constraints":[]})");
-    }
-    Document doc;
-    QString error;
-    REQUIRE(doc.open(path, &error));
-    CHECK(doc.sketch().hasEntity(1));
-}
-
 TEST_CASE("Modified flag follows edits, saves and undo", "[document][files]")
 {
     QTemporaryDir dir;
@@ -106,7 +89,7 @@ TEST_CASE("Files without an origin get one when opened", "[document][files]")
         QFile f(path);
         REQUIRE(f.open(QIODevice::WriteOnly));
         f.write(R"({"format":"setsquare.sketch","version":1,
-                    "entities":[{"id":1,"type":"point","x":3,"y":4}],"constraints":[]})");
+                    "entities":[{"id":1,"type":"point","x":3,"y":4,"sublayer":1}],"constraints":[]})");
     }
     Document doc;
     REQUIRE(doc.open(path));

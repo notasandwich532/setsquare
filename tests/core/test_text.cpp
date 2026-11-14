@@ -22,7 +22,8 @@ Text square(Id anchor)
     t.text = "I";
     t.font = "Test";
     t.height = 10;
-    t.shape = {{{0, 0}, {2, 0}, {2, 10}, {0, 10}}};
+    t.letters = {{{{0, 0}, {2, 0}, {2, 10}, {0, 10}}, "LLL"}};  // (the app makes them from the font)
+    t.shape = flattenLetters(t.letters, letterTolerance(t.height));
     return t;
 }
 }  // namespace
@@ -149,14 +150,4 @@ TEST_CASE("Letters are kept, saved and exported as the font's curves; quadratics
     const std::string svg = exporter::toSvg(s, {});
     CHECK(svg.find(" Q") != std::string::npos);
     CHECK(svg.find(" C") != std::string::npos);
-
-    // Files from before keep their letters (as points, joined by lines).
-    std::string old = json;
-    const size_t at = old.find("\"letters\"");
-    const size_t end = old.find('"', old.find('"', at + 10) + 1);
-    old.replace(at, end - at + 1, "\"shape\":[[0,0,2,0,2,10,0,10]]");
-    const Sketch before = fromJson(old);
-    REQUIRE(before.text(id).letters.size() == 1);
-    CHECK(before.text(id).letters[0].ops == "LLL");
-    CHECK(before.text(id).shape[0].size() == 4);
 }

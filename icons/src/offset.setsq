@@ -1,4 +1,5 @@
 {
+  "active_sublayer": 1,
   "axes": [
     3,
     5
@@ -9,6 +10,7 @@
       "refs": [
         9
       ],
+      "sublayer": 1,
       "type": "horizontal"
     },
     {
@@ -16,6 +18,7 @@
       "refs": [
         10
       ],
+      "sublayer": 1,
       "type": "vertical"
     },
     {
@@ -23,6 +26,7 @@
       "refs": [
         11
       ],
+      "sublayer": 1,
       "type": "horizontal"
     },
     {
@@ -30,6 +34,7 @@
       "refs": [
         12
       ],
+      "sublayer": 1,
       "type": "vertical"
     },
     {
@@ -37,6 +42,7 @@
       "refs": [
         9
       ],
+      "sublayer": 1,
       "type": "distance",
       "value": 24.0
     },
@@ -45,6 +51,7 @@
       "refs": [
         12
       ],
+      "sublayer": 1,
       "type": "distance",
       "value": 24.0
     },
@@ -53,6 +60,7 @@
       "refs": [
         23
       ],
+      "sublayer": 1,
       "type": "horizontal"
     },
     {
@@ -60,6 +68,7 @@
       "refs": [
         24
       ],
+      "sublayer": 1,
       "type": "vertical"
     },
     {
@@ -67,6 +76,7 @@
       "refs": [
         25
       ],
+      "sublayer": 1,
       "type": "horizontal"
     },
     {
@@ -74,6 +84,7 @@
       "refs": [
         26
       ],
+      "sublayer": 1,
       "type": "vertical"
     },
     {
@@ -82,6 +93,7 @@
         1,
         19
       ],
+      "sublayer": 1,
       "type": "horizontalDistance",
       "value": 7.5
     },
@@ -91,6 +103,7 @@
         1,
         19
       ],
+      "sublayer": 1,
       "type": "verticalDistance",
       "value": 7.5
     },
@@ -99,6 +112,7 @@
       "refs": [
         23
       ],
+      "sublayer": 1,
       "type": "distance",
       "value": 9.0
     },
@@ -107,6 +121,7 @@
       "refs": [
         24
       ],
+      "sublayer": 1,
       "type": "distance",
       "value": 9.0
     },
@@ -122,6 +137,7 @@
         41,
         42
       ],
+      "sublayer": 1,
       "type": "offset",
       "value": 3.5
     }
@@ -166,18 +182,21 @@
     },
     {
       "id": 6,
+      "sublayer": 1,
       "type": "point",
       "x": 24.0,
       "y": 24.0
     },
     {
       "id": 7,
+      "sublayer": 1,
       "type": "point",
       "x": 24.0,
       "y": 0.0
     },
     {
       "id": 8,
+      "sublayer": 1,
       "type": "point",
       "x": 0.0,
       "y": 24.0
@@ -187,6 +206,7 @@
       "id": 9,
       "p1": 1,
       "p2": 7,
+      "sublayer": 1,
       "type": "line"
     },
     {
@@ -194,6 +214,7 @@
       "id": 10,
       "p1": 7,
       "p2": 6,
+      "sublayer": 1,
       "type": "line"
     },
     {
@@ -201,6 +222,7 @@
       "id": 11,
       "p1": 6,
       "p2": 8,
+      "sublayer": 1,
       "type": "line"
     },
     {
@@ -208,28 +230,33 @@
       "id": 12,
       "p1": 8,
       "p2": 1,
+      "sublayer": 1,
       "type": "line"
     },
     {
       "id": 19,
+      "sublayer": 1,
       "type": "point",
       "x": 7.5,
       "y": 7.5
     },
     {
       "id": 20,
+      "sublayer": 1,
       "type": "point",
       "x": 16.5,
       "y": 16.5
     },
     {
       "id": 21,
+      "sublayer": 1,
       "type": "point",
       "x": 16.5,
       "y": 7.5
     },
     {
       "id": 22,
+      "sublayer": 1,
       "type": "point",
       "x": 7.5,
       "y": 16.5
@@ -238,46 +265,54 @@
       "id": 23,
       "p1": 19,
       "p2": 21,
+      "sublayer": 1,
       "type": "line"
     },
     {
       "id": 24,
       "p1": 21,
       "p2": 20,
+      "sublayer": 1,
       "type": "line"
     },
     {
       "id": 25,
       "p1": 20,
       "p2": 22,
+      "sublayer": 1,
       "type": "line"
     },
     {
       "id": 26,
       "p1": 22,
       "p2": 19,
+      "sublayer": 1,
       "type": "line"
     },
     {
       "id": 35,
+      "sublayer": 1,
       "type": "point",
       "x": 4.0,
       "y": 4.0
     },
     {
       "id": 36,
+      "sublayer": 1,
       "type": "point",
       "x": 20.0,
       "y": 20.0
     },
     {
       "id": 37,
+      "sublayer": 1,
       "type": "point",
       "x": 20.0,
       "y": 4.0
     },
     {
       "id": 38,
+      "sublayer": 1,
       "type": "point",
       "x": 4.0,
       "y": 20.0
@@ -286,24 +321,28 @@
       "id": 39,
       "p1": 35,
       "p2": 37,
+      "sublayer": 1,
       "type": "line"
     },
     {
       "id": 40,
       "p1": 37,
       "p2": 36,
+      "sublayer": 1,
       "type": "line"
     },
     {
       "id": 41,
       "p1": 36,
       "p2": 38,
+      "sublayer": 1,
       "type": "line"
     },
     {
       "id": 42,
       "p1": 38,
       "p2": 35,
+      "sublayer": 1,
       "type": "line"
     }
   ],
@@ -324,6 +363,13 @@
     "d34 = s.distance(l24, value=9)",
     "k43 = s.offset([l23, l24, l25, l26], 3.5, toward=(1, 1))",
     "s.stroke([l39, l40, l41, l42], color=\"#5cc97b\", width=2.5, dash=\"solid\")"
+  ],
+  "layers": [
+    {
+      "active_sublayer": 1,
+      "id": 1,
+      "name": "Layer 1"
+    }
   ],
   "origin": 1,
   "strokes": [
@@ -374,6 +420,13 @@
       "curve": 42,
       "dash": "solid",
       "width": 2.5
+    }
+  ],
+  "sublayers": [
+    {
+      "id": 1,
+      "layer": 1,
+      "name": "Sublayer 1"
     }
   ],
   "version": 1

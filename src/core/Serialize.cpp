@@ -14,7 +14,6 @@ using nlohmann::json;
 namespace
 {
 constexpr const char* kFormat = "setsquare.sketch";
-constexpr const char* kOldFormat = "drawing_app.sketch";  // (files saved before the app was named Setsquare)
 
 // {"type": "linear", "spread": "pad", "stops": [[0, "#ff0000"], [1, "#0000ff80"]], "start": id, "end": id}
 // or {"type": "radial", ..., "shape": id, "focal": id (optional)}: the sketch geometry placing it.
@@ -178,16 +177,8 @@ std::string lettersToPath(const Text& t)
         }
         out += " Z";
     };
-    if (!t.letters.empty()) {
-        for (const TextContour& c : t.letters) {
-            contour(c);
-        }
-    }
-    else {
-        for (const auto& poly : t.shape) {  // (made without the curves)
-            TextContour c{poly, std::string(poly.empty() ? 0 : poly.size() - 1, 'L')};
-            contour(c);
-        }
+    for (const TextContour& c : t.letters) {
+        contour(c);
     }
     return out;
 }
@@ -659,7 +650,7 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
     try {
         const json doc = json::parse(text);
         const std::string format = doc.value("format", std::string());
-        if (format != kFormat && format != kOldFormat) {
+        if (format != kFormat) {
             throw SketchError("not a Setsquare sketch file");
         }
         const int version = doc.value("version", 0);
@@ -789,9 +780,9 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
             const auto& seed = j.at("seed");
             f.seed = Point{seed.at(0).get<double>(), seed.at(1).get<double>()};
             f.boundary = j.value("boundary", std::vector<Id>{});
-            f.layer = j.value("layer", Id{kNoId});
+            f.layer = j.at("layer").get<Id>();
             if (!sketch.hasLayer(f.layer)) {
-                f.layer = sketch.layers().back().id;  // (from before layers: the only one)
+                throw SketchError("fill " + std::to_string(f.id) + " is in a layer that isn't in the file");
             }
             sketch.insertFill(f);
         }
@@ -831,23 +822,7 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
             if (t.hasColor && j.contains("gradient")) {
                 t.gradient = gradientFromJson(j.at("gradient"));
             }
-            if (j.contains("letters")) {
-                t.letters = lettersFromPath(j.at("letters").get<std::string>());
-            }
-            else {
-                // (files from before: the letters as points, a flat [x0, y0, x1, y1, ...] each)
-                for (const json& contour : j.value("shape", json::array())) {
-                    const std::vector<double> flat = contour.get<std::vector<double>>();
-                    TextContour c;
-                    for (size_t i = 0; i + 1 < flat.size(); i += 2) {
-                        c.points.push_back({flat[i], flat[i + 1]});
-                        if (i > 0) {
-                            c.ops += 'L';
-                        }
-                    }
-                    t.letters.push_back(std::move(c));
-                }
-            }
+            t.letters = lettersFromPath(j.at("letters").get<std::string>());
             t.shape = flattenLetters(t.letters, letterTolerance(t.height));
             for (const json& jr : j.value("runs", json::array())) {
                 TextRun r;
@@ -881,7 +856,6 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
             d.textHeight = j.value("text_height", d.textHeight);
             d.decimals = j.value("decimals", -1);
             d.flip = j.value("flip", std::uint8_t{0});
-            // ("along_y", from when an ordinate showed one of x and y: they show both now)
             d.along = j.value("along", 0.0);
             if (j.contains("tip")) {
                 d.tip = {j.at("tip").at(0).get<double>(), j.at("tip").at(1).get<double>()};
@@ -894,33 +868,27 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
             d.sublayer = j.value("sublayer", Id{kNoId});
             sketch.insertDrawnDimension(d);
         }
-        // Items from before sublayers (or in one that's gone) go in the first one.
-        const Id first = sketch.sublayers().front().id;
-        std::vector<Id> homeless;
+        // Every item is in one of the file's sublayers (the origin and axes, in none).
+        auto inSublayer = [&](Id id, Id sublayer) {
+            if (!sketch.hasSublayer(sublayer)) {
+                throw SketchError("item " + std::to_string(id) + " is in a sublayer that isn't in the file");
+            }
+        };
         for (const auto& [id, e] : sketch.entities()) {
-            if (!sketch.isReference(id) && !sketch.hasSublayer(e.sublayer)) {
-                homeless.push_back(id);
+            if (!sketch.isReference(id)) {
+                inSublayer(id, e.sublayer);
             }
         }
         for (const auto& [id, c] : sketch.constraints()) {
-            if (!sketch.hasSublayer(c.sublayer)) {
-                homeless.push_back(id);
-            }
+            inSublayer(id, c.sublayer);
         }
         for (const auto& [id, t] : sketch.texts()) {
-            if (!sketch.hasSublayer(t.sublayer)) {
-                homeless.push_back(id);
-            }
+            inSublayer(id, t.sublayer);
         }
         for (const auto& [id, d] : sketch.drawnDimensions()) {
-            if (!sketch.hasSublayer(d.sublayer)) {
-                homeless.push_back(id);
-            }
+            inSublayer(id, d.sublayer);
         }
-        for (Id id : homeless) {
-            sketch.setSublayerOf(id, first);
-        }
-        // Last, so a frame made for a page from before frames takes ids nothing else has.
+        // Last: setting the page puts its frame (loaded with the geometry) where the page is.
         sketch.setPage(loadedPage);
         if (history) {
             *history = doc.value("history", std::vector<std::string>{});
