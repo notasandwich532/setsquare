@@ -21,7 +21,13 @@ Linux: use the `linux-gcc` preset instead.
 
 The first configure builds Eigen, Boost.Graph and Catch2 through vcpkg, which takes a few minutes.
 
-On Windows, `windeployqt build\windows-msvc\setsquare.exe` copies the Qt DLLs next to the exe. Alternatively, add `%QT_ROOT_DIR%\bin` to PATH.
+On Windows, the build copies the Qt DLLs next to `setsquare.exe` (windeployqt), so it starts on a double-click.
+
+## Sharing it (Windows)
+```
+cmake --build --preset windows-msvc --target package_app
+```
+makes `build\windows-msvc\package\Setsquare.zip` (about 45 MB): the app, `setsquare-cli`, Qt, the bundled Python and Microsoft's C++ runtime, with a READ ME, so it runs on a PC with nothing installed (64-bit Windows 10 or 11). Unzip and double-click `setsquare.exe`. It isn't code-signed, so Windows SmartScreen asks once ("More info" → "Run anyway"). See `tools/package.cmake`.
 
 ## Scripting
 Everything in the UI can be done from Python (bundled CPython 3.14, no system Python needed), and UI actions are recorded as Python in the console. You can run Python in three places:

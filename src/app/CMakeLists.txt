@@ -121,6 +121,17 @@ if(WIN32)
                     --include-plugins qoffscreen "$<TARGET_FILE:setsquare>"
             COMMENT "Deploying Qt next to setsquare.exe"
             VERBATIM)
+        # A copy ready to share, with everything it needs (see tools/package.cmake; not built by
+        # default): build/<preset>/package/Setsquare/ and Setsquare.zip.
+        #   cmake --build --preset windows-msvc --target package_app
+        add_custom_target(package_app
+            COMMAND "${CMAKE_COMMAND}" "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DOUT=${CMAKE_BINARY_DIR}/package"
+                    "-DAPP=$<TARGET_FILE:setsquare>" "-DCLI=$<TARGET_FILE:setsquare-cli>"
+                    "-DWINDEPLOYQT=${WINDEPLOYQT}" "-DVERSION=${PROJECT_VERSION}"
+                    -P "${PROJECT_SOURCE_DIR}/tools/package.cmake"
+            DEPENDS setsquare setsquare-cli
+            COMMENT "Packaging Setsquare to share"
+            VERBATIM)
     endif()
 endif()
 
