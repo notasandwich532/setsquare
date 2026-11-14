@@ -155,6 +155,14 @@ public:
     // is refused) if the side that'd move can't.
     void fitBox(core::Id text);
 
+    // Drawn dimensions and notes (see core::DrawnDimension; they measure, never drive). Recorded
+    // as s.annotate(...) / s.edit_annotation(...).
+    core::Id annotate(const core::DrawnDimension& d);
+    void setAnnotation(const core::DrawnDimension& d);  // by d.id
+    void setDimensionDecimals(int places);              // the drawing's (recorded s.dimension_decimals = n)
+    // "\"aligned\", [l13], at=(20, -10), text=\"<> TYP\", ..." (what differs from a new one's)
+    static QString annotationArgs(const core::Sketch& sketch, const core::DrawnDimension& d);
+
     // Unchecked (inference while drawing); Document::addConstraint is the checked version.
     core::Id constrain(core::ConstraintType type, std::vector<core::Id> refs, double value = 0.0);
 

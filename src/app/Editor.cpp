@@ -2,6 +2,7 @@
 
 #include "TextShapes.h"
 
+#include <core/Annotations.h>
 #include <core/Gradient.h>
 #include <core/Hatch.h>
 #include <core/Regions.h>
@@ -55,6 +56,9 @@ QString Editor::name(const core::Sketch& s, Id id)
     }
     if (s.hasImage(id)) {
         return QStringLiteral("i%1").arg(id);
+    }
+    if (s.hasDrawnDimension(id)) {
+        return QStringLiteral("n%1").arg(id);
     }
     if (s.hasEntity(id)) {
         switch (s.entity(id).kind()) {
@@ -1040,6 +1044,83 @@ void Editor::setImage(const core::Image& image)
         call += image.visible ? QStringLiteral(", visible=True") : QStringLiteral(", visible=False");
     }
     log(call + QLatin1Char(')'));
+}
+
+QString Editor::annotationArgs(const core::Sketch& s, const core::DrawnDimension& d)
+{
+    QStringList args;
+    args << QStringLiteral("\"%1\"").arg(QString::fromLatin1(core::toString(d.kind)));
+    args << list(s, d.refs);
+    const core::annotation::Graphics g = core::annotation::graphics(s, d);
+    if (g.valid) {
+        args << QStringLiteral("at=") + pair(g.label);
+    }
+    if (d.text != core::annotation::defaultText(d.kind)) {
+        args << QStringLiteral("text=") + pyString(d.text);
+    }
+    if (d.decimals >= 0) {
+        args << QStringLiteral("decimals=%1").arg(d.decimals);
+    }
+    if (d.textHeight != core::DrawnDimension{}.textHeight) {
+        args << QStringLiteral("text_height=") + number(d.textHeight);
+    }
+    args << QStringLiteral("color=\"%1\"").arg(QString::fromStdString(d.style.color.hex()));
+    args << QStringLiteral("width=") + number(d.style.width);
+    if (d.alongY) {
+        args << QStringLiteral("along_y=True");
+    }
+    if (d.kind == core::DrawnDimensionKind::Leader) {
+        if (d.refs.empty()) {
+            args << QStringLiteral("tip=") + pair({d.tip.x, d.tip.y});
+        }
+        else if (s.hasEntity(d.refs[0]) && s.entity(d.refs[0]).kind() != core::EntityKind::Point) {
+            args << QStringLiteral("along=") + number(d.along);
+        }
+    }
+    if (d.kind == core::DrawnDimensionKind::Angle && d.flip != 0) {
+        args << QStringLiteral("flip=%1").arg(d.flip);
+    }
+    return args.join(QStringLiteral(", "));
+}
+
+core::Id Editor::annotate(const core::DrawnDimension& d)
+{
+    const Id id = m_sketch.addDrawnDimension(d);
+    log(QStringLiteral("%1 = s.annotate(%2)").arg(name(m_sketch, id), annotationArgs(m_sketch, m_sketch.drawnDimension(id))));
+    return id;
+}
+
+void Editor::setAnnotation(const core::DrawnDimension& d)
+{
+    m_sketch.setDrawnDimension(d);
+    const core::DrawnDimension& now = m_sketch.drawnDimension(d.id);
+    // All its settings (any may have gone back to a new one's), but the kind and what it measures,
+    // which stay.
+    QStringList args;
+    const core::annotation::Graphics g = core::annotation::graphics(m_sketch, now);
+    if (g.valid) {
+        args << QStringLiteral("at=") + pair(g.label);
+    }
+    args << QStringLiteral("text=") + pyString(now.text) << QStringLiteral("decimals=%1").arg(now.decimals)
+         << QStringLiteral("text_height=") + number(now.textHeight)
+         << QStringLiteral("color=\"%1\"").arg(QString::fromStdString(now.style.color.hex()))
+         << QStringLiteral("width=") + number(now.style.width);
+    if (now.kind == core::DrawnDimensionKind::Ordinate) {
+        args << (now.alongY ? QStringLiteral("along_y=True") : QStringLiteral("along_y=False"));
+    }
+    if (now.kind == core::DrawnDimensionKind::Leader) {
+        args << QStringLiteral("along=") + number(now.along) << QStringLiteral("tip=") + pair({now.tip.x, now.tip.y});
+    }
+    if (now.kind == core::DrawnDimensionKind::Angle) {
+        args << QStringLiteral("flip=%1").arg(now.flip);
+    }
+    log(QStringLiteral("s.edit_annotation(%1, %2)").arg(name(m_sketch, d.id), args.join(QStringLiteral(", "))));
+}
+
+void Editor::setDimensionDecimals(int places)
+{
+    m_sketch.setDimensionDecimals(places);
+    log(QStringLiteral("s.dimension_decimals = %1").arg(places));
 }
 
 QString Editor::pageCall(const core::Page& p)

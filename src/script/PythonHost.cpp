@@ -11,6 +11,7 @@
 #include "Images.h"
 #include "TextShapes.h"
 
+#include <core/Annotations.h>
 #include <core/Curves.h>
 #include <numbers>
 #include <core/Dimensions.h>
@@ -126,6 +127,8 @@ struct TextH : Item
 {};
 struct ImageH : Item
 {};
+struct AnnotationH : Item
+{};
 // A sublayer, by its own id (sublayers have their own id space).
 struct SublayerH
 {
@@ -153,9 +156,20 @@ const core::Constraint& constraintOf(Id id)
     return sketch().constraint(id);
 }
 
+// Whether `id` is anything in the sketch (geometry, a constraint, fill, text, image, annotation).
+bool isItem(Id id)
+{
+    const core::Sketch& s = sketch();
+    return s.hasEntity(id) || s.hasConstraint(id) || s.hasFill(id) || s.hasText(id) || s.hasImage(id)
+        || s.hasDrawnDimension(id);
+}
+
 py::object wrap(Id id)
 {
     const core::Sketch& s = sketch();
+    if (s.hasDrawnDimension(id)) {
+        return py::cast(AnnotationH{{id}});
+    }
     if (s.hasConstraint(id)) {
         return py::cast(ConstraintH{{id}});
     }
@@ -554,6 +568,54 @@ void dragPoints(const std::vector<Id>& points, double dx, double dy)
     call.target().endDrag();
 }
 
+// s.annotate / s.edit_annotation's settings, onto `d` (None: as it is). `at` last: where the label
+// goes depends on the rest.
+void annotationSettings(core::DrawnDimension& d, const py::object& at, const py::object& text,
+                        const py::object& decimals, const py::object& textHeight, const py::object& width,
+                        const py::object& color, const py::object& font, const py::object& alongY,
+                        const py::object& along, const py::object& tip, const py::object& flip)
+{
+    if (!text.is_none()) {
+        d.text = text.cast<std::string>();
+    }
+    if (!decimals.is_none()) {
+        d.decimals = decimals.cast<int>();
+    }
+    if (!textHeight.is_none()) {
+        d.textHeight = textHeight.cast<double>();
+    }
+    if (!width.is_none()) {
+        d.style.width = width.cast<double>();
+    }
+    if (!color.is_none()) {
+        d.style.color = colorArg(color);
+    }
+    if (!font.is_none()) {
+        d.font = font.cast<std::string>();
+    }
+    if (!alongY.is_none()) {
+        d.alongY = alongY.cast<bool>();
+    }
+    if (!along.is_none()) {
+        d.along = along.cast<double>();
+    }
+    if (!tip.is_none()) {
+        const core::Vec2 t = vecArg(tip);
+        d.tip = {t.x, t.y};
+    }
+    if (!flip.is_none()) {
+        d.flip = static_cast<std::uint8_t>(flip.cast<int>());
+    }
+    if (!at.is_none()) {
+        for (Id r : d.refs) {
+            entity(r);  // (gone: say so, rather than lay out nothing)
+        }
+        const core::Vec2 off = core::annotation::labelOffsetFor(sketch(), d, vecArg(at));
+        d.labelX = off.x;
+        d.labelY = off.y;
+    }
+}
+
 }  // namespace
 }  // namespace script
 
@@ -724,10 +786,7 @@ PYBIND11_EMBEDDED_MODULE(setsquare, m)
         .def_property_readonly("id", [](const Item& i) { return i.id; })
         .def_property_readonly("name", [](const Item& i) { return itemName(i.id); },
                                "The name used in recorded scripts, e.g. 'l7'.")
-        .def_property_readonly("exists", [](const Item& i) {
-            return sketch().hasEntity(i.id) || sketch().hasConstraint(i.id) || sketch().hasFill(i.id) || sketch().hasText(i.id)
-                   || sketch().hasImage(i.id);
-        })
+        .def_property_readonly("exists", [](const Item& i) { return isItem(i.id); })
         .def_property_readonly("sublayer", [](const Item& i) -> py::object {
             const Id l = sketch().sublayerOf(i.id);
             return l != kNoId ? py::cast(SublayerH{l}) : py::none();
@@ -1250,6 +1309,52 @@ PYBIND11_EMBEDDED_MODULE(setsquare, m)
                    + ">";
         });
 
+    auto annotationOf = [](Id id) -> const core::DrawnDimension& {
+        if (!sketch().hasDrawnDimension(id)) {
+            throw py::value_error("annotation " + std::to_string(id) + " no longer exists");
+        }
+        return sketch().drawnDimension(id);
+    };
+    py::class_<AnnotationH, Item>(m, "Annotation",
+                                  "A dimension or note drawn on the drawing (see Sketch.annotate): it measures the "
+                                  "geometry (never drives it) and is shown and exported with the drawing. Change it "
+                                  "with Sketch.edit_annotation.")
+        .def_property_readonly("kind", [annotationOf](const AnnotationH& a) {
+            return std::string(core::toString(annotationOf(a.id).kind));
+        })
+        .def_property_readonly("refs", [annotationOf](const AnnotationH& a) { return wrapAll(annotationOf(a.id).refs); },
+                               "What it measures (or points at).")
+        .def_property_readonly("value", [annotationOf](const AnnotationH& a) {
+            return core::annotation::value(sketch(), annotationOf(a.id));
+        }, "What it measures now: mm, or degrees (0 for a leader).")
+        .def_property_readonly("label", [annotationOf](const AnnotationH& a) {
+            return core::annotation::label(sketch(), annotationOf(a.id));
+        }, "What it says, its <> filled in.")
+        .def_property_readonly("at", [annotationOf](const AnnotationH& a) {
+            const core::annotation::Graphics g = core::annotation::graphics(sketch(), annotationOf(a.id));
+            return py::make_tuple(g.label.x, g.label.y);
+        }, "Where its label is.")
+        .def_property_readonly("text", [annotationOf](const AnnotationH& a) { return annotationOf(a.id).text; },
+                               "Its text, <> standing for the value.")
+        .def_property_readonly("decimals", [annotationOf](const AnnotationH& a) -> py::object {
+            const int d = annotationOf(a.id).decimals;
+            return d < 0 ? py::none() : py::object(py::int_(d));
+        }, "Places after the point; None: the drawing's (Sketch.dimension_decimals).")
+        .def_property_readonly("text_height", [annotationOf](const AnnotationH& a) { return annotationOf(a.id).textHeight; },
+                               "Capital letter height, mm.")
+        .def_property_readonly("width", [annotationOf](const AnnotationH& a) { return annotationOf(a.id).style.width; },
+                               "Line width, mm.")
+        .def_property_readonly("color", [annotationOf](const AnnotationH& a) { return annotationOf(a.id).style.color.hex(); })
+        .def_property_readonly("font", [annotationOf](const AnnotationH& a) { return annotationOf(a.id).font; })
+        .def("__repr__", [](const AnnotationH& a) {
+            if (!sketch().hasDrawnDimension(a.id)) {
+                return "<Annotation " + std::to_string(a.id) + " (deleted)>";
+            }
+            const core::DrawnDimension& d = sketch().drawnDimension(a.id);
+            return "<Annotation n" + std::to_string(a.id) + " " + core::toString(d.kind) + " '"
+                   + core::annotation::label(sketch(), d) + "'>";
+        });
+
     auto textOf = [](Id id) -> const core::Text& {
         if (!sketch().hasText(id)) {
             throw py::value_error("text " + std::to_string(id) + " no longer exists");
@@ -1404,17 +1509,12 @@ PYBIND11_EMBEDDED_MODULE(setsquare, m)
             },
             "The page's corners (bottom left, bottom right, top right, top left). Empty without a page.")
         .def("__getitem__", [](const SketchH&, Id id) {
-            if (!sketch().hasEntity(id) && !sketch().hasConstraint(id) && !sketch().hasFill(id) && !sketch().hasText(id)
-                && !sketch().hasImage(id)) {
+            if (!isItem(id)) {
                 throw py::key_error("no item " + std::to_string(id));
             }
             return wrap(id);
         })
-        .def("__contains__", [](const SketchH&, py::handle h) {
-            const Id id = idOf(h);
-            return sketch().hasEntity(id) || sketch().hasConstraint(id) || sketch().hasFill(id) || sketch().hasText(id)
-                   || sketch().hasImage(id);
-        })
+        .def("__contains__", [](const SketchH&, py::handle h) { return isItem(idOf(h)); })
         .def_property_readonly("entities", listOf(std::nullopt))
         .def_property_readonly("points", listOf(EntityKind::Point))
         .def_property_readonly("lines", listOf(EntityKind::Line))
@@ -1652,8 +1752,7 @@ PYBIND11_EMBEDDED_MODULE(setsquare, m)
             Call call;
             call.target().edit(QStringLiteral("Delete"), [&](Editor& ed) {
                 for (Id id : ids) {
-                    const core::Sketch& s = ed.sketch();
-                    if (s.hasEntity(id) || s.hasConstraint(id) || s.hasFill(id) || s.hasText(id) || s.hasImage(id)) {
+                    if (isItem(id)) {
                         ed.remove(id);
                     }
                 }
@@ -1830,6 +1929,72 @@ PYBIND11_EMBEDDED_MODULE(setsquare, m)
            "colour, or a gradient (setsquare.linear / setsquare.radial). hatch: a setsquare.hatch, to draw the area with "
            "its lines in the colour instead. "
            "Raises ValueError if `at` isn't enclosed: see loose_ends().")
+        .def("annotate", [](const SketchH&, const std::string& kind, py::object refs, py::object at, py::object text,
+                            py::object decimals, py::object textHeight, py::object width, py::object color,
+                            py::object font, py::object alongY, py::object along, py::object tip, py::object flip) {
+            core::DrawnDimension d;
+            if (!core::drawnDimensionKindFromString(kind, d.kind)) {
+                throw py::value_error("unknown kind '" + kind + "': aligned, horizontal, vertical, radius, diameter, "
+                                      "angle, arc_length, ordinate or leader");
+            }
+            if (!refs.is_none()) {
+                d.refs = itemsOf(refs);
+            }
+            d.text = core::annotation::defaultText(d.kind);
+            d.font = textshapes::defaultFamily().toStdString();
+            d.style.color = core::Color{0, 0, 0, 255};
+            d.style.width = 0.25;
+            if (d.kind == core::DrawnDimensionKind::Ordinate && d.refs.size() == 1 && sketch().origin() != kNoId) {
+                d.refs.push_back(sketch().origin());  // (from the origin, unless given)
+            }
+            annotationSettings(d, at, text, decimals, textHeight, width, color, font, alongY, along, tip, flip);
+            return wrap(editReturningId("Annotate", [&](Editor& ed) { return ed.annotate(d); }));
+        }, py::arg("kind"), py::arg("refs") = py::none(), py::arg("at") = py::none(), py::arg("text") = py::none(),
+           py::arg("decimals") = py::none(), py::arg("text_height") = py::none(), py::arg("width") = py::none(),
+           py::arg("color") = py::none(), py::arg("font") = py::none(), py::arg("along_y") = py::none(),
+           py::arg("along") = py::none(), py::arg("tip") = py::none(), py::arg("flip") = py::none(),
+           "Draw a dimension (or note) on the drawing: it measures, never drives, and is shown and exported with it. "
+           "kind: 'aligned', 'horizontal', 'vertical' (refs: two points, a point and a line, or a line), 'radius', "
+           "'diameter' (a circle or arc), 'angle' (two lines; flip= 0-3 for which of the four), 'arc_length' (an arc), "
+           "'ordinate' (a point, and the origin point it's measured from: the sketch's if left out; along_y=True for "
+           "its y), 'leader' (a point, a curve along= its parameter, or nothing and tip=(x, y)). at: where the label "
+           "goes. text: what it says, <> standing for the value (the default: '<>', 'R<>', 'Ø<>', '<>°', '⌒<>'; a "
+           "leader's 'Note'). decimals: places after the point (None: the drawing's). text_height (mm, capital "
+           "letters; 3.5), width (line width, mm; 0.25), color (black), font.")
+        .def("edit_annotation", [](const SketchH&, py::handle item, py::object at, py::object text, py::object decimals,
+                                   py::object textHeight, py::object width, py::object color, py::object font,
+                                   py::object alongY, py::object along, py::object tip, py::object flip) {
+            const Id id = idOf(item);
+            if (!sketch().hasDrawnDimension(id)) {
+                throw py::value_error("not an annotation");
+            }
+            core::DrawnDimension d = sketch().drawnDimension(id);
+            annotationSettings(d, at, text, decimals, textHeight, width, color, font, alongY, along, tip, flip);
+            editReturningId("Edit annotation", [&](Editor& ed) {
+                ed.setAnnotation(d);
+                return id;
+            });
+        }, py::arg("annotation"), py::arg("at") = py::none(), py::arg("text") = py::none(),
+           py::arg("decimals") = py::none(), py::arg("text_height") = py::none(), py::arg("width") = py::none(),
+           py::arg("color") = py::none(), py::arg("font") = py::none(), py::arg("along_y") = py::none(),
+           py::arg("along") = py::none(), py::arg("tip") = py::none(), py::arg("flip") = py::none(),
+           "Change an annotation (what's given; as Sketch.annotate's). decimals=-1: back to the drawing's.")
+        .def_property_readonly("annotations", [](const SketchH&) {
+            std::vector<Id> ids;
+            for (const auto& [id, d] : sketch().drawnDimensions()) {
+                ids.push_back(id);
+            }
+            return wrapAll(ids);
+        }, "The dimensions and notes drawn on the drawing (see annotate).")
+        .def_property(
+            "dimension_decimals", [](const SketchH&) { return sketch().dimensionDecimals(); },
+            [](const SketchH&, int places) {
+                editReturningId("Dimension decimals", [&](Editor& ed) {
+                    ed.setDimensionDecimals(places);
+                    return kNoId;
+                });
+            },
+            "How many places after the point annotations show unless they say (0 to 6; 2 to start with).")
         .def("measure_length", [](const SketchH&, py::handle curves) {
             const std::vector<Id> ids = itemsOf(curves);
             for (Id id : ids) {
@@ -2835,7 +3000,7 @@ def run_file(path, argv):
         sys.argv, sys.path[:] = old_argv, old_path
 
 
-_NAME = re.compile(r"^(sp|ea|[plcakdftei])(\d+)$")
+_NAME = re.compile(r"^(sp|ea|[plcakdftein])(\d+)$")
 
 
 class ConsoleNamespace(dict):
