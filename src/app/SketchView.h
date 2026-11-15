@@ -28,6 +28,7 @@
 #include <memory>
 #include <set>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 class Document;
@@ -213,6 +214,7 @@ public:
     QBrush gradientBrush(const core::Gradient& g, double alpha = 1.0) const;
     // A closed area (with its holes) on screen, for filling.
     QPainterPath regionPath(const core::regions::Region& region) const;
+    std::vector<QPolygonF> regionPolygons(const core::regions::Region& region) const;  // (regionPath's, even-odd)
     // A hatched fill's lines over its area (its shade, where they're too close together to show).
     void drawHatch(QPainter& painter, const core::Fill& fill, const core::regions::Region& region) const;
     QPainterPath textPath(const core::Text& text) const;  // its letters, on screen
@@ -310,7 +312,16 @@ private:
     // Texts' outlines as last drawn at this zoom (by what they are and where: see textPath), only
     // as fine as the screen shows: a text of thousands of points needn't be built, or filled, from
     // all of them each paint.
-    mutable std::unordered_map<std::uint64_t, QPainterPath> m_textPaths;
+    // Without the pan; also as its contours and their boxes, to be filled a square at a time (see
+    // TiledFill.h).
+    struct TextOutline
+    {
+        QPainterPath whole;
+        std::vector<QPolygonF> polygons;
+        std::vector<QRectF> boxes;
+    };
+    mutable std::unordered_map<std::uint64_t, TextOutline> m_textPaths;
+    const TextOutline& textOutline(const core::Text& text, std::uint64_t key) const;
     std::uint64_t textKey(const core::Text& text) const;  // what it is, where, and the zoom
     // A text's letters filled, and outlined if `edge`; from a picture of them kept while nothing
     // about them changes (`keep`: the fill is one a key can tell apart, i.e. not a gradient).
@@ -322,6 +333,9 @@ private:
         QPoint at;  // its top left, in device pixels from the pan's whole pixels
     };
     mutable std::unordered_map<std::uint64_t, TextPicture> m_textPictures;
+    // Pictures asked for once and not yet made: one's only made the second time it's wanted, so
+    // zooming (a new zoom each frame) doesn't make a picture each frame only to throw it away.
+    mutable std::unordered_set<std::uint64_t> m_textPicturesWanted;
     mutable qint64 m_textPictureBytes = 0;
     std::optional<core::Image> m_imagePreview;
     // The drawing as last painted (background, images, grid, page, sketch: all but the tool's

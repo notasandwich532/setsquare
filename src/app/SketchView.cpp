@@ -9,6 +9,7 @@
 #include "Document.h"
 #include "FrameClock.h"
 #include "Theme.h"
+#include "TiledFill.h"
 #include "tools/ConstraintTools.h"
 #include "tools/ModifyTools.h"
 #include "tools/SelectTool.h"
@@ -556,31 +557,42 @@ std::uint64_t SketchView::textKey(const core::Text& t) const
 void SketchView::drawText(QPainter& painter, const core::Text& t, const QBrush& fill, const std::optional<QPen>& edge,
                           bool keep) const
 {
-    const QPainterPath path = textPath(t);
+    if (!m_doc.sketch().hasEntity(t.anchor)) {
+        return;
+    }
+    const std::uint64_t shapeKey = textKey(t);
+    const TextOutline& outline = textOutline(t, shapeKey);
+    // (Unpanned: the painter's moved by the pan instead.)
     auto paint = [&](QPainter& p) {
-        p.fillPath(path, fill);
+        tiled::fill(p, outline.whole, outline.polygons, outline.boxes, fill, Qt::WindingFill, 32);
         if (edge) {
-            p.strokePath(path, *edge);
+            p.strokePath(outline.whole, *edge);
         }
     };
     const double margin = (edge ? edge->widthF() : 0.0) + 2.0;
-    const QRectF bounds = path.boundingRect().adjusted(-margin, -margin, margin, margin);
+    const QRectF bounds = outline.whole.boundingRect().translated(m_pan).adjusted(-margin, -margin, margin, margin);
     if (!bounds.intersects(QRectF(rect()))) {
         return;  // (off screen)
     }
+    auto direct = [&] {
+        painter.save();
+        painter.translate(m_pan);
+        paint(painter);
+        painter.restore();
+    };
     // Big on screen (zoomed right in), or painted with something a key can't tell apart: drawn
     // as it is. Otherwise from a picture of it, kept while it, its colours and the zoom stay as
     // they were: not filled afresh while something else is dragged, or the view scrolled.
     const qreal ratio = devicePixelRatioF();
     if (!keep || bounds.width() * bounds.height() > 4.0 * width() * height()) {
-        paint(painter);
+        direct();
         return;
     }
     // Pictures are kept in device pixels from the pan's whole pixels: scrolled by whole pixels,
     // one lines up with what drawing it afresh would make exactly.
     const QPointF panPixels = m_pan * ratio;
     const QPointF whole(std::floor(panPixels.x()), std::floor(panPixels.y()));
-    std::uint64_t key = textKey(t);
+    std::uint64_t key = shapeKey;
     mixKey(key, panPixels.x() - whole.x());
     mixKey(key, panPixels.y() - whole.y());
     mixKey(key, static_cast<double>(ratio));
@@ -592,6 +604,14 @@ void SketchView::drawText(QPainter& painter, const core::Text& t, const QBrush& 
     }
     auto found = m_textPictures.find(key);
     if (found == m_textPictures.end()) {
+        if (m_textPicturesWanted.size() > 1024) {
+            m_textPicturesWanted.clear();
+        }
+        if (m_textPicturesWanted.insert(key).second) {
+            direct();  // (the first time: likely a zoom passing through)
+            return;
+        }
+        m_textPicturesWanted.erase(key);
         const QRect area = QRectF(bounds.topLeft() * ratio - whole, bounds.size() * ratio).toAlignedRect();
         QImage picture(area.size(), QImage::Format_ARGB32_Premultiplied);
         picture.fill(Qt::transparent);
@@ -600,6 +620,7 @@ void SketchView::drawText(QPainter& painter, const core::Text& t, const QBrush& 
             p.setRenderHint(QPainter::Antialiasing);
             p.translate(-(whole + QPointF(area.topLeft())));
             p.scale(ratio, ratio);
+            p.translate(m_pan);
             paint(p);
         }
         picture.setDevicePixelRatio(ratio);
@@ -615,26 +636,31 @@ void SketchView::drawText(QPainter& painter, const core::Text& t, const QBrush& 
 
 QPainterPath SketchView::textPath(const core::Text& t) const
 {
-    QPainterPath path;
-    path.setFillRule(Qt::WindingFill);
-    const core::Sketch& s = m_doc.sketch();
-    if (!s.hasEntity(t.anchor)) {
-        return path;
+    if (!m_doc.sketch().hasEntity(t.anchor)) {
+        QPainterPath none;
+        none.setFillRule(Qt::WindingFill);
+        return none;
     }
-    const core::Point& anchor = s.point(t.anchor);
-    // Kept by what it is, where, and the zoom; made without the pan (moved by it after), so
-    // scrolling the view doesn't make it again.
-    const std::uint64_t h = textKey(t);
-    const QPointF pan = m_pan;
-    if (const auto found = m_textPaths.find(h); found != m_textPaths.end()) {
-        return found->second.translated(pan);
+    return textOutline(t, textKey(t)).whole.translated(m_pan);
+}
+
+const SketchView::TextOutline& SketchView::textOutline(const core::Text& t, std::uint64_t key) const
+{
+    // Kept by what it is, where, and the zoom; made without the pan, so scrolling the view
+    // doesn't make it again.
+    if (const auto found = m_textPaths.find(key); found != m_textPaths.end()) {
+        return found->second;
     }
     if (m_textPaths.size() > 256) {
         m_textPaths.clear();  // (old ones: other zooms, texts since changed)
     }
+    const core::Point& anchor = m_doc.sketch().point(t.anchor);
     // Only as fine as shows: a point within a fraction of a pixel of the last one kept adds
     // nothing anyone can see.
     constexpr double kFinest = 0.3;  // pixels
+    TextOutline outline;
+    outline.whole.setFillRule(Qt::WindingFill);
+    outline.polygons.reserve(t.shape.size());
     for (const auto& contour : t.shape) {
         QPolygonF polygon;
         polygon.reserve(static_cast<qsizetype>(contour.size()));
@@ -648,11 +674,12 @@ QPainterPath SketchView::textPath(const core::Text& t) const
         if (polygon.size() < 3) {
             continue;  // (smaller than a pixel)
         }
-        path.addPolygon(polygon);
-        path.closeSubpath();
+        outline.whole.addPolygon(polygon);
+        outline.whole.closeSubpath();
+        outline.boxes.push_back(polygon.boundingRect());
+        outline.polygons.push_back(std::move(polygon));
     }
-    m_textPaths.emplace(h, path);
-    return path.translated(pan);
+    return m_textPaths.emplace(key, std::move(outline)).first->second;
 }
 
 QPolygonF SketchView::textBox(const core::Text& t) const
@@ -891,6 +918,16 @@ QPainterPath SketchView::regionPath(const core::regions::Region& region) const
 {
     QPainterPath path;
     path.setFillRule(Qt::OddEvenFill);  // holes cut out
+    for (const QPolygonF& poly : regionPolygons(region)) {
+        path.addPolygon(poly);
+        path.closeSubpath();
+    }
+    return path;
+}
+
+std::vector<QPolygonF> SketchView::regionPolygons(const core::regions::Region& region) const
+{
+    std::vector<QPolygonF> polygons;
     // On screen, to within a third of a pixel: outlines found finely (or imported ones of many tiny
     // pieces) can have far more corners than show, and every one costs when filling.
     std::vector<QPointF> screen;
@@ -960,14 +997,15 @@ QPainterPath SketchView::regionPath(const core::regions::Region& region) const
                 poly << screen[k];
             }
         }
-        path.addPolygon(poly);
-        path.closeSubpath();
+        if (poly.size() >= 3) {
+            polygons.push_back(std::move(poly));
+        }
     };
     loop(region.outer);
     for (const auto& hole : region.holes) {
         loop(hole);
     }
-    return path;
+    return polygons;
 }
 
 QPen SketchView::strokePen(const core::StrokeStyle& style) const
@@ -1726,7 +1764,10 @@ void SketchView::drawSketch(QPainter& painter, core::Id only) const
             color.setAlphaF(color.alphaF()
                             * (sketch.layerOfSublayer(e.sublayer) == activeLayer ? kOtherSublayerAlpha : kOtherLayerAlpha));
         }
-        QPen pen(color, width, e.construction ? Qt::DashLine : Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+        // Flat ends: a curve's ends are under its points' dots anyway, and Qt draws a line with
+        // round ends (and every dash of a dashed one) as a general shape, many times slower than
+        // its own straight-line drawing: zooming a drawing of long construction lines crawled.
+        QPen pen(color, width, e.construction ? Qt::DashLine : Qt::SolidLine, Qt::FlatCap, Qt::RoundJoin);
         return pen;
     };
     // Hidden sublayers aren't drawn while sketching (presentation view shows the whole drawing);
@@ -1863,13 +1904,21 @@ void SketchView::drawSketch(QPainter& painter, core::Id only) const
                 continue;
             }
             const double alpha = m_presentation ? 1.0 : 0.35;
-            if (f.gradient.active()) {
-                painter.fillPath(regionPath(*region), gradientBrush(f.gradient, alpha));
-                continue;
-            }
             QColor color(f.color.r, f.color.g, f.color.b, f.color.a);
             color.setAlphaF(color.alphaF() * alpha);
-            painter.fillPath(regionPath(*region), color);
+            const QBrush brush = f.gradient.active() ? gradientBrush(f.gradient, alpha) : QBrush(color);
+            // (In tiles: Qt fills an area of thousands of corners far quicker a piece at a time.)
+            QPainterPath whole;
+            whole.setFillRule(Qt::OddEvenFill);
+            const std::vector<QPolygonF> polygons = regionPolygons(*region);
+            std::vector<QRectF> boxes;
+            boxes.reserve(polygons.size());
+            for (const QPolygonF& poly : polygons) {
+                whole.addPolygon(poly);
+                whole.closeSubpath();
+                boxes.push_back(poly.boundingRect());
+            }
+            tiled::fill(painter, whole, polygons, boxes, brush, Qt::OddEvenFill, 128);
         }
     }
 

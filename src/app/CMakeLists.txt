@@ -50,6 +50,8 @@ add_library(setsquare_lib STATIC
     ToolSearch.h
     Theme.cpp
     Theme.h
+    TiledFill.cpp
+    TiledFill.h
     tools/ConstraintTools.cpp
     tools/ConstraintTools.h
     tools/CurveTools.cpp
