@@ -11,6 +11,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QImage>
+#include <QTest>
 #include <QWheelEvent>
 #include "Theme.h"
 
@@ -233,4 +234,56 @@ TEST_CASE("Density: a spline's control polygon shows only where it can be made o
     }
     REQUIRE(view.zoom() * 40 < 20);
     CHECK(changed() > 0);  // too small to show, but selected it does
+}
+
+TEST_CASE("Paint cache: a text, drawn from a picture kept of it, shows as painting it afresh would", "[paint]")
+{
+    Document doc;
+    SketchView view(doc);
+    view.resize(800, 600);
+    view.show();
+    view.resetView();
+    Id anchor = kNoId, other = kNoId, text = kNoId;
+    doc.modify("points", [&](Sketch& s) {
+        anchor = s.addPoint(-40, 0);
+        other = s.addLine(-40, -30, 40, -30);
+    });
+    REQUIRE(view.tryEdit("text", [&](Editor& ed) {
+        Text t;
+        t.text = "Setsquare";
+        t.height = 12;
+        t.anchor = anchor;
+        text = ed.text(t);
+    }));
+    REQUIRE(differing(view.grab().toImage(), afresh(doc, view, kNoId)) == 0);
+
+    // Hovered, selected, and back: each its own picture.
+    view.setHovered(text);
+    CHECK(differing(view.grab().toImage(), afresh(doc, view, text)) == 0);
+    view.setHovered(kNoId);
+    view.setSelection({text});
+    CHECK(differing(view.grab().toImage(), afresh(doc, view, kNoId)) == 0);
+    view.setSelection({});
+    CHECK(differing(view.grab().toImage(), afresh(doc, view, kNoId)) == 0);
+
+    // Something else dragged (the text's picture as it was), then the text itself (a new one).
+    const Id end = doc.sketch().line(other).p2;
+    doc.beginDrag({end});
+    doc.dragTo(5, 7);
+    doc.endDrag();
+    CHECK(differing(view.grab().toImage(), afresh(doc, view, kNoId)) == 0);
+    doc.beginDrag({anchor});
+    doc.dragTo(3.3, 1.7);
+    doc.endDrag();
+    CHECK(differing(view.grab().toImage(), afresh(doc, view, kNoId)) == 0);
+
+    // Scrolled (by the middle button): the same, moved by as much.
+    const QPoint from(400, 300), by(37, 23);
+    QTest::mousePress(&view, Qt::MiddleButton, {}, from);
+    QTest::mouseMove(&view, from + by);
+    QTest::mouseRelease(&view, Qt::MiddleButton, {}, from + by);
+    const QImage scrolled = view.grab().toImage(), fresh = afresh(doc, view, kNoId);
+    const double ratio = scrolled.devicePixelRatio();
+    const QImage shifted = scrolled.copy(QRect(QPoint(by.x() * ratio, by.y() * ratio), fresh.size() - QSize(by.x() * ratio, by.y() * ratio)));
+    CHECK(differing(shifted, fresh.copy(QRect(QPoint(0, 0), shifted.size()))) == 0);
 }

@@ -15,6 +15,9 @@
 - `GCS.cpp`, `System::solve(Algorithm, bool)`: returns the worst status of the independent parts,
   not just the last part's (one part failing used to be reported as success when a later one
   solved).
+- `GCS.cpp`, `System::makeReducedJacobian`: each constraint's gradient is taken only for its own
+  parameters (the rest are zero), not every parameter of the system, which with thousands of
+  each was millions of calls. Search for "(setsquare:".
 - `shim/` provides stand-ins for the FreeCAD headers PlaneGCS pulls in
   (`SketcherGlobal.h`, `Base/Console.h`, `Base/Tools.h`, `FCConfig.h`, `boost_graph_adjacency_list.hpp`).
 

@@ -27,6 +27,7 @@
 #include <functional>
 #include <memory>
 #include <set>
+#include <unordered_map>
 #include <vector>
 
 class Document;
@@ -306,6 +307,22 @@ private:
     };
     mutable std::map<core::Id, FillCache> m_fillCache;
     const std::map<core::Id, std::optional<core::regions::Region>>& fillRegions(core::Id layer) const;
+    // Texts' outlines as last drawn at this zoom (by what they are and where: see textPath), only
+    // as fine as the screen shows: a text of thousands of points needn't be built, or filled, from
+    // all of them each paint.
+    mutable std::unordered_map<std::uint64_t, QPainterPath> m_textPaths;
+    std::uint64_t textKey(const core::Text& text) const;  // what it is, where, and the zoom
+    // A text's letters filled, and outlined if `edge`; from a picture of them kept while nothing
+    // about them changes (`keep`: the fill is one a key can tell apart, i.e. not a gradient).
+    void drawText(QPainter& painter, const core::Text& text, const QBrush& fill, const std::optional<QPen>& edge,
+                  bool keep) const;
+    struct TextPicture
+    {
+        QImage picture;
+        QPoint at;  // its top left, in device pixels from the pan's whole pixels
+    };
+    mutable std::unordered_map<std::uint64_t, TextPicture> m_textPictures;
+    mutable qint64 m_textPictureBytes = 0;
     std::optional<core::Image> m_imagePreview;
     // The drawing as last painted (background, images, grid, page, sketch: all but the tool's
     // overlay), with nothing hovered: while only the hover changes (the mouse moving over it), a

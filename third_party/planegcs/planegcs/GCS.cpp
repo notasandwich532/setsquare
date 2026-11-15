@@ -53,6 +53,7 @@
 #include <iostream>
 #include <limits>
 #include <numbers>
+#include <unordered_map>
 #include <utility>
 
 #include <Base/Tools.h>
@@ -4747,6 +4748,14 @@ void System::makeReducedJacobian(
 
     J = Eigen::MatrixXd::Zero(clist.size(), pdiagnoselist.size());
 
+    // (setsquare: each constraint's gradient only for its own parameters, the rest being zero;
+    // not every parameter for every constraint, which with thousands of each is millions of calls)
+    std::unordered_map<double*, int> column;
+    column.reserve(pdiagnoselist.size());
+    for (int j = 0; j < int(pdiagnoselist.size()); j++) {
+        column.emplace(pdiagnoselist[j], j);
+    }
+
     int jacobianconstraintcount = 0;
     int allcount = 0;
     for (auto& constr : clist) {
@@ -4754,8 +4763,10 @@ void System::makeReducedJacobian(
         ++allcount;
         if (constr->getTag() >= 0 && constr->isDriving()) {
             jacobianconstraintcount++;
-            for (int j = 0; j < int(pdiagnoselist.size()); j++) {
-                J(jacobianconstraintcount - 1, j) = constr->grad(pdiagnoselist[j]);
+            for (double* p : constr->params()) {
+                if (const auto it = column.find(p); it != column.end()) {
+                    J(jacobianconstraintcount - 1, it->second) = constr->grad(p);
+                }
             }
 
             // parallel processing: create tag multiplicity map
@@ -4948,6 +4959,20 @@ int System::diagnose(Algorithm alg)
             pdiagnoselist,
             true
         );
+
+        // (setsquare: the rank by the much quicker column-pivoting QR first. Only when there are
+        // more constraints than it, so some are redundant or conflicting, is the full-pivoting one
+        // needed, for the row transpositions that tell which.)
+        {
+            const Eigen::MatrixXd JT = J.topRows(jacobianconstraintmap.size()).transpose();
+            Eigen::ColPivHouseholderQR<Eigen::MatrixXd> quick(JT);
+            quick.setThreshold(qrpivotThreshold);
+            if (quick.rank() >= JT.cols()) {
+                fut.wait();
+                dofs = int(JT.rows()) - int(quick.rank());
+                return dofs;
+            }
+        }
 
         makeDenseQRDecomposition(J, jacobianconstraintmap, qrJT, rank, R);
 
@@ -5262,12 +5287,28 @@ void System::identifyDependentParametersDenseQR(
     bool silent
 )
 {
-    Eigen::FullPivHouseholderQR<Eigen::MatrixXd> qrJ;
+    // (setsquare: column pivoting, much quicker than full; only the columns' order is used here)
+    Eigen::ColPivHouseholderQR<Eigen::MatrixXd> qrJ;
     Eigen::MatrixXd Rparams;
 
-    int rank;
+    int rank = 0;
 
-    makeDenseQRDecomposition(J, jacobianconstraintmap, qrJ, rank, Rparams, false, true);
+    const Eigen::MatrixXd JG = J.topRows(jacobianconstraintmap.size());
+    if (JG.rows() > 0 && JG.cols() > 0) {
+        qrJ.compute(JG);
+        qrJ.setThreshold(qrpivotThreshold);
+        rank = int(qrJ.rank());
+        if (qrJ.cols() >= qrJ.rows()) {
+            Rparams = qrJ.matrixQR().triangularView<Eigen::Upper>();
+        }
+        else {
+            Rparams = qrJ.matrixQR().topRows(qrJ.cols()).triangularView<Eigen::Upper>();
+        }
+    }
+    else {
+        pDependentParametersGroups.clear();  // (as no decomposition gives)
+        return;
+    }
 
     identifyDependentParameters(qrJ, Rparams, rank, pdiagnoselist, silent);
 }
@@ -5446,18 +5487,19 @@ void System::identifyDependentGeometryParametersInTransposedJacobianDenseQRDecom
 
 void System::eliminateNonZerosOverPivotInUpperTriangularMatrix(Eigen::MatrixXd& R, int rank)
 {
-    for (int i = 1; i < rank; i++) {
-        // eliminate non zeros above pivot
-        assert(R(i, i) != 0);
-        for (int row = 0; row < i; row++) {
-            if (fabs(R(row, i)) > 1e-10) {
-                double coef = R(row, i) / R(i, i);
-                R.block(row, i + 1, 1, R.cols() - i - 1) -= coef
-                    * R.block(i, i + 1, 1, R.cols() - i - 1);
-            }
-            R(row, i) = 0;
-        }
+    // (setsquare: what eliminating the non-zeros above each pivot, row by row, comes to, by one
+    // triangular solve: [R11 R12] becomes [D, D R11^-1 R12], D the pivots. The same, and far
+    // quicker than row operations on a column-major matrix, rank^3 of them.)
+    if (rank <= 1) {
+        return;  // (nothing above the first pivot)
     }
+    const Eigen::MatrixXd R11 = R.topLeftCorner(rank, rank);
+    const Eigen::Index rest = R.cols() - rank;
+    if (rest > 0) {
+        const Eigen::MatrixXd X = R11.triangularView<Eigen::Upper>().solve(R.topRightCorner(rank, rest));
+        R.topRightCorner(rank, rest) = R11.diagonal().asDiagonal() * X;
+    }
+    R.topLeftCorner(rank, rank) = R11.diagonal().asDiagonal();
 }
 
 template<typename T>

@@ -38,6 +38,7 @@
 #include <array>
 #include <unordered_set>
 #include <cmath>
+#include <cstring>
 #include <numbers>
 
 namespace
@@ -517,6 +518,101 @@ GradientTool* SketchView::gradientTool() const
     return m_toolKind == ToolKind::Gradient ? static_cast<GradientTool*>(m_tool.get()) : nullptr;
 }
 
+namespace
+{
+void mixKey(std::uint64_t& h, std::uint64_t v)
+{
+    h ^= v + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
+    h *= 1099511628211ull;
+}
+void mixKey(std::uint64_t& h, double v)
+{
+    std::uint64_t bits;
+    std::memcpy(&bits, &v, sizeof bits);
+    mixKey(h, bits);
+}
+}  // namespace
+
+std::uint64_t SketchView::textKey(const core::Text& t) const
+{
+    std::uint64_t h = 1469598103934665603ull;
+    const core::Sketch& s = m_doc.sketch();
+    if (s.hasEntity(t.anchor)) {
+        mixKey(h, s.point(t.anchor).x);
+        mixKey(h, s.point(t.anchor).y);
+    }
+    mixKey(h, t.angle);
+    mixKey(h, m_zoom);
+    for (const auto& contour : t.shape) {
+        mixKey(h, static_cast<std::uint64_t>(contour.size()));
+        for (const core::Point& p : contour) {
+            mixKey(h, p.x);
+            mixKey(h, p.y);
+        }
+    }
+    return h;
+}
+
+void SketchView::drawText(QPainter& painter, const core::Text& t, const QBrush& fill, const std::optional<QPen>& edge,
+                          bool keep) const
+{
+    const QPainterPath path = textPath(t);
+    auto paint = [&](QPainter& p) {
+        p.fillPath(path, fill);
+        if (edge) {
+            p.strokePath(path, *edge);
+        }
+    };
+    const double margin = (edge ? edge->widthF() : 0.0) + 2.0;
+    const QRectF bounds = path.boundingRect().adjusted(-margin, -margin, margin, margin);
+    if (!bounds.intersects(QRectF(rect()))) {
+        return;  // (off screen)
+    }
+    // Big on screen (zoomed right in), or painted with something a key can't tell apart: drawn
+    // as it is. Otherwise from a picture of it, kept while it, its colours and the zoom stay as
+    // they were: not filled afresh while something else is dragged, or the view scrolled.
+    const qreal ratio = devicePixelRatioF();
+    if (!keep || bounds.width() * bounds.height() > 4.0 * width() * height()) {
+        paint(painter);
+        return;
+    }
+    // Pictures are kept in device pixels from the pan's whole pixels: scrolled by whole pixels,
+    // one lines up with what drawing it afresh would make exactly.
+    const QPointF panPixels = m_pan * ratio;
+    const QPointF whole(std::floor(panPixels.x()), std::floor(panPixels.y()));
+    std::uint64_t key = textKey(t);
+    mixKey(key, panPixels.x() - whole.x());
+    mixKey(key, panPixels.y() - whole.y());
+    mixKey(key, static_cast<double>(ratio));
+    mixKey(key, static_cast<std::uint64_t>(fill.color().rgba64()));
+    mixKey(key, static_cast<std::uint64_t>(fill.style()));
+    if (edge) {
+        mixKey(key, static_cast<std::uint64_t>(edge->color().rgba64()));
+        mixKey(key, edge->widthF());
+    }
+    auto found = m_textPictures.find(key);
+    if (found == m_textPictures.end()) {
+        const QRect area = QRectF(bounds.topLeft() * ratio - whole, bounds.size() * ratio).toAlignedRect();
+        QImage picture(area.size(), QImage::Format_ARGB32_Premultiplied);
+        picture.fill(Qt::transparent);
+        {
+            QPainter p(&picture);
+            p.setRenderHint(QPainter::Antialiasing);
+            p.translate(-(whole + QPointF(area.topLeft())));
+            p.scale(ratio, ratio);
+            paint(p);
+        }
+        picture.setDevicePixelRatio(ratio);
+        if (m_textPictureBytes > (96ll << 20)) {
+            m_textPictures.clear();  // (old ones: other zooms, texts since moved)
+            m_textPictureBytes = 0;
+        }
+        m_textPictureBytes += picture.sizeInBytes();
+        found = m_textPictures.emplace(key, TextPicture{std::move(picture), area.topLeft()}).first;
+    }
+    painter.drawImage((whole + QPointF(found->second.at)) / ratio, found->second.picture);
+}
+
 QPainterPath SketchView::textPath(const core::Text& t) const
 {
     QPainterPath path;
@@ -526,16 +622,37 @@ QPainterPath SketchView::textPath(const core::Text& t) const
         return path;
     }
     const core::Point& anchor = s.point(t.anchor);
+    // Kept by what it is, where, and the zoom; made without the pan (moved by it after), so
+    // scrolling the view doesn't make it again.
+    const std::uint64_t h = textKey(t);
+    const QPointF pan = m_pan;
+    if (const auto found = m_textPaths.find(h); found != m_textPaths.end()) {
+        return found->second.translated(pan);
+    }
+    if (m_textPaths.size() > 256) {
+        m_textPaths.clear();  // (old ones: other zooms, texts since changed)
+    }
+    // Only as fine as shows: a point within a fraction of a pixel of the last one kept adds
+    // nothing anyone can see.
+    constexpr double kFinest = 0.3;  // pixels
     for (const auto& contour : t.shape) {
         QPolygonF polygon;
+        polygon.reserve(static_cast<qsizetype>(contour.size()));
         for (const core::Point& p : contour) {
             const core::Point w = core::textToWorld(anchor, t.angle, p);
-            polygon << toScreen({w.x, w.y});
+            const QPointF at(w.x * m_zoom, -w.y * m_zoom);
+            if (polygon.isEmpty() || std::abs(at.x() - polygon.back().x()) + std::abs(at.y() - polygon.back().y()) >= kFinest) {
+                polygon << at;
+            }
+        }
+        if (polygon.size() < 3) {
+            continue;  // (smaller than a pixel)
         }
         path.addPolygon(polygon);
         path.closeSubpath();
     }
-    return path;
+    m_textPaths.emplace(h, path);
+    return path.translated(pan);
 }
 
 QPolygonF SketchView::textBox(const core::Text& t) const
@@ -585,6 +702,12 @@ core::Id SketchView::textAt(QPointF screen, bool editable) const
 const std::map<core::Id, std::optional<core::regions::Region>>& SketchView::fillRegions(core::Id layer) const
 {
     const core::Sketch& s = m_doc.sketch();
+    if (std::ranges::none_of(s.fills(), [&](const auto& f) { return f.second.layer == layer; })) {
+        // (nothing to find: no fingerprint or arrangement of a layer of thousands of curves)
+        static const std::map<core::Id, std::optional<core::regions::Region>> none;
+        m_fillCache.erase(layer);
+        return none;
+    }
     // A fingerprint of everything the areas depend on, positions measured in a frame of the
     // layer's own (from its first point, towards the point farthest from that), to a hair, so a
     // move or turn of the whole layer leaves it as it was: a group dragged round, say.
@@ -1782,7 +1905,6 @@ void SketchView::drawSketch(QPainter& painter, core::Id only) const
         if ((only != core::kNoId && id != only) || !sketch.hasEntity(t.anchor) || hidden(id) || !inLayer(id)) {
             continue;
         }
-        const QPainterPath path = textPath(t);
         QColor color = t.hasColor ? QColor(t.color.r, t.color.g, t.color.b, t.color.a)
                                   : styleFor(sketch.entity(t.anchor)).color();
         const bool graded = t.hasColor && t.gradient.active();
@@ -1790,15 +1912,11 @@ void SketchView::drawSketch(QPainter& painter, core::Id only) const
             if (!t.hasColor) {
                 color = onPaper ? QColor(Qt::black) : colors.fullyConstrained;  // as plain geometry shows
             }
-            if (graded) {
-                painter.fillPath(path, gradientBrush(t.gradient));
-            }
-            else {
-                painter.fillPath(path, color);
-            }
+            std::optional<QPen> edge;
             if (m_selection.contains(id) || id == m_hovered) {
-                painter.strokePath(path, QPen(m_selection.contains(id) ? colors.selection : colors.hover, 1.0));
+                edge = QPen(m_selection.contains(id) ? colors.selection : colors.hover, 1.0);
             }
+            drawText(painter, t, graded ? gradientBrush(t.gradient) : QBrush(color), edge, !graded);
             continue;
         }
         if (t.sublayer != sketch.activeSublayer() && !m_selection.contains(id) && id != m_hovered) {
@@ -1806,15 +1924,10 @@ void SketchView::drawSketch(QPainter& painter, core::Id only) const
         }
         QColor faint = color;
         faint.setAlphaF(faint.alphaF() * 0.3);
-        if (graded) {
-            painter.fillPath(path, gradientBrush(t.gradient, 0.3));
-        }
-        else {
-            painter.fillPath(path, faint);
-        }
         const bool hot = m_selection.contains(id) || id == m_hovered;
         const QColor edge = m_selection.contains(id) ? colors.selection : id == m_hovered ? colors.hover : color;
-        painter.strokePath(path, QPen(edge, hot ? kHighlightWidth : 1.0));
+        drawText(painter, t, graded ? gradientBrush(t.gradient, 0.3) : QBrush(faint),
+                 QPen(edge, hot ? kHighlightWidth : 1.0), !graded);
     }
 
     // Drawn dimensions: part of the drawing, in their own colour (in other sublayers, faded while

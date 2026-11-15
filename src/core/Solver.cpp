@@ -821,6 +821,13 @@ void Solver::Impl::build(const Sketch& sketch)
             ga.rad = alloc(std::hypot(sx, sy));
             ga.startAngle = alloc(startAngle);
             ga.endAngle = alloc(endAngle);
+            if (passive.contains(a->center) && passive.contains(a->start) && passive.contains(a->end)) {
+                // Wholly placed from its group's anchors (and nothing refers to it, or its points
+                // would be solved for): its radius and angles needn't be either. (An imported
+                // drawing's hundreds of arcs would otherwise be thousands of equations.)
+                arcs.emplace(id, ga);
+                continue;
+            }
             if (!fixed) {
                 declare(ga.rad);
                 declare(ga.startAngle);
