@@ -1420,6 +1420,24 @@ void SketchView::resizeEvent(QResizeEvent* event)
     }
 }
 
+void SketchView::drawBackdrop(QPainter& painter) const
+{
+    painter.fillRect(rect(), theme::canvas().background);
+    if (!m_presentation) {
+        // Reference images, under everything, the grid too (not part of the drawing: never in
+        // presentation view). Bottom layer first.
+        const auto& layers = m_doc.sketch().layers();
+        for (auto it = layers.rbegin(); it != layers.rend(); ++it) {
+            if (it->visible) {
+                drawImages(painter, it->id);
+            }
+        }
+    }
+    drawGrid(painter);
+    painter.setRenderHint(QPainter::Antialiasing);
+    drawPage(painter);
+}
+
 void SketchView::paintEvent(QPaintEvent*)
 {
     const qint64 start = m_clock.nsecsElapsed();
@@ -1445,8 +1463,8 @@ void SketchView::paintEvent(QPaintEvent*)
     if (m_showingQuickZoom) {
         const double k = m_zoom / m_baseKey->zoom;
         QPainter painter(this);
-        painter.fillRect(rect(), theme::canvas().background);
-        drawGrid(painter);
+        drawBackdrop(painter);  // (as it now is: zoomed out, the picture doesn't reach the edges)
+        painter.setRenderHint(QPainter::Antialiasing, false);
         painter.save();
         // On screen, what was at s is now at k s + (pan - k pan then).
         painter.translate(m_pan - k * m_baseKey->pan);
@@ -1475,20 +1493,7 @@ void SketchView::paintEvent(QPaintEvent*)
                     QImage::Format_ARGB32_Premultiplied);
         base.setDevicePixelRatio(ratio);
         QPainter painter(&base);
-        painter.fillRect(rect(), theme::canvas().background);
-        if (!m_presentation) {
-            // Reference images, under everything, the grid too (not part of the drawing: never in
-            // presentation view). Bottom layer first.
-            const auto& layers = m_doc.sketch().layers();
-            for (auto it = layers.rbegin(); it != layers.rend(); ++it) {
-                if (it->visible) {
-                    drawImages(painter, it->id);
-                }
-            }
-        }
-        drawGrid(painter);
-        painter.setRenderHint(QPainter::Antialiasing);
-        drawPage(painter);
+        drawBackdrop(painter);
         // With nothing hovered (that's drawn over it, below).
         struct Unhover
         {

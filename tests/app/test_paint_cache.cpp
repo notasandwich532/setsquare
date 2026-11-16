@@ -368,3 +368,38 @@ TEST_CASE("Paint cache: zooming a slow drawing by the wheel shows the picture st
         CHECK(differing(sharp, afreshAsViewed(doc, view)) == 0);
     }
 }
+
+TEST_CASE("Paint cache: zooming out a drawing on a page, the edges the stretched picture doesn't reach show as painting afresh would", "[paint]")
+{
+    Document doc;
+    SketchView view(doc);
+    view.resize(800, 600);
+    view.show();
+    view.resetView();
+    doc.modify("rect", [&](Sketch& s) { build::rectangle(s, s.addPoint(75, 125), s.addPoint(175, 175)); });  // (well inside the view)
+    Page page;  // A4, bottom-left on the origin
+    page.hasColor = true;
+    page.color = {0xff, 0xfd, 0xf5, 255};
+    REQUIRE(view.tryEdit("page", [&](Editor& ed) { ed.setPage(page); }));
+    for (bool presentation : {false, true}) {
+        INFO("presentation " << presentation);
+        view.setPresentation(presentation);
+        view.setView(4.0, QPointF(-100, 900));  // (zoomed in on part of the page)
+        view.grab();
+        view.setQuickZoomFrom(0.0);
+        const QPointF c(400, 300);
+        QWheelEvent wheel(c, view.mapToGlobal(c), QPoint(), QPoint(0, -120), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+        QCoreApplication::sendEvent(&view, &wheel);
+        const QImage shown = view.grab().toImage();
+        REQUIRE(view.showingQuickZoom());
+        const QImage fresh = afreshAsViewed(doc, view);
+        // (Zoomed out a notch, the picture covers all but about 50 pixels round the edge.)
+        const double ratio = shown.devicePixelRatio();
+        for (const QRect& strip : {QRect(0, 0, 800, 30), QRect(0, 570, 800, 30), QRect(0, 0, 30, 600), QRect(770, 0, 30, 600)}) {
+            const QRect pixels(strip.topLeft() * ratio, strip.size() * ratio);
+            CHECK(differing(shown.copy(pixels), fresh.copy(pixels)) == 0);
+        }
+        QTest::qWait(300);  // (the wheel stops)
+        view.setQuickZoomFrom(1e9);
+    }
+}

@@ -260,6 +260,8 @@ protected:
 private:
     void drawGrid(QPainter& painter) const;
     void drawPage(QPainter& painter) const;  // the sheet (see core::Page)
+    // What's behind the drawing: the background, reference images, the grid and the page.
+    void drawBackdrop(QPainter& painter) const;
     void drawImages(QPainter& painter, core::Id layer) const;  // a layer's reference images
     // `only`: just that item (drawn over the cached picture as it's hovered), not the rest.
     void drawSketch(QPainter& painter, core::Id only = core::kNoId) const;
