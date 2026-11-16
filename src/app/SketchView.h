@@ -51,7 +51,14 @@ public:
     QPointF toScreen(core::Vec2 world) const;
     core::Vec2 toWorld(QPointF screen) const;
     double zoom() const { return m_zoom; }  // pixels per world unit
+    QPointF pan() const { return m_pan; }   // where the world's origin is on screen
+    void setView(double zoom, QPointF pan);  // (as if the user had: no fitting it to the drawing after)
     void resetView();
+    // Zooming by the wheel, when the drawing's slow to paint (at least `ms` a frame): the last
+    // picture is shown stretched while the wheel turns, painted sharp once it stops (see
+    // paintEvent). 0 always does; infinity never.
+    void setQuickZoomFrom(double ms) { m_quickZoomFromMs = ms; }
+    bool showingQuickZoom() const { return m_showingQuickZoom; }  // the last paint was stretched
     void fitAll();  // zoom to show the whole drawing (or reset when it's empty)
 
     // --- tools ---
@@ -357,6 +364,12 @@ private:
     };
     QImage m_base;
     std::optional<BaseKey> m_baseKey;
+    double m_baseMs = 0.0;  // how long it took to paint
+    // Zooming by the wheel (see setQuickZoomFrom): on until the wheel's been still a moment.
+    double m_quickZoomFromMs = 8.0;
+    bool m_wheelZooming = false;
+    bool m_showingQuickZoom = false;
+    class QTimer* m_wheelSettled = nullptr;
     quint64 m_documentStamp = 0;  // counts the document's changes
     quint64 m_previewStamp = 0;   // and the image preview's
     core::Id m_editFeature = core::kNoId;  // the pattern the next pattern command edits

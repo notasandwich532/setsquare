@@ -33,6 +33,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QScreen>
+#include <QTimer>
 #include <QWheelEvent>
 
 #include <algorithm>
@@ -98,6 +99,16 @@ SketchView::SketchView(Document& document, QWidget* parent)
     connect(m_frameClock, &FrameClock::frame, this, [this] {
         if (isVisible()) {
             repaint();  // paint now, right after the vblank
+        }
+    });
+    // The wheel still a moment: the zoom it came to, painted sharp.
+    m_wheelSettled = new QTimer(this);
+    m_wheelSettled->setSingleShot(true);
+    m_wheelSettled->setInterval(120);
+    connect(m_wheelSettled, &QTimer::timeout, this, [this] {
+        m_wheelZooming = false;
+        if (m_showingQuickZoom) {
+            scheduleRepaint();
         }
     });
 
@@ -1419,7 +1430,47 @@ void SketchView::paintEvent(QPaintEvent*)
     const qreal ratio = devicePixelRatioF();
     const BaseKey key{m_documentStamp, m_previewStamp, m_zoom,         m_pan,      size(),
                       ratio,           m_presentation, m_showConstraints, m_selection};
+    // Zooming by the wheel, on a drawing slow to paint: the last picture stretched to the new
+    // zoom (a few milliseconds whatever's in it), over the grid as it now is (where zooming out
+    // shows what the picture never had), until the wheel stops. Not past twice or half the
+    // picture's zoom (too blurred, or too much missing): then a new one.
+    m_showingQuickZoom = false;
+    if (m_wheelZooming && m_baseKey && !m_base.isNull()) {
+        BaseKey moved = *m_baseKey;
+        moved.zoom = m_zoom;
+        moved.pan = m_pan;
+        const double k = m_zoom / m_baseKey->zoom;
+        m_showingQuickZoom = moved == key && k <= 2.0 && k >= 0.5;
+    }
+    if (m_showingQuickZoom) {
+        const double k = m_zoom / m_baseKey->zoom;
+        QPainter painter(this);
+        painter.fillRect(rect(), theme::canvas().background);
+        drawGrid(painter);
+        painter.save();
+        // On screen, what was at s is now at k s + (pan - k pan then).
+        painter.translate(m_pan - k * m_baseKey->pan);
+        painter.scale(k, k);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform);
+        painter.drawImage(QPointF(0, 0), m_base);
+        painter.restore();
+        painter.setRenderHint(QPainter::Antialiasing);
+        if (m_hovered != core::kNoId) {
+            drawSketch(painter, m_hovered);
+        }
+        if (m_tool) {
+            m_tool->paintOverlay(painter);
+        }
+        m_paintMs = (m_clock.nsecsElapsed() - start) / 1e6;
+        if (m_showStats) {
+            m_paintRate.tick(m_clock.elapsed());
+            drawStats(painter);
+        }
+        m_inPaint = false;
+        return;
+    }
     if (!m_baseKey || !(*m_baseKey == key) || m_base.isNull()) {
+        const qint64 baseStart = m_clock.nsecsElapsed();
         QImage base(QSize(static_cast<int>(std::ceil(width() * ratio)), static_cast<int>(std::ceil(height() * ratio))),
                     QImage::Format_ARGB32_Premultiplied);
         base.setDevicePixelRatio(ratio);
@@ -1449,6 +1500,7 @@ void SketchView::paintEvent(QPaintEvent*)
         painter.end();
         m_base = std::move(base);
         m_baseKey = key;
+        m_baseMs = (m_clock.nsecsElapsed() - baseStart) / 1e6;
         m_imageCache.prune();  // (only the pictures just drawn are kept)
     }
     QPainter painter(this);
@@ -2285,6 +2337,14 @@ ToolEvent SketchView::makeEvent(const QMouseEvent* event) const
                      event->modifiers()};
 }
 
+void SketchView::setView(double zoom, QPointF pan)
+{
+    m_zoom = std::clamp(zoom, kMinZoom, kMaxZoom);
+    m_pan = pan;
+    m_autoView = AutoView::None;
+    scheduleRepaint();
+}
+
 void SketchView::wheelEvent(QWheelEvent* event)
 {
     const double notches = event->angleDelta().y() / 120.0;
@@ -2297,6 +2357,10 @@ void SketchView::wheelEvent(QWheelEvent* event)
     m_zoom = std::clamp(m_zoom * std::pow(kZoomStep, notches), kMinZoom, kMaxZoom);
     m_autoView = AutoView::None;  // the user has taken over the view
     m_pan = QPointF(mouse.x() - anchor.x * m_zoom, mouse.y() + anchor.y * m_zoom);
+    if (m_baseMs >= m_quickZoomFromMs) {
+        m_wheelZooming = true;  // (stretched till the wheel stops: see paintEvent)
+        m_wheelSettled->start();
+    }
     scheduleRepaint();
     event->accept();
 }

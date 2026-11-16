@@ -141,6 +141,18 @@ QImage afresh(Document& doc, const SketchView& view, Id hovered)
     fresh.setHovered(hovered);
     return fresh.grab().toImage();
 }
+
+// The same, at the view's zoom and pan.
+QImage afreshAsViewed(Document& doc, const SketchView& view)
+{
+    SketchView fresh(doc);
+    fresh.resize(view.size());
+    fresh.show();
+    fresh.setView(view.zoom(), view.pan());
+    fresh.setPresentation(view.presentation());
+    fresh.setSelection(view.selection());
+    return fresh.grab().toImage();
+}
 }  // namespace
 
 TEST_CASE("Paint cache: hovering, selecting and editing show as painting afresh would", "[paint]")
@@ -286,4 +298,73 @@ TEST_CASE("Paint cache: a text, drawn from a picture kept of it, shows as painti
     const double ratio = scrolled.devicePixelRatio();
     const QImage shifted = scrolled.copy(QRect(QPoint(by.x() * ratio, by.y() * ratio), fresh.size() - QSize(by.x() * ratio, by.y() * ratio)));
     CHECK(differing(shifted, fresh.copy(QRect(QPoint(0, 0), shifted.size()))) == 0);
+}
+
+TEST_CASE("Paint cache: zooming a slow drawing by the wheel shows the picture stretched, then sharp once the wheel stops", "[paint]")
+{
+    Document doc;
+    SketchView view(doc);
+    view.resize(800, 600);
+    view.show();
+    view.resetView();
+    doc.modify("rect", [&](Sketch& s) { build::rectangle(s, s.addPoint(-40, -20), s.addPoint(40, 20)); });
+    REQUIRE(view.tryEdit("fill", [&](Editor& ed) { ed.fill({0, 0}, {255, 0, 0, 255}); }));
+    const QImage before = view.grab().toImage();
+    auto wheel = [&](int notches) {
+        const QPointF c(430, 280);  // (off centre: zoomed about the mouse)
+        QWheelEvent e(c, view.mapToGlobal(c), QPoint(), QPoint(0, 120 * notches), Qt::NoButton, Qt::NoModifier,
+                      Qt::NoScrollPhase, false);
+        QCoreApplication::sendEvent(&view, &e);
+    };
+
+    SECTION("A quick drawing: painted sharp every time")
+    {
+        wheel(1);
+        CHECK(differing(view.grab().toImage(), afreshAsViewed(doc, view)) == 0);
+        CHECK(!view.showingQuickZoom());
+    }
+    SECTION("A slow one: stretched, where painting afresh puts it")
+    {
+        // Where the red fill shows (its box, on screen).
+        auto redBox = [](const QImage& image) {
+            QRect box;
+            for (int y = 0; y < image.height(); ++y) {
+                for (int x = 0; x < image.width(); ++x) {
+                    const QColor p = image.pixelColor(x, y);
+                    if (p.red() - p.green() > 50 && p.red() - p.blue() > 50) {
+                        box |= QRect(x, y, 1, 1);
+                    }
+                }
+            }
+            return box;
+        };
+        auto near = [](const QRect& a, const QRect& b) {
+            return std::abs(a.left() - b.left()) <= 2 && std::abs(a.top() - b.top()) <= 2 && std::abs(a.right() - b.right()) <= 2
+                && std::abs(a.bottom() - b.bottom()) <= 2;
+        };
+        view.setQuickZoomFrom(0.0);  // (as if it were slow)
+        double pictured = view.zoom();  // the zoom of the picture being stretched
+        for (int notches : {1, 2, -1, 4, 3, -5}) {
+            wheel(notches);
+            const QImage shown = view.grab().toImage();
+            const double k = view.zoom() / pictured;
+            const bool stretched = k <= 2.0 && k >= 0.5;  // (past twice or half: a new picture)
+            if (!stretched) {
+                pictured = view.zoom();
+            }
+            INFO("after " << notches << " notches, zoom " << view.zoom());
+            CHECK(view.showingQuickZoom() == stretched);
+            const QImage fresh = afreshAsViewed(doc, view);
+            CHECK(!redBox(fresh).isEmpty());
+            CHECK(near(redBox(shown), redBox(fresh)));
+            if (!stretched) {
+                CHECK(differing(shown, fresh) == 0);
+            }
+        }        CHECK(differing(view.grab().toImage(), before) > 1000);  // (it has zoomed)
+        // The wheel stopped: painted sharp.
+        QTest::qWait(400);
+        const QImage sharp = view.grab().toImage();
+        CHECK(!view.showingQuickZoom());
+        CHECK(differing(sharp, afreshAsViewed(doc, view)) == 0);
+    }
 }
