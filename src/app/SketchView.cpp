@@ -26,6 +26,7 @@
 #include "tools/TransformTools.h"
 
 #include <QDoubleSpinBox>
+#include <QGuiApplication>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QSignalBlocker>
@@ -110,6 +111,15 @@ SketchView::SketchView(Document& document, QWidget* parent)
     m_painters = new QThreadPool(this);
     m_painters->setMaxThreadCount(std::max(1, QThread::idealThreadCount()));
     m_painters->setExpiryTimeout(-1);
+
+    // Nothing happening a moment: the picture's margin and the overview painted (see paintIdle).
+    m_idle = new QTimer(this);
+    m_idle->setSingleShot(true);
+    m_idle->setInterval(80);
+    connect(m_idle, &QTimer::timeout, this, [this] {
+        m_idle->setInterval(80);  // (paintIdle sets it shorter to go straight on)
+        paintIdle();
+    });
 
     // The wheel still a moment: the zoom it came to, painted sharp.
     m_wheelSettled = new QTimer(this);
@@ -1320,7 +1330,7 @@ void SketchView::deleteSelection()
     });
 }
 
-void SketchView::fitAll()
+QRectF SketchView::drawingExtent() const
 {
     const core::Sketch& s = m_doc.sketch();
     double minX = 0, minY = 0, maxX = 0, maxY = 0;  // always include the origin
@@ -1387,6 +1397,13 @@ void SketchView::fitAll()
             }
         }
     }
+    return QRectF(QPointF(minX, minY), QPointF(maxX, maxY));
+}
+
+void SketchView::fitAll()
+{
+    const QRectF extent = drawingExtent();
+    const double minX = extent.left(), minY = extent.top(), maxX = extent.right(), maxY = extent.bottom();
     const double w = maxX - minX, h = maxY - minY;
     if (w < 1e-9 && h < 1e-9) {
         resetView();
@@ -1455,21 +1472,21 @@ QRectF SketchView::shownArea(const QPainter& painter) const
 {
     // (What of the canvas the painter's image covers: all of it, or a band being painted. An
     // image's size is in device pixels; the painter's world transform is in logical ones.)
-    QRectF area = QRectF(rect());
+    // (Painting a picture, it may reach past the window: the margin kept round it.)
     const QPaintDevice* device = painter.device();
     if (device && device->devType() == QInternal::Image) {
         const qreal r = device->devicePixelRatioF();
         bool invertible = false;
         const QTransform back = painter.worldTransform().inverted(&invertible);
         if (invertible) {
-            area = area.intersected(back.mapRect(QRectF(0, 0, device->width() / r, device->height() / r)));
+            return back.mapRect(QRectF(0, 0, device->width() / r, device->height() / r));
         }
     }
-    return area;
+    return QRectF(rect());
 }
 void SketchView::drawBackdrop(QPainter& painter) const
 {
-    painter.fillRect(rect(), theme::canvas().background);
+    painter.fillRect(shownArea(painter), theme::canvas().background);
     if (!m_presentation) {
         // Reference images, under everything, the grid too (not part of the drawing: never in
         // presentation view). Bottom layer first.
@@ -1495,10 +1512,17 @@ void SketchView::paintEvent(QPaintEvent*)
     const qreal ratio = devicePixelRatioF();
     const BaseKey key{m_documentStamp, m_previewStamp, m_zoom,         m_pan,      size(),
                       ratio,           m_presentation, m_showConstraints, m_selection};
+    // The picture of the drawing reaches past the window by a quarter of it each way (filled in
+    // while nothing's happening: see paintIdle), so zooming out or panning a little shows what's
+    // there at once.
+    const QSize window(static_cast<int>(std::ceil(width() * ratio)), static_cast<int>(std::ceil(height() * ratio)));
+    const QPoint margin((window.width() + 3) / 4, (window.height() + 3) / 4);
+    const QRect inWindow(margin, window);
     // Zooming by the wheel, on a drawing slow to paint: the last picture stretched to the new
-    // zoom (a few milliseconds whatever's in it), over the grid as it now is (where zooming out
-    // shows what the picture never had), until the wheel stops. Not past twice or half the
-    // picture's zoom (too blurred, or too much missing): then a new one.
+    // zoom (a few milliseconds whatever's in it), over what's behind as it now is, until the
+    // wheel stops. Beyond what the picture has, the overview of the whole drawing (see
+    // paintOverview), stretched too. Not past twice or half the picture's zoom (too blurred, or
+    // too much missing): then a new one.
     m_showingQuickZoom = false;
     if (m_wheelZooming && m_baseKey && !m_base.isNull()) {
         BaseKey moved = *m_baseKey;
@@ -1508,17 +1532,32 @@ void SketchView::paintEvent(QPaintEvent*)
         m_showingQuickZoom = moved == key && k <= 2.0 && k >= 0.5;
     }
     if (m_showingQuickZoom) {
-        const double k = m_zoom / m_baseKey->zoom;
         QPainter painter(this);
-        drawBackdrop(painter);  // (as it now is: zoomed out, the picture doesn't reach the edges)
+        drawBackdrop(painter);
         painter.setRenderHint(QPainter::Antialiasing, false);
-        painter.save();
-        // On screen, what was at s is now at k s + (pan - k pan then).
-        painter.translate(m_pan - k * m_baseKey->pan);
-        painter.scale(k, k);
         painter.setRenderHint(QPainter::SmoothPixmapTransform);
-        painter.drawImage(QPointF(0, 0), m_base);
-        painter.restore();
+        // On screen, what was at s in a picture made at zoom z and pan p is now at k s + (pan - k p),
+        // k = zoom / z.
+        auto stretched = [&](const BaseKey& made, const QImage& picture, QPoint origin, const QRegion& has) {
+            const double k = m_zoom / made.zoom;
+            painter.save();
+            painter.translate(m_pan - k * made.pan);
+            painter.scale(k, k);
+            if (has != QRegion(picture.rect())) {
+                QPainterPath inside;  // (what of it has been painted)
+                for (const QRect& r : has) {
+                    inside.addRect(QRectF((r.x() - origin.x()) / ratio, (r.y() - origin.y()) / ratio, r.width() / ratio,
+                                          r.height() / ratio));
+                }
+                painter.setClipPath(inside);
+            }
+            painter.drawImage(QPointF(-origin.x() / ratio, -origin.y() / ratio), picture);
+            painter.restore();
+        };
+        if (overviewCurrent()) {
+            stretched(m_overviewKey, m_overview, QPoint(0, 0), QRegion(m_overview.rect()));
+        }
+        stretched(*m_baseKey, m_base, m_baseOrigin, m_baseValid);
         painter.setRenderHint(QPainter::Antialiasing);
         if (m_hovered != core::kNoId) {
             drawSketch(painter, m_hovered);
@@ -1535,40 +1574,38 @@ void SketchView::paintEvent(QPaintEvent*)
         return;
     }
     // Only panned (by whole device pixels, as the middle button pans): the picture moved by as
-    // much, and only what's come into view painted.
+    // much, and only what's come into the window and wasn't painted already painted.
     if (m_baseKey && !m_base.isNull() && !(*m_baseKey == key)) {
         BaseKey moved = *m_baseKey;
         moved.pan = m_pan;
         const QPointF shift = (m_pan - m_baseKey->pan) * ratio;
         const QPoint by(qRound(shift.x()), qRound(shift.y()));
-        const int w = m_base.width(), h = m_base.height();
         if (moved == key && std::abs(shift.x() - by.x()) < 1e-6 && std::abs(shift.y() - by.y()) < 1e-6
-            && std::abs(by.x()) < w && std::abs(by.y()) < h) {
+            && std::abs(by.x()) < m_base.width() && std::abs(by.y()) < m_base.height()) {
             scrollImage(m_base, by);
-            std::vector<QRect> uncovered;
-            if (by.x() != 0) {
-                uncovered.push_back(by.x() > 0 ? QRect(0, 0, by.x(), h) : QRect(w + by.x(), 0, -by.x(), h));
-            }
-            const int x0 = std::max(by.x(), 0), x1 = w + std::min(by.x(), 0);  // (the rest, across)
-            if (by.y() != 0 && x1 > x0) {
-                uncovered.push_back(by.y() > 0 ? QRect(x0, 0, x1 - x0, by.y()) : QRect(x0, h + by.y(), x1 - x0, -by.y()));
-            }
-            paintAreas(m_base, uncovered);
+            m_baseValid = m_baseValid.translated(by) & QRegion(m_base.rect());
+            const QRegion missing = QRegion(inWindow) - m_baseValid;
+            paintAreas(m_base, std::vector<QRect>(missing.begin(), missing.end()), m_baseOrigin, true);
+            m_baseValid += missing;
             m_baseKey = key;
         }
     }
     if (!m_baseKey || !(*m_baseKey == key) || m_base.isNull()) {
         const qint64 baseStart = m_clock.nsecsElapsed();
-        QImage base(QSize(static_cast<int>(std::ceil(width() * ratio)), static_cast<int>(std::ceil(height() * ratio))),
-                    QImage::Format_ARGB32_Premultiplied);
-        base.setDevicePixelRatio(ratio);
-        paintAreas(base, {base.rect()});
-        m_base = std::move(base);
+        const QSize whole = window + QSize(2 * margin.x(), 2 * margin.y());
+        if (m_base.size() != whole || m_base.devicePixelRatio() != ratio) {
+            m_base = QImage(whole, QImage::Format_ARGB32_Premultiplied);
+            m_base.setDevicePixelRatio(ratio);
+        }
+        m_baseOrigin = margin;
+        paintAreas(m_base, {inWindow}, m_baseOrigin, true);  // (the margin later)
+        m_baseValid = QRegion(inWindow);
         m_baseKey = key;
         m_baseMs = (m_clock.nsecsElapsed() - baseStart) / 1e6;
         m_imageCache.prune();  // (only the pictures just drawn are kept)
-    }    QPainter painter(this);
-    painter.drawImage(QPointF(0, 0), m_base);
+    }
+    QPainter painter(this);
+    painter.drawImage(QPointF(-m_baseOrigin.x() / ratio, -m_baseOrigin.y() / ratio), m_base);
     painter.setRenderHint(QPainter::Antialiasing);
     if (m_hovered != core::kNoId) {
         drawSketch(painter, m_hovered);
@@ -1582,8 +1619,105 @@ void SketchView::paintEvent(QPaintEvent*)
         drawStats(painter);
     }
     m_inPaint = false;
+    if (m_baseValid != QRegion(m_base.rect()) || !overviewCurrent()) {
+        m_idle->start(80);  // (restarted each frame: it waits for them to stop)
+    }
 }
 
+bool SketchView::overviewCurrent() const
+{
+    if (m_overview.isNull() || !m_baseKey) {
+        return false;
+    }
+    BaseKey made = m_overviewKey;
+    made.zoom = m_baseKey->zoom;
+    made.pan = m_baseKey->pan;
+    made.size = m_baseKey->size;
+    return made == *m_baseKey;
+}
+
+void SketchView::paintIdle()
+{
+    // Not while anything's going on (it'd be painted again anyway, or hold up a frame).
+    if (!isVisible() || m_base.isNull() || !m_baseKey || m_wheelZooming || m_panning
+        || QGuiApplication::mouseButtons() != Qt::NoButton) {
+        m_idle->start();
+        return;
+    }
+    const BaseKey key{m_documentStamp, m_previewStamp, m_zoom,           m_pan,      size(),
+                      devicePixelRatioF(), m_presentation, m_showConstraints, m_selection};
+    if (!(*m_baseKey == key)) {
+        return;  // (a paint's coming: it starts this again)
+    }
+    // The margin, a strip at a time (each a few milliseconds: the window can be painted between).
+    const QRegion missing = QRegion(m_base.rect()) - m_baseValid;
+    if (!missing.isEmpty()) {
+        QRect strip = *missing.begin();
+        strip.setHeight(std::min(strip.height(), 160));
+        paintAreas(m_base, {strip}, m_baseOrigin, true);
+        m_baseValid += strip;
+        m_idle->start(1);
+        return;
+    }
+    if (!overviewCurrent() && !paintOverview()) {
+        m_idle->start(1);  // (more of it to do)
+    }
+}
+
+bool SketchView::paintOverview()
+{
+    // The whole drawing, small (at most 2048 pixels across, and no finer than the view), on
+    // nothing: shown under the picture while zooming out past its margin. Made a strip at a time
+    // (the whole can take tens of milliseconds); started again if the drawing changes meanwhile.
+    const qreal ratio = devicePixelRatioF();
+    BaseKey made = *m_baseKey;
+    if (m_overviewNext.isNull() || [&] {
+            BaseKey was = m_overviewNextKey;
+            was.zoom = made.zoom;
+            was.pan = made.pan;
+            was.size = made.size;
+            return !(was == made);
+        }()) {
+        const QRectF extent = drawingExtent();
+        const double across = std::max({extent.width(), extent.height(), 1e-6});
+        const double zoom = std::min(2048.0 / ratio / across, m_zoom);
+        const double pad = 8.0;  // (logical pixels: room for a line's width, dots and labels)
+        const QSize size(static_cast<int>(std::ceil((extent.width() * zoom + 2 * pad) * ratio)),
+                         static_cast<int>(std::ceil((extent.height() * zoom + 2 * pad) * ratio)));
+        m_overviewNext = QImage(size, QImage::Format_ARGB32_Premultiplied);
+        m_overviewNext.setDevicePixelRatio(ratio);
+        m_overviewNext.fill(Qt::transparent);
+        m_overviewNextKey = made;
+        m_overviewNextKey.zoom = zoom;
+        m_overviewNextKey.pan = QPointF(pad - extent.left() * zoom, pad + extent.bottom() * zoom);
+        m_overviewNextRow = 0;
+    }
+    // Painted as the canvas would be at its zoom and pan (put back after).
+    struct View
+    {
+        double& zoom;
+        QPointF& pan;
+        double wasZoom;
+        QPointF wasPan;
+        ~View()
+        {
+            zoom = wasZoom;
+            pan = wasPan;
+        }
+    } view{m_zoom, m_pan, m_zoom, m_pan};
+    m_zoom = m_overviewNextKey.zoom;
+    m_pan = m_overviewNextKey.pan;
+    const QRect strip(0, m_overviewNextRow, m_overviewNext.width(),
+                      std::min(160, m_overviewNext.height() - m_overviewNextRow));
+    paintAreas(m_overviewNext, {strip}, QPoint(0, 0), false);
+    m_overviewNextRow = strip.bottom() + 1;
+    if (m_overviewNextRow < m_overviewNext.height()) {
+        return false;
+    }
+    m_overview = std::exchange(m_overviewNext, QImage());
+    m_overviewKey = m_overviewNextKey;
+    return true;
+}
 namespace
 {
 // Moves an image's pixels by `by` (the edges they leave keep what was there).
@@ -1616,7 +1750,7 @@ void SketchView::setPaintThreads(int threads)
     m_paintThreads = threads;
 }
 
-void SketchView::paintAreas(QImage& base, const std::vector<QRect>& areas)
+void SketchView::paintAreas(QImage& base, const std::vector<QRect>& areas, QPoint origin, bool backdrop)
 {
     if (areas.empty()) {
         return;
@@ -1632,9 +1766,11 @@ void SketchView::paintAreas(QImage& base, const std::vector<QRect>& areas)
         view.setDevicePixelRatio(ratio);
         return view;
     };
-    auto onto = [&](QPainter& painter, const QRect& r) { painter.translate(-r.left() / ratio, -r.top() / ratio); };
+    auto onto = [&](QPainter& painter, const QRect& r) {
+        painter.translate(-(r.left() - origin.x()) / ratio, -(r.top() - origin.y()) / ratio);
+    };
     // What's behind, here (its reference images' cache is the main thread's).
-    for (const QRect& r : areas) {
+    for (const QRect& r : backdrop ? areas : std::vector<QRect>()) {
         QImage view = part(r);
         QPainter painter(&view);
         onto(painter, r);
@@ -1746,7 +1882,7 @@ void SketchView::drawPage(QPainter& painter) const
     if (m_presentation) {
         // The drawing as it will be: off the page dimmed, the page in its colour.
         QPainterPath outside;
-        outside.addRect(rect());
+        outside.addRect(shownArea(painter));
         outside.addRect(sheet);
         outside.setFillRule(Qt::OddEvenFill);
         painter.fillPath(outside, QColor(0, 0, 0, 120));
@@ -1823,18 +1959,19 @@ void SketchView::drawGrid(QPainter& painter) const
     }
     const double majorSpacing = spacing * 5.0;
 
-    const core::Vec2 topLeft = toWorld(QPointF(0, 0));
-    const core::Vec2 bottomRight = toWorld(QPointF(width(), height()));
+    const QRectF area = shownArea(painter);
+    const core::Vec2 topLeft = toWorld(area.topLeft());
+    const core::Vec2 bottomRight = toWorld(area.bottomRight());
 
     auto drawLines = [&](double step, const QColor& color) {
         painter.setPen(QPen(color, 0));
         for (double x = std::floor(topLeft.x / step) * step; x <= bottomRight.x; x += step) {
             const double sx = toScreen({x, 0}).x();
-            painter.drawLine(QPointF(sx, 0), QPointF(sx, height()));
+            painter.drawLine(QPointF(sx, area.top()), QPointF(sx, area.bottom()));
         }
         for (double y = std::floor(bottomRight.y / step) * step; y <= topLeft.y; y += step) {
             const double sy = toScreen({0, y}).y();
-            painter.drawLine(QPointF(0, sy), QPointF(width(), sy));
+            painter.drawLine(QPointF(area.left(), sy), QPointF(area.right(), sy));
         }
     };
 
@@ -1846,9 +1983,9 @@ void SketchView::drawGrid(QPainter& painter) const
     }
     const QPointF origin = toScreen({0, 0});
     painter.setPen(QPen(colors.axisX, 1.0));
-    painter.drawLine(QPointF(0, origin.y()), QPointF(width(), origin.y()));
+    painter.drawLine(QPointF(area.left(), origin.y()), QPointF(area.right(), origin.y()));
     painter.setPen(QPen(colors.axisY, 1.0));
-    painter.drawLine(QPointF(origin.x(), 0), QPointF(origin.x(), height()));
+    painter.drawLine(QPointF(origin.x(), area.top()), QPointF(origin.x(), area.bottom()));
 }
 
 void SketchView::drawArcPath(QPainter& painter, const core::ArcShape& arc) const
@@ -2026,10 +2163,10 @@ void SketchView::drawSketch(QPainter& painter, core::Id only) const
                             kHighlightWidth));
         const QPointF o = toScreen({0, 0});
         if (axis == sketch.xAxis()) {
-            painter.drawLine(QPointF(0, o.y()), QPointF(width(), o.y()));
+            painter.drawLine(QPointF(shownArea(painter).left(), o.y()), QPointF(shownArea(painter).right(), o.y()));
         }
         else {
-            painter.drawLine(QPointF(o.x(), 0), QPointF(o.x(), height()));
+            painter.drawLine(QPointF(o.x(), shownArea(painter).top()), QPointF(o.x(), shownArea(painter).bottom()));
         }
     }
 

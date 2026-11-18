@@ -15,6 +15,7 @@
 
 #include <QElapsedTimer>
 #include <QImage>
+#include <QRegion>
 #include <QPen>
 #include <QPointF>
 #include <QPolygonF>
@@ -60,6 +61,8 @@ public:
     // paintEvent). 0 always does; infinity never.
     void setQuickZoomFrom(double ms) { m_quickZoomFromMs = ms; }
     bool showingQuickZoom() const { return m_showingQuickZoom; }  // the last paint was stretched
+    // The margin round the window and the overview painted (see paintIdle), for the view as it is.
+    bool paintedAhead() const { return !m_base.isNull() && m_baseValid == QRegion(m_base.rect()) && overviewCurrent(); }
     // How many threads paint the drawing at once (see paintAreas): 1 by default, at most as many
     // as the computer has cores.
     void setPaintThreads(int threads);
@@ -268,7 +271,15 @@ private:
     void drawBackdrop(QPainter& painter) const;
     // Paints parts of ase (a picture of the whole canvas; device pixels) afresh: what's behind,
     // then the drawing, in bands painted by several threads at once.
-    void paintAreas(QImage& base, const std::vector<QRect>& areas);
+    // origin: where the window's top left is in ase (device pixels); ackdrop: what's
+    // behind too (else only the drawing, on whatever's there).
+    void paintAreas(QImage& base, const std::vector<QRect>& areas, QPoint origin, bool backdrop);
+    // While nothing's happening: the picture's margin painted, a strip at a time, then the
+    // overview (a small picture of the whole drawing, for zooming out past the margin).
+    void paintIdle();
+    bool paintOverview();  // (a strip of it; true once it's all done)
+    bool overviewCurrent() const;  // (made of the drawing as it is, as the picture is)
+    QRectF drawingExtent() const;  // in world units: all of it, the origin and page too
     // The part of the canvas (widget coordinates) painter paints: the whole, or a band.
     QRectF shownArea(const QPainter& painter) const;
     class QThreadPool* m_painters = nullptr;
@@ -378,8 +389,16 @@ private:
         std::set<core::Id> selection;
         bool operator==(const BaseKey&) const = default;
     };
-    QImage m_base;
+    QImage m_base;  // (the window and a margin round it)
     std::optional<BaseKey> m_baseKey;
+    QPoint m_baseOrigin;  // where the window's top left is in it (device pixels)
+    QRegion m_baseValid;  // what of it has been painted
+    QImage m_overview;    // the whole drawing, small, on nothing
+    BaseKey m_overviewKey;  // (its own zoom and pan)
+    QImage m_overviewNext;  // the next, being painted
+    BaseKey m_overviewNextKey;
+    int m_overviewNextRow = 0;
+    class QTimer* m_idle = nullptr;
     double m_baseMs = 0.0;  // how long it took to paint
     // Zooming by the wheel (see setQuickZoomFrom): on until the wheel's been still a moment.
     double m_quickZoomFromMs = 8.0;
