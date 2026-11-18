@@ -79,18 +79,21 @@ TEST_CASE("Tiled fill: makes what filling the shape whole does")
     }
     for (Qt::FillRule rule : {Qt::WindingFill, Qt::OddEvenFill}) {
         whole.setFillRule(rule);
-        for (int view = 0; view < 3; ++view) {
+        for (int view = 0; view < 4; ++view) {
             for (int tile : {32, 128}) {
                 for (const QColor& color : {QColor(200, 120, 40), QColor(40, 160, 220, 90)}) {
                     auto paint = [&](bool tiled) {
                         QImage image(1100, 800, QImage::Format_ARGB32_Premultiplied);
+                        if (view == 3) {
+                            image.setDevicePixelRatio(2.0);  // (a scaled screen's: Qt scales it)
+                        }
                         image.fill(QColor(30, 32, 36));
                         QPainter p(&image);
                         p.setRenderHint(QPainter::Antialiasing);
                         if (view == 1) {
                             p.translate(13.37, 7.61);  // (a pan of part pixels)
                         }
-                        if (view == 2) {
+                        if (view == 2 || view == 3) {
                             p.translate(-41.3, 22.9);
                             p.scale(1.53, 1.53);  // (zoomed, as on a scaled screen)
                         }

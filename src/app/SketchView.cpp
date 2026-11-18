@@ -33,10 +33,15 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QScreen>
+#include <QThread>
+#include <QThreadPool>
 #include <QTimer>
 #include <QWheelEvent>
 
 #include <algorithm>
+#include <atomic>
+#include <exception>
+#include <mutex>
 #include <array>
 #include <unordered_set>
 #include <cmath>
@@ -101,6 +106,11 @@ SketchView::SketchView(Document& document, QWidget* parent)
             repaint();  // paint now, right after the vblank
         }
     });
+    // Threads to paint with (see paintAreas), kept ready.
+    m_painters = new QThreadPool(this);
+    m_painters->setMaxThreadCount(std::max(1, QThread::idealThreadCount()));
+    m_painters->setExpiryTimeout(-1);
+
     // The wheel still a moment: the zoom it came to, painted sharp.
     m_wheelSettled = new QTimer(this);
     m_wheelSettled->setSingleShot(true);
@@ -572,7 +582,8 @@ void SketchView::drawText(QPainter& painter, const core::Text& t, const QBrush& 
         return;
     }
     const std::uint64_t shapeKey = textKey(t);
-    const TextOutline& outline = textOutline(t, shapeKey);
+    const std::shared_ptr<const TextOutline> kept = textOutline(t, shapeKey);
+    const TextOutline& outline = *kept;
     // (Unpanned: the painter's moved by the pan instead.)
     auto paint = [&](QPainter& p) {
         tiled::fill(p, outline.whole, outline.polygons, outline.boxes, fill, Qt::WindingFill, 32);
@@ -582,8 +593,8 @@ void SketchView::drawText(QPainter& painter, const core::Text& t, const QBrush& 
     };
     const double margin = (edge ? edge->widthF() : 0.0) + 2.0;
     const QRectF bounds = outline.whole.boundingRect().translated(m_pan).adjusted(-margin, -margin, margin, margin);
-    if (!bounds.intersects(QRectF(rect()))) {
-        return;  // (off screen)
+    if (!bounds.intersects(shownArea(painter))) {
+        return;  // (off screen, or out of this band)
     }
     auto direct = [&] {
         painter.save();
@@ -613,12 +624,16 @@ void SketchView::drawText(QPainter& painter, const core::Text& t, const QBrush& 
         mixKey(key, static_cast<std::uint64_t>(edge->color().rgba64()));
         mixKey(key, edge->widthF());
     }
+    // (Locked: the canvas is painted by several threads at once. One makes the picture; the
+    // others wanting it wait for it.)
+    std::unique_lock held(m_cacheLock);
     auto found = m_textPictures.find(key);
     if (found == m_textPictures.end()) {
         if (m_textPicturesWanted.size() > 1024) {
             m_textPicturesWanted.clear();
         }
         if (m_textPicturesWanted.insert(key).second) {
+            held.unlock();
             direct();  // (the first time: likely a zoom passing through)
             return;
         }
@@ -642,7 +657,9 @@ void SketchView::drawText(QPainter& painter, const core::Text& t, const QBrush& 
         m_textPictureBytes += picture.sizeInBytes();
         found = m_textPictures.emplace(key, TextPicture{std::move(picture), area.topLeft()}).first;
     }
-    painter.drawImage((whole + QPointF(found->second.at)) / ratio, found->second.picture);
+    const TextPicture shown = found->second;  // (shared, not copied)
+    held.unlock();
+    painter.drawImage((whole + QPointF(shown.at)) / ratio, shown.picture);
 }
 
 QPainterPath SketchView::textPath(const core::Text& t) const
@@ -652,13 +669,14 @@ QPainterPath SketchView::textPath(const core::Text& t) const
         none.setFillRule(Qt::WindingFill);
         return none;
     }
-    return textOutline(t, textKey(t)).whole.translated(m_pan);
+    return textOutline(t, textKey(t))->whole.translated(m_pan);
 }
 
-const SketchView::TextOutline& SketchView::textOutline(const core::Text& t, std::uint64_t key) const
+std::shared_ptr<const SketchView::TextOutline> SketchView::textOutline(const core::Text& t, std::uint64_t key) const
 {
     // Kept by what it is, where, and the zoom; made without the pan, so scrolling the view
-    // doesn't make it again.
+    // doesn't make it again. (Shared: one thread may clear the cache while another draws it.)
+    const std::scoped_lock held(m_cacheLock);
     if (const auto found = m_textPaths.find(key); found != m_textPaths.end()) {
         return found->second;
     }
@@ -690,7 +708,7 @@ const SketchView::TextOutline& SketchView::textOutline(const core::Text& t, std:
         outline.boxes.push_back(polygon.boundingRect());
         outline.polygons.push_back(std::move(polygon));
     }
-    return m_textPaths.emplace(key, std::move(outline)).first->second;
+    return m_textPaths.emplace(key, std::make_shared<const TextOutline>(std::move(outline))).first->second;
 }
 
 QPolygonF SketchView::textBox(const core::Text& t) const
@@ -739,6 +757,14 @@ core::Id SketchView::textAt(QPointF screen, bool editable) const
 
 const std::map<core::Id, std::optional<core::regions::Region>>& SketchView::fillRegions(core::Id layer) const
 {
+    // (Locked: the canvas is painted by several threads at once. Found before they start: while
+    // they paint, only read.)
+    if (m_fillsFound) {
+        static const std::map<core::Id, std::optional<core::regions::Region>> none;
+        const auto found = m_fillCache.find(layer);
+        return found == m_fillCache.end() ? none : found->second.regions;
+    }
+    const std::scoped_lock held(m_cacheLock);
     const core::Sketch& s = m_doc.sketch();
     if (std::ranges::none_of(s.fills(), [&](const auto& f) { return f.second.layer == layer; })) {
         // (nothing to find: no fingerprint or arrangement of a layer of thousands of curves)
@@ -894,7 +920,7 @@ void SketchView::drawHatch(QPainter& painter, const core::Fill& f, const core::r
         return;
     }
     // Its lines across what of the area is on screen, cut to the area by the clip.
-    const QRectF box = area.boundingRect().intersected(QRectF(rect()).adjusted(-4, -4, 4, 4));
+    const QRectF box = area.boundingRect().intersected(shownArea(painter).adjusted(-4, -4, 4, 4));
     if (box.isEmpty()) {
         return;
     }
@@ -1420,6 +1446,27 @@ void SketchView::resizeEvent(QResizeEvent* event)
     }
 }
 
+namespace
+{
+void scrollImage(QImage& image, QPoint by);
+}  // namespace
+
+QRectF SketchView::shownArea(const QPainter& painter) const
+{
+    // (What of the canvas the painter's image covers: all of it, or a band being painted. An
+    // image's size is in device pixels; the painter's world transform is in logical ones.)
+    QRectF area = QRectF(rect());
+    const QPaintDevice* device = painter.device();
+    if (device && device->devType() == QInternal::Image) {
+        const qreal r = device->devicePixelRatioF();
+        bool invertible = false;
+        const QTransform back = painter.worldTransform().inverted(&invertible);
+        if (invertible) {
+            area = area.intersected(back.mapRect(QRectF(0, 0, device->width() / r, device->height() / r)));
+        }
+    }
+    return area;
+}
 void SketchView::drawBackdrop(QPainter& painter) const
 {
     painter.fillRect(rect(), theme::canvas().background);
@@ -1487,28 +1534,40 @@ void SketchView::paintEvent(QPaintEvent*)
         m_inPaint = false;
         return;
     }
+    // Only panned (by whole device pixels, as the middle button pans): the picture moved by as
+    // much, and only what's come into view painted.
+    if (m_baseKey && !m_base.isNull() && !(*m_baseKey == key)) {
+        BaseKey moved = *m_baseKey;
+        moved.pan = m_pan;
+        const QPointF shift = (m_pan - m_baseKey->pan) * ratio;
+        const QPoint by(qRound(shift.x()), qRound(shift.y()));
+        const int w = m_base.width(), h = m_base.height();
+        if (moved == key && std::abs(shift.x() - by.x()) < 1e-6 && std::abs(shift.y() - by.y()) < 1e-6
+            && std::abs(by.x()) < w && std::abs(by.y()) < h) {
+            scrollImage(m_base, by);
+            std::vector<QRect> uncovered;
+            if (by.x() != 0) {
+                uncovered.push_back(by.x() > 0 ? QRect(0, 0, by.x(), h) : QRect(w + by.x(), 0, -by.x(), h));
+            }
+            const int x0 = std::max(by.x(), 0), x1 = w + std::min(by.x(), 0);  // (the rest, across)
+            if (by.y() != 0 && x1 > x0) {
+                uncovered.push_back(by.y() > 0 ? QRect(x0, 0, x1 - x0, by.y()) : QRect(x0, h + by.y(), x1 - x0, -by.y()));
+            }
+            paintAreas(m_base, uncovered);
+            m_baseKey = key;
+        }
+    }
     if (!m_baseKey || !(*m_baseKey == key) || m_base.isNull()) {
         const qint64 baseStart = m_clock.nsecsElapsed();
         QImage base(QSize(static_cast<int>(std::ceil(width() * ratio)), static_cast<int>(std::ceil(height() * ratio))),
                     QImage::Format_ARGB32_Premultiplied);
         base.setDevicePixelRatio(ratio);
-        QPainter painter(&base);
-        drawBackdrop(painter);
-        // With nothing hovered (that's drawn over it, below).
-        struct Unhover
-        {
-            core::Id& hovered;
-            core::Id was;
-            ~Unhover() { hovered = was; }
-        } unhover{m_hovered, std::exchange(m_hovered, core::kNoId)};
-        drawSketch(painter);
-        painter.end();
+        paintAreas(base, {base.rect()});
         m_base = std::move(base);
         m_baseKey = key;
         m_baseMs = (m_clock.nsecsElapsed() - baseStart) / 1e6;
         m_imageCache.prune();  // (only the pictures just drawn are kept)
-    }
-    QPainter painter(this);
+    }    QPainter painter(this);
     painter.drawImage(QPointF(0, 0), m_base);
     painter.setRenderHint(QPainter::Antialiasing);
     if (m_hovered != core::kNoId) {
@@ -1525,6 +1584,123 @@ void SketchView::paintEvent(QPaintEvent*)
     m_inPaint = false;
 }
 
+namespace
+{
+// Moves an image's pixels by `by` (the edges they leave keep what was there).
+void scrollImage(QImage& image, QPoint by)
+{
+    const int w = image.width(), h = image.height();
+    const qsizetype stride = image.bytesPerLine();
+    const int bytes = image.depth() / 8;
+    uchar* const bits = image.bits();
+    const int across = (w - std::abs(by.x())) * bytes;
+    const int from = std::max(-by.x(), 0) * bytes, to = std::max(by.x(), 0) * bytes;
+    auto row = [&](int y) {  // (row y comes from row y - by.y)
+        std::memmove(bits + y * stride + to, bits + (y - by.y()) * stride + from, static_cast<size_t>(across));
+    };
+    if (by.y() > 0) {
+        for (int y = h - 1; y >= by.y(); --y) {
+            row(y);
+        }
+    }
+    else {
+        for (int y = 0; y < h + by.y(); ++y) {
+            row(y);
+        }
+    }
+}
+}  // namespace
+
+void SketchView::setPaintThreads(int threads)
+{
+    m_paintThreads = threads;
+}
+
+void SketchView::paintAreas(QImage& base, const std::vector<QRect>& areas)
+{
+    if (areas.empty()) {
+        return;
+    }
+    const qreal ratio = base.devicePixelRatio();
+    uchar* const bits = base.bits();  // (its own: not shared)
+    const qsizetype stride = base.bytesPerLine();
+    const QImage::Format format = base.format();
+    // A part of it (device pixels) to paint on its own, as if the whole: its pixels are the
+    // picture's own, so many can be painted at once.
+    auto part = [&](const QRect& r) {
+        QImage view(bits + r.top() * stride + r.left() * (base.depth() / 8), r.width(), r.height(), stride, format);
+        view.setDevicePixelRatio(ratio);
+        return view;
+    };
+    auto onto = [&](QPainter& painter, const QRect& r) { painter.translate(-r.left() / ratio, -r.top() / ratio); };
+    // What's behind, here (its reference images' cache is the main thread's).
+    for (const QRect& r : areas) {
+        QImage view = part(r);
+        QPainter painter(&view);
+        onto(painter, r);
+        drawBackdrop(painter);
+    }
+    // Fill areas found now, so the bands only read them.
+    for (const core::Layer& layer : m_doc.sketch().layers()) {
+        if (layer.visible) {
+            fillRegions(layer.id);
+        }
+    }
+    struct Found
+    {
+        bool& found;
+        ~Found() { found = false; }
+    } found{m_fillsFound = true};
+    // With nothing hovered (that's drawn over it, after).
+    struct Unhover
+    {
+        core::Id& hovered;
+        core::Id was;
+        ~Unhover() { hovered = was; }
+    } unhover{m_hovered, std::exchange(m_hovered, core::kNoId)};
+    // The drawing, in bands of rows, a thread to each (more bands than threads: some bands are
+    // busier than others). Each band draws what reaches it (see shownArea). One thread by default:
+    // each band still goes through every item to find what reaches it, and on drawings like the
+    // 100-tooth gear or the coaster that's most of the work, so more threads were slower.
+    // (Worth it once items are sorted by where they are, once a frame, for the bands to share.)
+    const int threads = std::clamp(m_paintThreads, 1, std::max(1, QThread::idealThreadCount()));
+    constexpr int kMinBand = 48;  // device rows
+    std::vector<QRect> bands;
+    for (const QRect& r : areas) {
+        const int n = threads == 1 ? 1 : std::clamp(r.height() / kMinBand, 1, 2 * threads);
+        for (int k = 0; k < n; ++k) {
+            const int y0 = r.top() + r.height() * k / n, y1 = r.top() + r.height() * (k + 1) / n;
+            bands.emplace_back(r.left(), y0, r.width(), y1 - y0);
+        }
+    }
+    std::atomic<size_t> next{0};
+    std::exception_ptr failed;
+    std::mutex failing;
+    auto paintBands = [&] {
+        for (size_t i; (i = next++) < bands.size();) {
+            try {
+                QImage view = part(bands[i]);
+                QPainter painter(&view);
+                onto(painter, bands[i]);
+                painter.setRenderHint(QPainter::Antialiasing);
+                drawSketch(painter);
+            }
+            catch (...) {
+                const std::scoped_lock held(failing);
+                failed = std::current_exception();
+            }
+        }
+    };
+    const int helpers = std::min(threads, static_cast<int>(bands.size())) - 1;
+    for (int k = 0; k < helpers; ++k) {
+        m_painters->start(paintBands);
+    }
+    paintBands();
+    m_painters->waitForDone();
+    if (failed) {
+        std::rethrow_exception(failed);
+    }
+}
 void SketchView::setImagePreview(std::optional<core::Image> image)
 {
     m_imagePreview = std::move(image);
@@ -1933,6 +2109,13 @@ void SketchView::drawSketch(QPainter& painter, core::Id only) const
         }
         return std::nullopt;
     };
+    // What's out of sight (off screen, or out of the band being painted) isn't drawn: a band's
+    // painter would only clip it away, after working out its outline.
+    const QRectF shown = shownArea(painter);
+    auto outOfSight = [&](const std::optional<QRectF>& box, double margin) {
+        return box && !box->adjusted(-margin, -margin, margin, margin).intersects(shown);
+    };
+
     // Layer by layer, from the bottom: fills, strokes, texts, then the geometry.
     // Presentation view on coloured paper: plain geometry and text in black, as exported.
     const bool onPaper = m_presentation && sketch.page() && sketch.page()->hasColor;
@@ -1956,6 +2139,19 @@ void SketchView::drawSketch(QPainter& painter, core::Id only) const
                 continue;  // its outline is open: nothing to fill until it's closed again
             }
             const auto& region = found->second;
+            {
+                double x0 = 1e300, y0 = 1e300, x1 = -1e300, y1 = -1e300;
+                for (const core::Vec2& p : region->outer) {
+                    const QPointF s = toScreen(p);
+                    x0 = std::min(x0, s.x());
+                    y0 = std::min(y0, s.y());
+                    x1 = std::max(x1, s.x());
+                    y1 = std::max(y1, s.y());
+                }
+                if (x0 <= x1 && outOfSight(QRectF(QPointF(x0, y0), QPointF(x1, y1)), 2.0)) {
+                    continue;
+                }
+            }
             if (f.hatch.active()) {
                 drawHatch(painter, f, *region);
                 continue;
@@ -2000,9 +2196,12 @@ void SketchView::drawSketch(QPainter& painter, core::Id only) const
             faded.setAlphaF(faded.alphaF() * 0.3);
             pen.setColor(faded);
         }
+        decorated.insert(id);
+        if (outOfSight(shownBox(id, sketch.entity(id)), pen.widthF() / 2 + 2.0)) {
+            continue;
+        }
         painter.setPen(pen);
         drawCurve(id, sketch.entity(id));
-        decorated.insert(id);
     }
 
     // Texts: filled faintly with an outline while sketching (in their anchor's colour, or their
@@ -2069,6 +2268,10 @@ void SketchView::drawSketch(QPainter& painter, core::Id only) const
         if (sketch.isPageFrame(id) && !m_selection.contains(id) && id != m_hovered && !constrained.contains(id)) {
             continue;  // (the page's edge shows already: it only lights up)
         }
+        const std::optional<QRectF> box = shownBox(id, e);
+        if (outOfSight(box, kHighlightWidth + 2.0)) {
+            continue;
+        }
         if (m_presentation && decorated.contains(id)) {
             if (!m_selection.contains(id) && id != m_hovered && !constrained.contains(id)) {
                 continue;  // its stroke is what shows
@@ -2089,8 +2292,7 @@ void SketchView::drawSketch(QPainter& painter, core::Id only) const
         }
         // Smaller than its own line is wide (zoomed out): a dot of the pen's size is all it'd show.
         if (!m_selection.contains(id) && id != m_hovered && !constrained.contains(id)) {
-            if (const std::optional<QRectF> box = shownBox(id, e);
-                box && std::max(box->width(), box->height()) < kMinCurveShape) {
+            if (box && std::max(box->width(), box->height()) < kMinCurveShape) {
                 const double w = std::max(painter.pen().widthF(), 1.0);
                 painter.fillRect(QRectF(box->center() - QPointF(w / 2, w / 2), QSizeF(w, w)), painter.pen().color());
                 continue;
@@ -2121,7 +2323,7 @@ void SketchView::drawSketch(QPainter& painter, core::Id only) const
     };
     std::vector<Special> special;
     std::unordered_set<quint64> dotCells;
-    const QRectF onScreen = QRectF(rect()).adjusted(-10, -10, 10, 10);
+    const QRectF onScreen = shownArea(painter).adjusted(-10, -10, 10, 10);
     for (const auto& [id, e] : sketch.entities()) {
         if ((only != core::kNoId && id != only) || e.kind() != core::EntityKind::Point || sketch.isHiddenReference(id)
             || hidden(id) || placedPoints.contains(id)) {
@@ -2143,8 +2345,9 @@ void SketchView::drawSketch(QPainter& painter, core::Id only) const
         const bool marked = sketch.isOrigin(id) || (e.fixed && e.projectedFrom == core::kNoId);
         if (!highlighted && !marked) {
             // Dense (zoomed out): one dot to a few pixels' square is all that can be told apart.
-            const quint64 cell = (static_cast<quint64>(static_cast<quint32>(static_cast<int>(std::floor(at.x() / kDotSpacing)))) << 32)
-                               | static_cast<quint32>(static_cast<int>(std::floor(at.y() / kDotSpacing)));
+            // (Squares fixed to the drawing, not the window: panned, the same dots show.)
+            const quint64 cell = (static_cast<quint64>(static_cast<quint32>(static_cast<int>(std::floor((at.x() - m_pan.x()) / kDotSpacing)))) << 32)
+                               | static_cast<quint32>(static_cast<int>(std::floor((at.y() - m_pan.y()) / kDotSpacing)));
             if (dotCells.insert(cell).second) {
                 dots[color.rgba()] << at;
             }
@@ -2394,9 +2597,14 @@ void SketchView::mousePressEvent(QMouseEvent* event)
 void SketchView::mouseMoveEvent(QMouseEvent* event)
 {
     if (m_panning) {
-        m_pan += event->position() - m_lastMouse;
+        // By whole device pixels (the rest carried to the next move): then the picture of the
+        // drawing can be moved by as much, and only what comes into view painted.
+        const qreal ratio = devicePixelRatioF();
+        const QPointF d = event->position() - m_lastMouse;
+        const QPointF step(std::round(d.x() * ratio) / ratio, std::round(d.y() * ratio) / ratio);
+        m_pan += step;
         m_autoView = AutoView::None;
-        m_lastMouse = event->position();
+        m_lastMouse += step;
         scheduleRepaint();
     }
     else {

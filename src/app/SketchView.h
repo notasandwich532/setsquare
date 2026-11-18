@@ -26,6 +26,7 @@
 #include <optional>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
@@ -59,6 +60,9 @@ public:
     // paintEvent). 0 always does; infinity never.
     void setQuickZoomFrom(double ms) { m_quickZoomFromMs = ms; }
     bool showingQuickZoom() const { return m_showingQuickZoom; }  // the last paint was stretched
+    // How many threads paint the drawing at once (see paintAreas): 1 by default, at most as many
+    // as the computer has cores.
+    void setPaintThreads(int threads);
     void fitAll();  // zoom to show the whole drawing (or reset when it's empty)
 
     // --- tools ---
@@ -262,6 +266,14 @@ private:
     void drawPage(QPainter& painter) const;  // the sheet (see core::Page)
     // What's behind the drawing: the background, reference images, the grid and the page.
     void drawBackdrop(QPainter& painter) const;
+    // Paints parts of ase (a picture of the whole canvas; device pixels) afresh: what's behind,
+    // then the drawing, in bands painted by several threads at once.
+    void paintAreas(QImage& base, const std::vector<QRect>& areas);
+    // The part of the canvas (widget coordinates) painter paints: the whole, or a band.
+    QRectF shownArea(const QPainter& painter) const;
+    class QThreadPool* m_painters = nullptr;
+    mutable bool m_fillsFound = false;  // (while paintAreas' bands paint: fillRegions only reads)
+    int m_paintThreads = 1;
     void drawImages(QPainter& painter, core::Id layer) const;  // a layer's reference images
     // `only`: just that item (drawn over the cached picture as it's hovered), not the rest.
     void drawSketch(QPainter& painter, core::Id only = core::kNoId) const;
@@ -329,8 +341,10 @@ private:
         std::vector<QPolygonF> polygons;
         std::vector<QRectF> boxes;
     };
-    mutable std::unordered_map<std::uint64_t, TextOutline> m_textPaths;
-    const TextOutline& textOutline(const core::Text& text, std::uint64_t key) const;
+    mutable std::unordered_map<std::uint64_t, std::shared_ptr<const TextOutline>> m_textPaths;
+    std::shared_ptr<const TextOutline> textOutline(const core::Text& text, std::uint64_t key) const;
+    // Guards the caches above and below: the canvas is painted by several threads at once.
+    mutable std::mutex m_cacheLock;
     std::uint64_t textKey(const core::Text& text) const;  // what it is, where, and the zoom
     // A text's letters filled, and outlined if `edge`; from a picture of them kept while nothing
     // about them changes (`keep`: the fill is one a key can tell apart, i.e. not a gradient).

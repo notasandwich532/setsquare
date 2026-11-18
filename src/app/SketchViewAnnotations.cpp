@@ -20,6 +20,7 @@
 #include <cmath>
 #include <functional>
 #include <map>
+#include <mutex>
 #include <numbers>
 #include <optional>
 #include <set>
@@ -100,10 +101,13 @@ QByteArray symbolSvg(const QString& name)
 }
 
 // A marker drawn ready to show, at `size` px: its SVG in `color` (or its own colours, if none),
-// with a halo in the canvas colour round it. Cached: drawn once per look.
-QPixmap glyphPixmap(const QByteArray& svg, const QString& key, std::optional<QColor> color, double size, qreal ratio)
+// with a halo in the canvas colour round it. Cached: drawn once per look. (An image, not a pixmap,
+// and the cache locked: the canvas is painted by several threads at once.)
+QImage glyphImage(const QByteArray& svg, const QString& key, std::optional<QColor> color, double size, qreal ratio)
 {
-    static std::unordered_map<std::string, QPixmap> cache;
+    static std::mutex lock;
+    static std::unordered_map<std::string, QImage> cache;
+    const std::scoped_lock held(lock);
     const QColor halo = theme::canvas().background;
     const std::string k = key.toStdString() + '|' + (color ? color->name(QColor::HexArgb).toStdString() : "own") + '|'
         + std::to_string(size) + '|' + std::to_string(ratio) + '|' + halo.name().toStdString();
@@ -137,12 +141,11 @@ QPixmap glyphPixmap(const QByteArray& svg, const QString& key, std::optional<QCo
         p.setOpacity(1.0);
         QSvgRenderer(color ? inColour(*color) : svg).render(&p, at);
     }
-    QPixmap pm = QPixmap::fromImage(image);
-    pm.setDevicePixelRatio(ratio);
+    image.setDevicePixelRatio(ratio);
     if (cache.size() > 500) {
         cache.clear();
     }
-    return cache.emplace(k, pm).first->second;
+    return cache.emplace(k, image).first->second;
 }
 
 // Which entities carry a symbol for this constraint.
@@ -594,12 +597,12 @@ void SketchView::drawAnnotations(QPainter& painter, Id only) const
             // the symbols.
             const bool ownColours = a.icon == QStringLiteral("fix") || a.icon == QStringLiteral("group");
             const std::optional<QColor> tint = plain && ownColours ? std::nullopt : std::optional<QColor>(color);
-            painter.drawPixmap(corner, glyphPixmap(icons::svg(a.icon), QStringLiteral("icon:") + a.icon, tint,
-                                                   drawn, ratio));
+            painter.drawImage(corner, glyphImage(icons::svg(a.icon), QStringLiteral("icon:") + a.icon, tint,
+                                                 drawn, ratio));
             continue;
         }
         if (const QByteArray svg = symbolSvg(a.text); !svg.isEmpty()) {
-            painter.drawPixmap(corner, glyphPixmap(svg, a.text, color, drawn, ratio));
+            painter.drawImage(corner, glyphImage(svg, a.text, color, drawn, ratio));
             continue;
         }
         // Text (a ratio's shares): haloed the same way.
