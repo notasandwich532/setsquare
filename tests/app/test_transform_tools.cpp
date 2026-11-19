@@ -172,6 +172,78 @@ TEST_CASE("Move: turn by an angle about the centre", "[transform][move]")
     CHECK(f.pos(line.p2).y == Approx(5.0).margin(1e-6));
 }
 
+TEST_CASE("Move: turn about a point picked (the corner stays), even when it's picked after the angle", "[transform][move]")
+{
+    Fixture f;
+    f.selectRect();
+    f.view.setTool(ToolKind::Move);
+    const bool angleFirst = GENERATE(false, true);
+    INFO("angle set first " << angleFirst);
+    if (angleFirst) {
+        f.field<QDoubleSpinBox>("angle")->setValue(180);  // (live, about the centre, for now; half a turn keeps its sides level, as they're held)
+    }
+    // The "Rotate about" input is current: the corner, where it shows (turned already, it shows
+    // at (30, 20)). It turns about where the corner was before the move: so it stays put.
+    if (angleFirst) {
+        REQUIRE(f.pos(f.rect.corners[0]).x == Approx(30.0).margin(1e-6));
+        f.click(30, 20);
+    }
+    else {
+        f.click(10, 10);
+    }
+    if (!angleFirst) {
+        f.field<QDoubleSpinBox>("angle")->setValue(180);
+    }
+    CHECK(f.pos(f.rect.corners[0]).x == Approx(10.0).margin(1e-6));  // (live: already turned about it)
+    f.ok();
+    CHECK(f.pos(f.rect.corners[0]).x == Approx(10.0).margin(1e-6));
+    CHECK(f.pos(f.rect.corners[0]).y == Approx(10.0).margin(1e-6));
+    CHECK(f.pos(f.rect.corners[2]).x == Approx(-10.0).margin(1e-6));  // (30, 20) half a turn about (10, 10)
+    CHECK(f.pos(f.rect.corners[2]).y == Approx(0.0).margin(1e-6));
+    REQUIRE(!f.recorded.isEmpty());
+    CHECK(f.recorded.last().contains("about=(10, 10)"));
+    // Replayed, the history does the same.
+    const Vec2 turned = f.pos(f.rect.corners[2]);
+    const QString line = f.recorded.last();
+    f.doc.undo();
+    REQUIRE(f.pos(f.rect.corners[2]).x == Approx(30.0));
+    script::setDocument(&f.doc);
+    const script::RunResult r = script::runConsole(line);
+    script::setDocument(nullptr);
+    INFO(r.error.toStdString());
+    REQUIRE(r.ok);
+    CHECK(f.pos(f.rect.corners[2]).x == Approx(turned.x).margin(1e-6));
+    CHECK(f.pos(f.rect.corners[2]).y == Approx(turned.y).margin(1e-6));
+}
+
+TEST_CASE("Move: turn about anywhere clicked, or copy about it", "[transform][move]")
+{
+    Fixture f;
+    const bool copy = GENERATE(false, true);
+    INFO("copy " << copy);
+    f.selectRect();
+    f.view.setTool(ToolKind::Move);
+    f.click(50, 50);  // empty space
+    CHECK(f.field<SelectionButton>("about")->text().contains("50.0"));
+    f.field<QCheckBox>("copy")->setChecked(copy);
+    f.field<QDoubleSpinBox>("angle")->setValue(180);
+    f.ok();
+    if (copy) {
+        CHECK(f.pos(f.rect.corners[0]).x == Approx(10.0));  // (stays)
+        CHECK(f.count(EntityKind::Line) == 8);
+        bool found = false;  // a copy of the corner at (90, 90)
+        for (const auto& [id, e] : f.sketch().entities()) {
+            if (e.kind() == EntityKind::Point && std::abs(f.pos(id).x - 90) < 1e-6 && std::abs(f.pos(id).y - 90) < 1e-6) {
+                found = true;
+            }
+        }
+        CHECK(found);
+    }
+    else {
+        CHECK(f.pos(f.rect.corners[0]).x == Approx(90.0).margin(1e-6));  // (10, 10) half a turn about (50, 50)
+        CHECK(f.pos(f.rect.corners[0]).y == Approx(90.0).margin(1e-6));
+    }
+}
 TEST_CASE("Scale: pick the point, set the factor", "[transform][scale]")
 {
     Fixture f;

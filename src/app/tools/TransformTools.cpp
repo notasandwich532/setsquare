@@ -436,6 +436,9 @@ void MoveTool::buildPanel()
     const SketchView::ModifyOptions& o = view().modifyOptions();
     m_objects = addPick(QObject::tr("Objects"), "objects", QObject::tr("click the objects to move"),
                         [this](Id id) { return isGeometry(id); }, true);
+    m_about = addPick(QObject::tr("Rotate about"), "about",
+                      QObject::tr("click the point to rotate about, or anywhere (none: the objects' centre)"),
+                      [this](Id id) { return isPoint(id); }, false);
     m_dx = panel()->addNumber(QObject::tr("X distance"), "dx", 0.0, -1e6, 1e6);
     m_dy = panel()->addNumber(QObject::tr("Y distance"), "dy", 0.0, -1e6, 1e6);
     m_angle = panel()->addNumber(QObject::tr("Angle"), "angle", 0.0, -360.0, 360.0, QStringLiteral(" °"));
@@ -472,9 +475,32 @@ void MoveTool::changed()
     }
     view().modifyOptions().copy = m_copy->isChecked();
     const std::vector<Id>& objects = picked(m_objects);
-    if (objects != m_moving) {
+    // What it turns about: the point picked, or the place clicked, or else the objects' centre.
+    // Found with the geometry where it was (the point may be one of those moving).
+    const Id aboutPoint = picked(m_about).empty() ? kNoId : picked(m_about).front();
+    if (aboutPoint != kNoId) {
+        m_hasLocation = false;
+    }
+    if (m_hasLocation) {
+        pickButton(m_about)->setText(QObject::tr("▸ (%1, %2)").arg(m_location.x, 0, 'f', 1).arg(m_location.y, 0, 'f', 1));
+    }
+    if (objects != m_moving || aboutPoint != m_pivotPoint || m_hasLocation != m_pivotLocated
+        || (m_hasLocation && (m_location.x != m_pivotLocation.x || m_location.y != m_pivotLocation.y))
+        || m_moving.empty()) {
         stopLiveMove();  // the geometry goes back before measuring it again
-        m_pivot = centreOf(objects);
+        if (aboutPoint != kNoId) {
+            const core::Point& p = doc().sketch().point(aboutPoint);
+            m_pivot = {p.x, p.y};
+        }
+        else if (m_hasLocation) {
+            m_pivot = m_location;
+        }
+        else {
+            m_pivot = centreOf(objects);
+        }
+        m_pivotPoint = aboutPoint;
+        m_pivotLocated = m_hasLocation;
+        m_pivotLocation = m_location;
     }
     const Motion m = motion();
     const bool still = m.dx == 0.0 && m.dy == 0.0 && m.angle == 0.0;
@@ -516,9 +542,23 @@ bool MoveTool::commit()
     return true;
 }
 
+bool MoveTool::pickLocation(int input, const Snap& snap)
+{
+    if (input != m_about) {
+        return false;
+    }
+    m_location = snap.pos;
+    m_hasLocation = true;
+    setCurrentPick(-1);
+    return true;
+}
+
 void MoveTool::paintPreview(QPainter& painter)
 {
     const std::vector<Id>& objects = picked(m_objects);
+    if (!objects.empty() && (m_pivotPoint != kNoId || m_pivotLocated)) {
+        view().drawSnapMarker(painter, Snap{m_pivot});  // (where it turns about)
+    }
     if (!m_copy->isChecked() || objects.empty()) {
         return;
     }

@@ -109,7 +109,8 @@ private:
     bool m_leaving = false;
 };
 
-// Move/Copy: X and Y distances and an angle about the objects' centre, set in the panel or by
+// Move/Copy: X and Y distances and an angle about a point (picked, or anywhere clicked; else the
+// objects' centre), set in the panel or by
 // dragging the arrows, the rotation knob or the centre square. Moving drags the real geometry,
 // so what's attached follows; "Create copy" copies instead.
 class MoveTool : public CommandTool
@@ -130,6 +131,7 @@ protected:
     QString dragLabel(int id) const override;
     void changed() override;
     void abandon() override;
+    bool pickLocation(int input, const Snap& snap) override;
 
 private:
     struct Motion
@@ -140,11 +142,17 @@ private:
     void stopLiveMove();
 
     int m_objects = 0;
+    int m_about = 0;          // the point to rotate about (optional)
+    bool m_hasLocation = false;  // rotating about a place clicked, not a point
+    core::Vec2 m_location;
     QDoubleSpinBox* m_dx = nullptr;
     QDoubleSpinBox* m_dy = nullptr;
     QDoubleSpinBox* m_angle = nullptr;
     QCheckBox* m_copy = nullptr;
-    core::Vec2 m_pivot;             // the objects' centre when they were picked
+    core::Vec2 m_pivot;  // what it turns about, where it was when picked
+    core::Id m_pivotPoint = core::kNoId;  // (what m_pivot was found from)
+    bool m_pivotLocated = false;
+    core::Vec2 m_pivotLocation;
     std::vector<core::Id> m_moving;  // objects of the live move, if one is open
     Motion m_dragStart;
 };
