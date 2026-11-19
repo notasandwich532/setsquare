@@ -45,7 +45,7 @@ See [docs/scripting.md](docs/scripting.md).
 - `tests/`: Catch2 unit/GUI tests, plus `tests/scripts/*.py` run headless
 
 ## Credits
-Setsquare was developed with [Claude](https://www.anthropic.com/claude), Anthropic's AI model, working in [Claude Code](https://www.anthropic.com/claude-code). The design, the decisions and the testing in use are the author's; Claude wrote much of the code, the tests and the documentation to that direction.
+Setsquare was developed with [Claude](https://www.anthropic.com/claude), Anthropic's AI model, working in [Claude Code](https://www.anthropic.com/claude-code). The design, the decisions and the testing in use are the author's; Claude wrote all of the code, to that direction.
 
 The constraint solver is PlaneGCS, from [FreeCAD](https://www.freecad.org)'s Sketcher.
 
