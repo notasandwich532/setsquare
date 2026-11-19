@@ -43,3 +43,6 @@ See [docs/scripting.md](docs/scripting.md).
 - `src/app/`: `Document` + the recording `Editor` (the command layer), and the Qt application
 - `src/script/`: embedded Python host, the `setsquare` module, and `setsquare-cli`
 - `tests/`: Catch2 unit/GUI tests, plus `tests/scripts/*.py` run headless
+
+## Licence
+Setsquare is free software under the [GNU General Public License v3.0 or later](LICENSE). It's built on PlaneGCS (from FreeCAD, LGPL-2.1-or-later), Qt (LGPL-3.0), Python and other libraries: see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The Windows zip includes all of their licence texts.

@@ -130,6 +130,7 @@ if(WIN32)
             COMMAND "${CMAKE_COMMAND}" "-DBUILD_DIR=${CMAKE_BINARY_DIR}" "-DOUT=${CMAKE_BINARY_DIR}/package"
                     "-DAPP=$<TARGET_FILE:setsquare>" "-DCLI=$<TARGET_FILE:setsquare-cli>"
                     "-DWINDEPLOYQT=${WINDEPLOYQT}" "-DVERSION=${PROJECT_VERSION}"
+                    "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}" "-DVCPKG_SHARE=${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share"
                     -P "${PROJECT_SOURCE_DIR}/tools/package.cmake"
             DEPENDS setsquare setsquare-cli
             COMMENT "Packaging Setsquare to share"

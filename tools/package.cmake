@@ -7,14 +7,16 @@
 #
 # In it: setsquare.exe and setsquare-cli.exe; Qt (its DLLs and plugins, put there by windeployqt);
 # the other DLLs the build uses (Python's, zlib, ...); the bundled Python (python/); Microsoft's C++
-# runtime (so the Visual C++ Redistributable needn't be installed); a READ ME. Not the tests, the
+# runtime (so the Visual C++ Redistributable needn't be installed); the licences (Setsquare's, GPL-3.0,
+# and everything else's in licenses/); a READ ME. Not the tests, the
 # build's own files or debugging symbols.
 #
-# Expects: BUILD_DIR, OUT, APP, CLI, WINDEPLOYQT, VERSION; the C++ runtime is found from the
+# Expects: BUILD_DIR, OUT, APP, CLI, WINDEPLOYQT, VERSION, SOURCE_DIR, VCPKG_SHARE (vcpkg's share/,
+# for the libraries' copyright files); the C++ runtime is found from the
 # Visual Studio environment (VCToolsRedistDir), else looked for where Visual Studio installs it.
 
 cmake_minimum_required(VERSION 3.21)
-foreach(var BUILD_DIR OUT APP CLI WINDEPLOYQT)
+foreach(var BUILD_DIR OUT APP CLI WINDEPLOYQT SOURCE_DIR VCPKG_SHARE)
     if(NOT ${var})
         message(FATAL_ERROR "package.cmake: ${var} not set")
     endif()
@@ -75,6 +77,34 @@ list(GET crt 0 crt)
 file(GLOB crt_dlls "${crt}/*.dll")
 file(COPY ${crt_dlls} DESTINATION "${dest}")
 
+# The licences: Setsquare's (GPL-3.0-or-later), what it's built on (THIRD_PARTY_NOTICES), and their
+# texts in licenses/: PlaneGCS's and Qt's, and the copyright file vcpkg keeps for each library it
+# built (not its own build tools, nor Catch2: the tests aren't here; Boost's dozens are one).
+file(COPY_FILE "${SOURCE_DIR}/LICENSE" "${dest}/LICENSE.txt")
+file(COPY_FILE "${SOURCE_DIR}/THIRD_PARTY_NOTICES.md" "${dest}/THIRD_PARTY_NOTICES.txt")
+file(MAKE_DIRECTORY "${dest}/licenses")
+file(COPY_FILE "${SOURCE_DIR}/third_party/planegcs/LICENSE" "${dest}/licenses/PlaneGCS (LGPL-2.1).txt")
+file(COPY_FILE "${SOURCE_DIR}/licenses/LGPL-3.0.txt" "${dest}/licenses/Qt (LGPL-3.0).txt")
+file(GLOB ports LIST_DIRECTORIES true "${VCPKG_SHARE}/*")
+set(boost_done FALSE)
+foreach(port IN LISTS ports)
+    get_filename_component(name "${port}" NAME)
+    if(NOT EXISTS "${port}/copyright" OR name MATCHES "^(vcpkg-|pkgconf$|catch2$)")
+        continue()
+    endif()
+    if(name MATCHES "^boost-")
+        if(boost_done)
+            continue()
+        endif()
+        set(name "boost")
+        set(boost_done TRUE)
+    endif()
+    file(COPY_FILE "${port}/copyright" "${dest}/licenses/${name}.txt")
+endforeach()
+if(NOT EXISTS "${dest}/licenses/python3.txt")
+    message(FATAL_ERROR "no copyright file for Python in ${VCPKG_SHARE}")
+endif()
+
 # A note for whoever it's given to.
 file(WRITE "${dest}/READ ME.txt"
 "Setsquare ${VERSION}
@@ -96,6 +126,11 @@ Drawings are .setsq files, saved wherever you choose. Text uses the fonts instal
 setsquare-cli.exe runs Python scripts on drawings without opening a window:
     setsquare-cli script.py
     setsquare-cli --open drawing.setsq -c \"print(s.dof)\"
+
+Setsquare is free software: you can share and change it under the GNU General Public License,
+version 3 or later (LICENSE.txt). It comes with no warranty. Its source code is on the GitHub page
+this came from (under Releases, this version's \"Source code\"). What it's built on, and those
+licences, are in THIRD_PARTY_NOTICES.txt and licenses/.
 ")
 
 # Zipped.

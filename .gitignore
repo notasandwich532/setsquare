@@ -5,3 +5,9 @@ CMakeUserPresets.json
 .vs/
 .vscode/
 *.user
+
+# Personal: drawings and screenshots made while working on it
+/drawings/
+/*.png
+/ui example/*.png
+!/ui example/pattern.png
