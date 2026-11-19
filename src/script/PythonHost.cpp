@@ -1872,11 +1872,21 @@ PYBIND11_EMBEDDED_MODULE(setsquare, m)
                 const double f = double(i) / steps;
                 call.target().dragMove(dx * f, dy * f, angle * f, centre);
             }
+            const size_t dropped = call.target().droppedByTurn().size();
             call.target().endDrag();
+            if (dropped > 0) {
+                const std::string text = "move: turning dropped " + std::to_string(dropped)
+                    + (dropped == 1 ? " horizontal/vertical constraint" : " horizontal/vertical constraints")
+                    + " (they'd have stopped it turning)";
+                if (PyErr_WarnEx(PyExc_UserWarning, text.c_str(), 1) < 0) {
+                    throw py::error_already_set();  // (warnings made errors)
+                }
+            }
         }, py::arg("items"), py::arg("dx") = 0.0, py::arg("dy") = 0.0, py::arg("angle") = 0.0,
            py::arg("about") = py::make_tuple(0, 0),
            "Move items rigidly: turn by `angle` degrees about `about`, then shift by (dx, dy). Connected geometry "
-           "follows as the constraints allow, as when dragging.")
+           "follows as the constraints allow, as when dragging. Turned other than by half turns, horizontal and "
+           "vertical constraints held within the items are dropped (with a warning): they'd stop it turning.")
 
         // appearance
         .def("stroke", [](const SketchH&, py::handle curves, py::object color, py::object width, py::object dash) {

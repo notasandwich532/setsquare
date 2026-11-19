@@ -51,6 +51,9 @@ public:
     QLineEdit* addText(const QString& label, const char* name, const QString& text,
                        const QString& placeholder = {});
     void addWidget(const QString& label, QWidget* input);  // any other input (owned by the panel)
+    // A line of warning across the panel, hidden while it's empty (setNote).
+    class QLabel* addNote(const char* name);
+    void setNote(class QLabel* note, const QString& text);
     void addButtons();  // OK and Cancel
     void setRowVisible(QWidget* input, bool visible);
     void setRowLabel(QWidget* input, const QString& label);

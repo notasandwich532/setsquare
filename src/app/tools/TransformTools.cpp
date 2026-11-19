@@ -443,6 +443,44 @@ void MoveTool::buildPanel()
     m_dy = panel()->addNumber(QObject::tr("Y distance"), "dy", 0.0, -1e6, 1e6);
     m_angle = panel()->addNumber(QObject::tr("Angle"), "angle", 0.0, -360.0, 360.0, QStringLiteral(" °"));
     m_copy = panel()->addCheck(QObject::tr("Create copy"), "copy", o.copy);
+    m_note = panel()->addNote("turnNote");
+}
+
+namespace
+{
+QString constraintCount(size_t n)
+{
+    return n == 1 ? QObject::tr("1 horizontal/vertical constraint")
+                  : QObject::tr("%1 horizontal/vertical constraints").arg(n);
+}
+}  // namespace
+
+QString MoveTool::turnNote() const
+{
+    const std::vector<Id>& objects = picked(m_objects);
+    if (objects.empty()) {
+        return {};
+    }
+    if (m_copy->isChecked()) {
+        // (A copy turned by right angles has them swapped; by anything else, they're left out.)
+        if (std::abs(std::remainder(m_angle->value(), 90.0)) <= 1e-9) {
+            return {};
+        }
+        const std::vector<Id> ids = core::xform::expand(doc().sketch(), objects);
+        const std::set<Id> in(ids.begin(), ids.end());
+        size_t n = 0;
+        for (const auto& [id, c] : doc().sketch().constraints()) {
+            const bool axial = c.type == core::ConstraintType::Horizontal || c.type == core::ConstraintType::Vertical
+                            || c.type == core::ConstraintType::HorizontalDistance
+                            || c.type == core::ConstraintType::VerticalDistance;
+            n += axial && std::ranges::all_of(c.refs, [&](Id r) { return in.contains(r); });
+        }
+        return n == 0 ? QString()
+                      : QObject::tr("⚠ The copy leaves out %1: turned, they wouldn't hold.").arg(constraintCount(n));
+    }
+    const size_t n = doc().droppedByTurn().size();
+    return n == 0 ? QString()
+                  : QObject::tr("⚠ Turning drops %1: they'd stop it turning.").arg(constraintCount(n));
 }
 
 MoveTool::Motion MoveTool::motion() const
@@ -470,9 +508,15 @@ void MoveTool::abandon()
 
 void MoveTool::changed()
 {
-    if (!m_dx) {
+    if (!m_note) {
         return;  // still building the panel
     }
+    liveMove();
+    panel()->setNote(m_note, turnNote());
+}
+
+void MoveTool::liveMove()
+{
     view().modifyOptions().copy = m_copy->isChecked();
     const std::vector<Id>& objects = picked(m_objects);
     // What it turns about: the point picked, or the place clicked, or else the objects' centre.
@@ -528,16 +572,21 @@ void MoveTool::changed()
 bool MoveTool::commit()
 {
     const Motion m = motion();
+    const QString note = turnNote();  // (said again once the panel's gone)
     if (m_copy->isChecked()) {
         stopLiveMove();
         const std::vector<Id> objects = picked(m_objects);
         const Vec2 about = m_pivot;
-        return view().tryEdit(QObject::tr("Copy"),
-                              [&](Editor& ed) { ed.copy(objects, m.dx, m.dy, m.angle, about); });
+        if (!view().tryEdit(QObject::tr("Copy"), [&](Editor& ed) { ed.copy(objects, m.dx, m.dy, m.angle, about); })) {
+            return false;
+        }
     }
-    if (!m_moving.empty()) {
+    else if (!m_moving.empty()) {
         doc().endDrag();  // one undo step, recorded as s.move(...)
         m_moving.clear();
+    }
+    if (!note.isEmpty()) {
+        emit view().message(note);
     }
     return true;
 }

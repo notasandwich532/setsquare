@@ -537,8 +537,31 @@ void Document::beginDrag(const std::vector<core::Id>& points)
     m_dragIsMove = false;
     m_dragAngle = 0.0;
     m_dragAbout = {};
+    m_dragDropped.clear();
     m_dragSolver = std::make_unique<core::Solver>(m_sketch, m_sketch.activeLayer());
     m_dragSolver->beginDrag(points);
+}
+
+std::vector<core::Id> Document::levelConstraints(const core::Sketch& s, const std::vector<core::Id>& points)
+{
+    const std::set<core::Id> moving(points.begin(), points.end());
+    std::vector<core::Id> out;
+    for (const auto& [id, c] : s.constraints()) {
+        if (c.type != core::ConstraintType::Horizontal && c.type != core::ConstraintType::Vertical) {
+            continue;
+        }
+        const bool within = std::ranges::all_of(c.refs, [&](core::Id r) {
+            if (!s.hasEntity(r)) {
+                return false;
+            }
+            const std::vector<core::Id> defining = s.definingPoints(r);
+            return std::ranges::all_of(defining, [&](core::Id p) { return moving.contains(p); });
+        });
+        if (within) {
+            out.push_back(id);
+        }
+    }
+    return out;
 }
 
 void Document::beginDragEdge(core::Id roundEntity, double x, double y)
@@ -576,6 +599,23 @@ void Document::dragMove(double dx, double dy, double angle, core::Vec2 about)
 {
     if (!m_dragSolver) {
         return;
+    }
+    // Turned other than by half turns, the horizontal and vertical constraints held within what's
+    // moving would stop it turning: dropped (see droppedByTurn), the drag started again without
+    // them from where it began. Turned back to a half turn, they're kept again. (So the angle it
+    // ends at decides, and s.move(...) does the same again.)
+    const bool turned = std::abs(std::remainder(angle, 180.0)) > 1e-9;
+    std::vector<core::Id> dropping = turned ? levelConstraints(m_beforeDrag, m_dragPoints) : std::vector<core::Id>();
+    if (dropping != m_dragDropped) {
+        m_sketch = m_beforeDrag;
+        for (core::Id id : dropping) {
+            m_sketch.remove(id);
+        }
+        m_dragDropped = std::move(dropping);
+        m_dragMoved = false;  // (back where it began, for now)
+        m_dragSolver = std::make_unique<core::Solver>(m_sketch, m_sketch.activeLayer());
+        m_dragSolver->beginDrag(m_dragPoints);
+        emit changed();
     }
     const core::Affine t = Editor::moveMap(dx, dy, angle, about);
     if (m_dragSolver->dragMap([&](core::Vec2 p) { return t.apply(p); })) {
@@ -621,7 +661,11 @@ void Document::endDrag()
         commit(std::move(now));
         record(python);
     }
+    else {
+        m_sketch = std::move(m_beforeDrag);  // (nothing moved: no constraint dropped either)
+    }
     m_beforeDrag = {};
+    m_dragDropped.clear();
     resolve();
     emit changed();
 }
@@ -634,6 +678,7 @@ void Document::cancelDrag()
     m_dragSolver.reset();
     m_sketch = std::move(m_beforeDrag);
     m_beforeDrag = {};
+    m_dragDropped.clear();
     resolve();
     emit changed();
 }

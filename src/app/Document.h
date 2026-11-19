@@ -101,6 +101,11 @@ public:
     // Moves the dragged points rigidly: turned by `angle` degrees about `about`, then shifted.
     // Recorded as s.move(...).
     void dragMove(double dx, double dy, double angle, core::Vec2 about);
+    // The horizontal/vertical constraints the move under way has dropped: turned other than by
+    // half turns, they'd stop it (ids as they were before the drag). Empty if none.
+    const std::vector<core::Id>& droppedByTurn() const { return m_dragDropped; }
+    // The horizontal and vertical constraints held entirely within these points.
+    static std::vector<core::Id> levelConstraints(const core::Sketch& sketch, const std::vector<core::Id>& points);
     void endDrag();
     void cancelDrag();  // restores the sketch to how it was when the drag began
     bool isDragging() const { return m_dragSolver != nullptr; }
@@ -218,6 +223,7 @@ private:
     bool m_dragIsMove = false;  // dragMove() rather than dragTo()
     double m_dragAngle = 0.0;
     core::Vec2 m_dragAbout;
+    std::vector<core::Id> m_dragDropped;
     core::Id m_labelDimension = core::kNoId;
 
     int m_transactionDepth = 0;

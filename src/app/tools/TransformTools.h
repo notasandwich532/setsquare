@@ -140,6 +140,10 @@ private:
     };
     Motion motion() const;
     void stopLiveMove();
+    void liveMove();  // the geometry moved as the panel says (or put back, copying)
+    // A warning of what turning loses: horizontal/vertical constraints dropped (or left out of
+    // a copy); empty if nothing.
+    QString turnNote() const;
 
     int m_objects = 0;
     int m_about = 0;          // the point to rotate about (optional)
@@ -149,6 +153,7 @@ private:
     QDoubleSpinBox* m_dy = nullptr;
     QDoubleSpinBox* m_angle = nullptr;
     QCheckBox* m_copy = nullptr;
+    class QLabel* m_note = nullptr;
     core::Vec2 m_pivot;  // what it turns about, where it was when picked
     core::Id m_pivotPoint = core::kNoId;  // (what m_pivot was found from)
     bool m_pivotLocated = false;

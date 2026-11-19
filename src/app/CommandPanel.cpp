@@ -163,6 +163,29 @@ QCheckBox* CommandPanel::addCheck(const QString& label, const char* name, bool c
     return box;
 }
 
+QLabel* CommandPanel::addNote(const char* name)
+{
+    auto* note = new QLabel(this);
+    note->setObjectName(QLatin1String(name));
+    note->setWordWrap(true);
+    note->setStyleSheet(QStringLiteral("color: #f2b33d;"));  // (a warning's amber)
+    m_form->addRow(note);
+    m_form->setRowVisible(note, false);
+    adjustSize();
+    place();
+    return note;
+}
+
+void CommandPanel::setNote(QLabel* note, const QString& text)
+{
+    if (note->text() == text && m_form->isRowVisible(note) == !text.isEmpty()) {
+        return;
+    }
+    note->setText(text);
+    m_form->setRowVisible(note, !text.isEmpty());
+    adjustSize();
+    place();
+}
 void CommandPanel::addWidget(const QString& label, QWidget* input)
 {
     input->setParent(this);

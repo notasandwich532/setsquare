@@ -17,6 +17,7 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QLabel>
 #include <QCoreApplication>
 #include <QDoubleSpinBox>
 #include <QLineEdit>
@@ -242,6 +243,91 @@ TEST_CASE("Move: turn about anywhere clicked, or copy about it", "[transform][mo
     else {
         CHECK(f.pos(f.rect.corners[0]).x == Approx(90.0).margin(1e-6));  // (10, 10) half a turn about (50, 50)
         CHECK(f.pos(f.rect.corners[0]).y == Approx(90.0).margin(1e-6));
+    }
+}
+namespace
+{
+size_t levelCount(const Sketch& s)
+{
+    return static_cast<size_t>(std::ranges::count_if(s.constraints(), [](const auto& kv) {
+        return kv.second.type == ConstraintType::Horizontal || kv.second.type == ConstraintType::Vertical;
+    }));
+}
+}  // namespace
+
+TEST_CASE("Move: turning by other than half turns drops the horizontal/vertical constraints, and says so", "[transform][move]")
+{
+    Fixture f;
+    const size_t level = levelCount(f.sketch());
+    REQUIRE(level == 4);  // (the rectangle's)
+    QStringList messages;
+    QObject::connect(&f.view, &SketchView::message, [&](const QString& m) { messages << m; });
+    f.selectRect();
+    f.view.setTool(ToolKind::Move);
+    f.click(10, 10);  // about the corner
+    auto* angle = f.field<QDoubleSpinBox>("angle");
+    auto* note = f.field<QLabel>("turnNote");
+
+    SECTION("A quarter turn: dropped (live), and the warning; OK keeps it, one undo step back")
+    {
+        angle->setValue(90);
+        CHECK(levelCount(f.sketch()) == 0);
+        CHECK(f.pos(f.rect.corners[2]).x == Approx(0.0).margin(1e-6));  // (turned, live)
+        CHECK(note->isVisibleTo(note->parentWidget()));
+        CHECK(note->text().contains("drops 4 horizontal/vertical constraints"));
+        f.ok();
+        CHECK(f.pos(f.rect.corners[2]).y == Approx(30.0).margin(1e-6));
+        CHECK(levelCount(f.sketch()) == 0);
+        CHECK(f.doc.solveResult().ok);
+        REQUIRE(!messages.isEmpty());
+        CHECK(messages.last().contains("drops 4"));
+        // Replayed, the history does the same.
+        const QString line = f.recorded.last();
+        f.doc.undo();
+        CHECK(levelCount(f.sketch()) == 4);
+        CHECK(f.pos(f.rect.corners[2]).x == Approx(30.0));
+        script::setDocument(&f.doc);
+        const script::RunResult r = script::runConsole(line);
+        script::setDocument(nullptr);
+        INFO(r.error.toStdString());
+        REQUIRE(r.ok);
+        CHECK(levelCount(f.sketch()) == 0);
+        CHECK(f.pos(f.rect.corners[2]).x == Approx(0.0).margin(1e-6));
+        CHECK(f.pos(f.rect.corners[2]).y == Approx(30.0).margin(1e-6));
+    }
+    SECTION("Back to a half turn: kept again, no warning")
+    {
+        angle->setValue(30);
+        CHECK(levelCount(f.sketch()) == 0);
+        angle->setValue(180);
+        CHECK(levelCount(f.sketch()) == 4);
+        CHECK(!note->isVisibleTo(note->parentWidget()));
+        f.ok();
+        CHECK(levelCount(f.sketch()) == 4);
+        CHECK(f.pos(f.rect.corners[2]).x == Approx(-10.0).margin(1e-6));
+        CHECK(messages.isEmpty());
+    }
+    SECTION("Esc: they come back")
+    {
+        angle->setValue(45);
+        f.view.setFocus();
+        QTest::keyClick(&f.view, Qt::Key_Escape);
+        f.settle();
+        CHECK(levelCount(f.sketch()) == 4);
+        CHECK(f.pos(f.rect.corners[2]).x == Approx(30.0));
+    }
+    SECTION("A copy turned by 30 degrees leaves them out (said so); by 90, swapped (nothing said)")
+    {
+        f.field<QCheckBox>("copy")->setChecked(true);
+        angle->setValue(90);
+        CHECK(!note->isVisibleTo(note->parentWidget()));
+        angle->setValue(30);
+        CHECK(note->text().contains("copy leaves out 4"));
+        f.ok();
+        CHECK(levelCount(f.sketch()) == 4);  // (the original's)
+        CHECK(f.count(EntityKind::Line) == 8);
+        REQUIRE(!messages.isEmpty());
+        CHECK(messages.last().contains("leaves out 4"));
     }
 }
 TEST_CASE("Scale: pick the point, set the factor", "[transform][scale]")
