@@ -6,11 +6,14 @@
 
 #include <core/Builders.h>
 #include <core/Export.h>
+#include <core/Hatch.h>
 #include <core/Regions.h>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <QFile>
+#include <algorithm>
+#include <cmath>
 #include <QFileInfo>
 #include <QImage>
 #include <QImageReader>
@@ -248,4 +251,56 @@ TEST_CASE("PNG and JPG export: the page at the resolution asked, as the PDF draw
         CHECK(error.contains(QStringLiteral("too big")));
         CHECK(!QFile::exists(dir.filePath(QStringLiteral("huge.png"))));
     }
+}
+
+TEST_CASE("Image export: a hatch's lines stop at its area's edge (their ends don't stick out past it)", "[export][image]")
+{
+    Document doc;
+    doc.modify("circle", [&](Sketch& s) { s.addCircle(0, 0, 20); });
+    const Id fill = [&] {
+        Id id = kNoId;
+        doc.edit("fill", [&](Editor& ed) { id = ed.fill({0, 0}, Color{0, 200, 0, 255}); });
+        return id;
+    }();
+    Hatch thick = *hatch::builtin("ANSI31");  // (at 45 degrees: every line meets the circle at a slant)
+    thick.scale = 3;
+    thick.width = 1.2;  // mm: ends would stick out by up to 0.6
+    doc.edit("hatch", [&](Editor& ed) { ed.setFillHatch(fill, thick); });
+
+    // The pieces: the hatch on its own, with the circle to clip it to.
+    exporter::SvgOptions o;
+    o.undecorated = false;  // (no black edge over where the ends would be)
+    o.margin = 5;
+    exporter::SvgOptions asLines = o;
+    asLines.hatchLines = true;  // (as the PDF and image exports have them)
+    const exporter::SvgPieces pieces = exporter::toSvgPieces(doc.sketch(), asLines);
+    REQUIRE(pieces.clips.size() == pieces.svgs.size());
+    CHECK(std::ranges::count_if(pieces.clips, [](const auto& c) { return !c.empty(); }) == 1);
+    CHECK(exporter::toSvg(doc.sketch(), [&] {
+              exporter::SvgOptions lines = o;
+              lines.hatchLines = true;
+              return lines;
+          }()).find("clip-path=\"url(#") != std::string::npos);  // (the SVG clips them itself)
+
+    QTemporaryDir dir;
+    const QString path = dir.filePath(QStringLiteral("hatch.png"));
+    Document::ImageOptions image;
+    image.dpi = 254;  // 10 pixels a mm
+    REQUIRE(doc.exportImage(path, o, image));
+    const QImage png = readImage(path);
+    const QPointF centre(png.width() / 2.0, png.height() / 2.0);  // (the circle's, with the margin even round it)
+    int inside = 0, outside = 0;
+    for (int y = 0; y < png.height(); ++y) {
+        for (int x = 0; x < png.width(); ++x) {
+            const QColor p = png.pixelColor(x, y);
+            if (!(p.green() > 120 && p.red() < 100)) {
+                continue;
+            }
+            const double r = std::hypot(x + 0.5 - centre.x(), y + 0.5 - centre.y()) / 10.0;  // mm
+            inside += r < 19.5;
+            outside += r > 20.15;  // (past the edge and its antialiasing)
+        }
+    }
+    CHECK(inside > 1000);
+    CHECK(outside == 0);
 }

@@ -922,6 +922,7 @@ std::string writeSvg(const Sketch& s, const SvgOptions& o, SvgPieces* pieces)
         }
     };
 
+    int hatchClips = 0;  // (ids for the hatches' clip paths)
     for (const Group& g : groups) {
         out << "  <g id=\"layer" << g.layer->id << "\" inkscape:groupmode=\"layer\" inkscape:label=\""
             << xmlEscape(g.layer->name) << "\">\n";
@@ -930,25 +931,7 @@ std::string writeSvg(const Sketch& s, const SvgOptions& o, SvgPieces* pieces)
         if (!g.fills.empty()) {
             group("fills", "Fills");
             for (const Area& a : g.fills) {
-                // A hatch: its tile as a pattern; else its lines, cut exactly to the area (dots as
-                // round caps on no length).
-                std::optional<std::string> pattern =
-                    a.hatch.active() && !o.hatchLines ? hatchPaint(a.hatch, a.color) : std::nullopt;
-                std::vector<hatch::Segment> segments;
-                if (a.hatch.active() && !pattern && hatch::within(a.hatch, a.region, 2000000, segments)) {
-                    std::string lines;
-                    for (const hatch::Segment& p : segments) {
-                        lines += "M" + X(p.a.x) + ',' + Y(p.a.y) + (p.a.x == p.b.x && p.a.y == p.b.y ? std::string(" l0,0 ") : " L" + X(p.b.x) + ',' + Y(p.b.y) + ' ');
-                    }
-                    if (!lines.empty()) {
-                        lines.pop_back();
-                        out << indent << "  <path d=\"" << lines << "\" fill=\"none\" stroke=\"" << rgb(a.color) << '"'
-                            << (a.color.a < 255 ? " stroke-opacity=\"" + num(a.color.a / 255.0) + '"' : std::string())
-                            << " stroke-width=\"" << num(a.hatch.width > 0 ? a.hatch.width : kHairline)
-                            << "\" stroke-linecap=\"round\"/>\n";
-                    }
-                    continue;
-                }
+                // Its outline (exact where its curves are).
                 std::string d;
                 const std::vector<Along>& along = curvesOf(g.layer->id);
                 auto loop = [&](const std::vector<Vec2>& pts) {
@@ -966,6 +949,59 @@ std::string writeSvg(const Sketch& s, const SvgOptions& o, SvgPieces* pieces)
                     loop(hole);
                 }
                 d.pop_back();
+                // A hatch: its tile as a pattern; else its lines, cut to the area and clipped to its
+                // outline too (cut at their middles, their ends would stick out by half their width
+                // where they meet it at a slant; dots as round caps on no length).
+                std::optional<std::string> pattern =
+                    a.hatch.active() && !o.hatchLines ? hatchPaint(a.hatch, a.color) : std::nullopt;
+                std::vector<hatch::Segment> segments;
+                if (a.hatch.active() && !pattern && hatch::within(a.hatch, a.region, 2000000, segments)) {
+                    std::string lines;
+                    for (const hatch::Segment& p : segments) {
+                        lines += "M" + X(p.a.x) + ',' + Y(p.a.y) + (p.a.x == p.b.x && p.a.y == p.b.y ? std::string(" l0,0 ") : " L" + X(p.b.x) + ',' + Y(p.b.y) + ' ');
+                    }
+                    if (!lines.empty()) {
+                        lines.pop_back();
+                        const std::string clip = prefix + "hatch-clip" + std::to_string(++hatchClips);
+                        if (pieces) {
+                            // (Qt's SVG renderer ignores clip paths: in a piece of its own, with its
+                            // outline for the painter to clip it to. See SvgPieces.)
+                            pieces->svgs.push_back(out.str() + "    </g>\n  </g>\n");
+                            pieces->texts.emplace_back();
+                            pieces->clips.resize(pieces->svgs.size());
+                            out.str({});
+                            out << "  <g>\n    <g>\n";
+                        }
+                        out << indent << "  <defs><clipPath id=\"" << clip << "\"><path d=\"" << d
+                            << "\" clip-rule=\"evenodd\"/></clipPath></defs>\n";
+                        out << indent << "  <path d=\"" << lines << "\" fill=\"none\" stroke=\"" << rgb(a.color) << '"'
+                            << (a.color.a < 255 ? " stroke-opacity=\"" + num(a.color.a / 255.0) + '"' : std::string())
+                            << " stroke-width=\"" << num(a.hatch.width > 0 ? a.hatch.width : kHairline)
+                            << "\" stroke-linecap=\"round\" clip-path=\"url(#" << clip << ")\"/>\n";
+                        if (pieces) {
+                            pieces->svgs.push_back(out.str() + "    </g>\n  </g>\n");
+                            pieces->texts.emplace_back();
+                            std::vector<std::vector<Vec2>> outline;
+                            auto onPage = [&](const std::vector<Vec2>& pts) {
+                                std::vector<Vec2> loop;
+                                loop.reserve(pts.size());
+                                for (const Vec2& p : pts) {
+                                    loop.push_back({p.x - x0 + m, y1 - p.y + m});
+                                }
+                                outline.push_back(std::move(loop));
+                            };
+                            onPage(a.region.outer);
+                            for (const auto& hole : a.region.holes) {
+                                onPage(hole);
+                            }
+                            pieces->clips.resize(pieces->svgs.size());
+                            pieces->clips.back() = std::move(outline);
+                            out.str({});
+                            out << "  <g>\n    <g>\n";
+                        }
+                    }
+                    continue;
+                }
                 out << indent << "  <path d=\"" << d << '"'
                     << (pattern ? " fill=\"" + *pattern + '"' : paintAttrs("fill", a.color, a.gradient))
                     << " fill-rule=\"evenodd\" stroke=\"none\"/>\n";
@@ -1131,6 +1167,7 @@ std::string writeSvg(const Sketch& s, const SvgOptions& o, SvgPieces* pieces)
         }
         pieces->svgs.push_back(head + defsPart + out.str());
         pieces->texts.emplace_back();  // (nothing after the last)
+        pieces->clips.resize(pieces->svgs.size());
     }
     return head + defsPart + out.str();
 }

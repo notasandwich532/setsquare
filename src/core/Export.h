@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Geometry.h"
 #include "Sketch.h"
 
 #include <array>
@@ -68,6 +69,10 @@ struct SvgPieces
 {
     std::vector<std::string> svgs;
     std::vector<std::vector<PlacedTextRun>> texts;  // texts[i]: drawn after svgs[i]
+    // clips[i]: loops (in its units, from its top left, y down; even-odd) to clip svgs[i] to, or
+    // none. A hatch drawn as its lines is a piece of its own, clipped to its area's outline (Qt's
+    // SVG renderer ignores clip-path; the lines' ends would stick out past it).
+    std::vector<std::vector<std::vector<Vec2>>> clips;
 };
 SvgPieces toSvgPieces(const Sketch& sketch, const SvgOptions& options = {});
 

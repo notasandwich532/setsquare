@@ -20,6 +20,7 @@
 #include <QFileInfo>
 #include <QPageLayout>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPdfWriter>
 #include <QSaveFile>
 #include <QSvgRenderer>
@@ -954,6 +955,24 @@ void paintPieces(QPainter& painter, const core::exporter::SvgPieces& pieces, con
     painter.setRenderHint(QPainter::TextAntialiasing);
     const QRectF pageRect(0, 0, mm.width() * perMm, mm.height() * perMm);
     for (size_t i = 0; i < pieces.svgs.size(); ++i) {
+        if (i < pieces.clips.size() && !pieces.clips[i].empty()) {
+            QPainterPath outline;
+            outline.setFillRule(Qt::OddEvenFill);
+            for (const auto& loop : pieces.clips[i]) {
+                QPolygonF polygon;
+                polygon.reserve(static_cast<qsizetype>(loop.size()));
+                for (const core::Vec2& p : loop) {
+                    polygon << QPointF(p.x * perMm, p.y * perMm);
+                }
+                outline.addPolygon(polygon);
+                outline.closeSubpath();
+            }
+            painter.save();
+            painter.setClipPath(outline, Qt::IntersectClip);
+            QSvgRenderer(QByteArray::fromStdString(pieces.svgs[i])).render(&painter, pageRect);
+            painter.restore();
+            continue;  // (a hatch: no text after it)
+        }
         QSvgRenderer(QByteArray::fromStdString(pieces.svgs[i])).render(&painter, pageRect);
         for (const core::exporter::PlacedTextRun& r : pieces.texts[i]) {
             if (r.size <= 0.0 || r.text.empty()) {
