@@ -2,6 +2,8 @@
 
 #include "tools/Tool.h"
 
+#include "Document.h"
+
 #include <core/Export.h>
 
 #include <QMainWindow>
@@ -55,6 +57,7 @@ private:
     void exportSvg();    // options, then where to
     void exportDxf();
     void exportPdf();
+    void exportImage(bool jpeg);  // PNG, or JPG
     // Where to export to (next to the sketch file, with this suffix); empty if cancelled.
     QString exportPath(const QString& suffix, const QString& title, const QString& filter);
     void copySelection();
@@ -75,5 +78,7 @@ private:
     core::exporter::SvgOptions m_svgOptions;  // as last used
     core::exporter::DxfOptions m_dxfOptions;
     core::exporter::SvgOptions m_pdfOptions;  // (the PDF is drawn from the SVG export)
+    core::exporter::SvgOptions m_imageSvgOptions;  // (so are PNGs and JPGs)
+    Document::ImageOptions m_imageOptions;
     QAction* m_insertImage = nullptr;
 };

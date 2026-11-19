@@ -16,6 +16,7 @@
 #include <set>
 #include <QFile>
 #include <QFontDatabase>
+#include <QImageWriter>
 #include <QFileInfo>
 #include <QPageLayout>
 #include <QPainter>
@@ -916,31 +917,101 @@ bool Document::exportDxf(const QString& path, const core::exporter::DxfOptions& 
     return true;
 }
 
-bool Document::exportPdf(const QString& path, const core::exporter::SvgOptions& options, QString* error)
+namespace
+{
+// The SVG export in pieces, its text cut out to be drawn in its font (see SvgPieces), and its size
+// in mm. Hatches as lines: Qt's SVG renderer doesn't draw <pattern>s.
+bool exportPieces(const core::Sketch& sketch, const core::exporter::SvgOptions& options,
+                  core::exporter::SvgPieces& pieces, QSizeF& mm, QString* error)
 {
     core::exporter::SvgOptions o = options;
-    o.hatchLines = true;  // (Qt's SVG renderer doesn't draw <pattern>s; on paper, lines are what they are anyway)
+    o.hatchLines = true;
     o.canvas.reset();
-    // In pieces, the text in its font drawn between them by the PDF's own painter: Qt's SVG renderer
-    // would draw it as shapes (not selectable, not searchable).
-    core::exporter::SvgPieces pieces;
     try {
-        pieces = core::exporter::toSvgPieces(m_sketch, o);
+        pieces = core::exporter::toSvgPieces(sketch, o);
     }
     catch (const core::SketchError& e) {
         if (error) {
-            *error = tr("Couldn't export: %1").arg(errorText(e));
+            *error = Document::tr("Couldn't export: %1").arg(errorText(e));
         }
         return false;
     }
-    const QSizeF mm = QSvgRenderer(QByteArray::fromStdString(pieces.svgs.front())).viewBoxF().size();  // (in mm)
+    mm = QSvgRenderer(QByteArray::fromStdString(pieces.svgs.front())).viewBoxF().size();
     if (mm.isEmpty()) {
         if (error) {
-            *error = tr("Couldn't export: there's nothing to put on the page");
+            *error = Document::tr("Couldn't export: there's nothing to put on the page");
         }
         return false;
     }
+    return true;
+}
 
+// Draws the pieces, each followed by its texts in their fonts, `perMm` device pixels to the mm
+// (from the painter's top left).
+void paintPieces(QPainter& painter, const core::exporter::SvgPieces& pieces, const QSizeF& mm, double perMm)
+{
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setRenderHint(QPainter::TextAntialiasing);
+    const QRectF pageRect(0, 0, mm.width() * perMm, mm.height() * perMm);
+    for (size_t i = 0; i < pieces.svgs.size(); ++i) {
+        QSvgRenderer(QByteArray::fromStdString(pieces.svgs[i])).render(&painter, pageRect);
+        for (const core::exporter::PlacedTextRun& r : pieces.texts[i]) {
+            if (r.size <= 0.0 || r.text.empty()) {
+                continue;
+            }
+            // At a 100 px font, scaled down to its size (fonts take whole pixel sizes).
+            painter.save();
+            painter.scale(perMm, perMm);
+            painter.translate(r.x, r.y);
+            painter.rotate(r.rotation);
+            painter.scale(r.size / 100.0, r.size / 100.0);
+            QFont font(QString::fromStdString(r.font));
+            font.setPixelSize(100);
+            font.setBold(r.bold);
+            font.setItalic(r.italic);
+            painter.setFont(font);
+            painter.setPen(QColor(r.color.r, r.color.g, r.color.b, r.color.a));
+            const QString text = QString::fromStdString(r.text);
+            const QFontMetricsF metrics(font, painter.device());
+            const double extra = r.tracking * 100.0 / r.size;
+            // Where it starts: its left end at (x, y), or its middle, or its right end.
+            double x = 0.0;
+            if (r.align != 0) {
+                const QList<uint> letters = text.toUcs4();
+                const double width = metrics.horizontalAdvance(text) + extra * std::max<qsizetype>(letters.size() - 1, 0);
+                x = -width * r.align / 2.0;
+            }
+            if (std::abs(r.tracking) < 1e-9) {
+                painter.drawText(QPointF(x, 0), text);
+            }
+            else {
+                // Letter by letter, each moved on by its advance and the tracking (QFont's own
+                // letter spacing goes by the device's pixels, not the font's).
+                for (char32_t c : text.toUcs4()) {
+                    const QString letter = QString::fromUcs4(&c, 1);
+                    painter.drawText(QPointF(x, 0), letter);
+                    x += metrics.horizontalAdvance(letter) + extra;
+                }
+            }
+            painter.restore();
+        }
+    }
+}
+
+QSize pixelsFor(const QSizeF& mm, double dpi)
+{
+    return QSize(std::max(1, static_cast<int>(std::lround(mm.width() * dpi / 25.4))),
+                 std::max(1, static_cast<int>(std::lround(mm.height() * dpi / 25.4))));
+}
+}  // namespace
+
+bool Document::exportPdf(const QString& path, const core::exporter::SvgOptions& o, QString* error)
+{
+    core::exporter::SvgPieces pieces;
+    QSizeF mm;
+    if (!exportPieces(m_sketch, o, pieces, mm, error)) {
+        return false;
+    }
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly)) {
         if (error) {
@@ -963,54 +1034,9 @@ bool Document::exportPdf(const QString& path, const core::exporter::SvgOptions& 
             }
             return false;
         }
-        painter.setRenderHint(QPainter::Antialiasing);
         // True size: millimetres from the resolution (the page itself is whole points, as Qt writes
         // it, so up to half a point off the drawing's size; the drawing isn't stretched to it).
-        const double perMm = pdf.resolution() / 25.4;
-        const QRectF pageRect(0, 0, mm.width() * perMm, mm.height() * perMm);
-        for (size_t i = 0; i < pieces.svgs.size(); ++i) {
-            QSvgRenderer(QByteArray::fromStdString(pieces.svgs[i])).render(&painter, pageRect);
-            for (const core::exporter::PlacedTextRun& r : pieces.texts[i]) {
-                if (r.size <= 0.0 || r.text.empty()) {
-                    continue;
-                }
-                // At a 100 px font, scaled down to its size (fonts take whole pixel sizes).
-                painter.save();
-                painter.scale(perMm, perMm);
-                painter.translate(r.x, r.y);
-                painter.rotate(r.rotation);
-                painter.scale(r.size / 100.0, r.size / 100.0);
-                QFont font(QString::fromStdString(r.font));
-                font.setPixelSize(100);
-                font.setBold(r.bold);
-                font.setItalic(r.italic);
-                painter.setFont(font);
-                painter.setPen(QColor(r.color.r, r.color.g, r.color.b, r.color.a));
-                const QString text = QString::fromStdString(r.text);
-                const QFontMetricsF metrics(font, painter.device());
-                const double extra = r.tracking * 100.0 / r.size;
-                // Where it starts: its left end at (x, y), or its middle, or its right end.
-                double x = 0.0;
-                if (r.align != 0) {
-                    const QList<uint> letters = text.toUcs4();
-                    const double width = metrics.horizontalAdvance(text) + extra * std::max<qsizetype>(letters.size() - 1, 0);
-                    x = -width * r.align / 2.0;
-                }
-                if (std::abs(r.tracking) < 1e-9) {
-                    painter.drawText(QPointF(x, 0), text);
-                }
-                else {
-                    // Letter by letter, each moved on by its advance and the tracking (QFont's own
-                    // letter spacing goes by the PDF's device pixels, not the font's).
-                    for (char32_t c : text.toUcs4()) {
-                        const QString letter = QString::fromUcs4(&c, 1);
-                        painter.drawText(QPointF(x, 0), letter);
-                        x += metrics.horizontalAdvance(letter) + extra;
-                    }
-                }
-                painter.restore();
-            }
-        }
+        paintPieces(painter, pieces, mm, pdf.resolution() / 25.4);
         painter.end();
     }
     if (!file.commit()) {
@@ -1027,6 +1053,97 @@ bool Document::exportPdf(const QString& path, const core::exporter::SvgOptions& 
     return true;
 }
 
+QSize Document::exportImageSize(const core::exporter::SvgOptions& o, double dpi) const
+{
+    core::exporter::SvgPieces pieces;
+    QSizeF mm;
+    if (!exportPieces(m_sketch, o, pieces, mm, nullptr)) {
+        return {};
+    }
+    return pixelsFor(mm, dpi);
+}
+
+bool Document::exportImage(const QString& path, const core::exporter::SvgOptions& o, const ImageOptions& image,
+                           QString* error)
+{
+    const QString suffix = QFileInfo(path).suffix().toLower();
+    const bool jpeg = suffix == QStringLiteral("jpg") || suffix == QStringLiteral("jpeg");
+    if (!jpeg && suffix != QStringLiteral("png")) {
+        if (error) {
+            *error = tr("Couldn't export: an image is .png, .jpg or .jpeg, not .%1").arg(suffix);
+        }
+        return false;
+    }
+    if (!(image.dpi >= 1.0 && image.dpi <= 10000.0)) {
+        if (error) {
+            *error = tr("Couldn't export: the resolution has to be between 1 and 10000 dpi");
+        }
+        return false;
+    }
+    core::exporter::SvgPieces pieces;
+    QSizeF mm;
+    if (!exportPieces(m_sketch, o, pieces, mm, error)) {
+        return false;
+    }
+    const QSize pixels = pixelsFor(mm, image.dpi);
+    if (pixels.width() > kMaxImageSide || pixels.height() > kMaxImageSide
+        || qint64(pixels.width()) * pixels.height() > kMaxImagePixels) {
+        if (error) {
+            *error = tr("Couldn't export: %1 × %2 pixels is too big (at most %3 pixels a side, and %4 million in all). "
+                        "Try a lower resolution.")
+                         .arg(pixels.width())
+                         .arg(pixels.height())
+                         .arg(kMaxImageSide)
+                         .arg(kMaxImagePixels / 1000000);
+        }
+        return false;
+    }
+    QImage picture(pixels, QImage::Format_ARGB32_Premultiplied);
+    if (picture.isNull()) {
+        if (error) {
+            *error = tr("Couldn't export: not enough memory for %1 × %2 pixels").arg(pixels.width()).arg(pixels.height());
+        }
+        return false;
+    }
+    // (A JPEG has no transparency: white behind it. A page's own colour is drawn over this anyway.)
+    picture.fill(image.transparent && !jpeg ? QColor(Qt::transparent) : QColor(Qt::white));
+    const int perMetre = static_cast<int>(std::lround(image.dpi / 0.0254));
+    picture.setDotsPerMeterX(perMetre);  // (so it prints at true size)
+    picture.setDotsPerMeterY(perMetre);
+    {
+        QPainter painter(&picture);
+        paintPieces(painter, pieces, mm, image.dpi / 25.4);
+    }
+    if (jpeg) {
+        picture = picture.convertToFormat(QImage::Format_RGB32);
+    }
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) {
+        if (error) {
+            *error = tr("Couldn't write %1: %2").arg(path, file.errorString());
+        }
+        return false;
+    }
+    QImageWriter writer(&file, jpeg ? QByteArrayLiteral("jpg") : QByteArrayLiteral("png"));
+    if (jpeg) {
+        writer.setQuality(std::clamp(image.quality, 1, 100));
+    }
+    if (!writer.write(picture) || !file.commit()) {
+        if (error) {
+            *error = tr("Couldn't write %1: %2")
+                         .arg(path, writer.error() != QImageWriter::UnknownError ? writer.errorString() : file.errorString());
+        }
+        return false;
+    }
+    announce(QStringLiteral("doc.export_image(%1, dpi=%2, fills=%3, undecorated=%4, construction=%5, margin=%6%7%8%9)")
+                 .arg(pyString(path), Editor::number(image.dpi), pyBool(o.fills), pyBool(o.undecorated),
+                      pyBool(o.construction), Editor::number(o.margin),
+                      o.page ? QString() : QStringLiteral(", page=False"),
+                      o.dimensions ? QString() : QStringLiteral(", dimensions=False"),
+                      (image.transparent && !jpeg ? QStringLiteral(", transparent=True") : QString())
+                          + (jpeg && image.quality != 92 ? QStringLiteral(", quality=%1").arg(image.quality) : QString())));
+    return true;
+}
 void Document::newSketch()
 {
     reset();

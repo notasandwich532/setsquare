@@ -23,6 +23,8 @@
 
 #include <QClipboard>
 #include <QCursor>
+#include <QApplication>
+#include <QSpinBox>
 #include <QCheckBox>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -649,6 +651,128 @@ void MainWindow::exportPdf()
     statusBar()->showMessage(tr("Exported %1").arg(QDir::toNativeSeparators(path)), 4000);
 }
 
+void MainWindow::exportImage(bool jpeg)
+{
+    const QString kind = jpeg ? tr("JPG") : tr("PNG");
+    QDialog dialog(this);
+    dialog.setObjectName(QStringLiteral("exportImageDialog"));
+    dialog.setWindowTitle(tr("Export %1").arg(kind));
+    auto* form = new QFormLayout(&dialog);
+    QString what;
+    if (const auto& page = m_doc->sketch().page()) {
+        what = tr("The page (%1 × %2 mm) as presentation view shows it: what's off it is cut off.")
+                   .arg(page->width)
+                   .arg(page->height);
+    }
+    else {
+        what = tr("No page is set (File > Page Setup), so the picture is the drawing, with the margin round it.");
+    }
+    auto* note = new QLabel(what, &dialog);
+    note->setWordWrap(true);
+    form->addRow(note);
+    auto* dpi = new ExpressionSpinBox(&dialog);
+    dpi->setObjectName(QStringLiteral("imageDpi"));
+    dpi->setRange(10.0, 10000.0);
+    dpi->setDecimals(0);
+    dpi->setSuffix(tr(" dpi"));
+    dpi->setValue(m_imageOptions.dpi);
+    auto* pixels = new QLabel(&dialog);
+    pixels->setObjectName(QStringLiteral("imagePixels"));
+    auto* transparent = new QCheckBox(tr("Transparent background (where there's no page colour)"), &dialog);
+    transparent->setObjectName(QStringLiteral("imageTransparent"));
+    transparent->setChecked(m_imageOptions.transparent);
+    auto* quality = new QSpinBox(&dialog);
+    quality->setObjectName(QStringLiteral("imageQuality"));
+    quality->setRange(1, 100);
+    quality->setValue(m_imageOptions.quality);
+    auto* fills = new QCheckBox(tr("Fills"), &dialog);
+    fills->setChecked(m_imageSvgOptions.fills);
+    auto* plain = new QCheckBox(tr("Curves without a stroke (thin black)"), &dialog);
+    plain->setChecked(m_imageSvgOptions.undecorated);
+    auto* construction = new QCheckBox(tr("Construction geometry (grey, dashed)"), &dialog);
+    construction->setChecked(m_imageSvgOptions.construction);
+    auto* dimensions = new QCheckBox(tr("Dimensions and notes (from Annotate)"), &dialog);
+    dimensions->setChecked(m_imageSvgOptions.dimensions);
+    auto* margin = new ExpressionSpinBox(&dialog);
+    margin->setRange(0.0, 1000.0);
+    margin->setDecimals(2);
+    margin->setSuffix(QStringLiteral(" mm"));
+    margin->setValue(m_imageSvgOptions.margin);
+    form->addRow(tr("Resolution"), dpi);
+    form->addRow(tr("Size"), pixels);
+    if (jpeg) {
+        form->addRow(tr("Quality"), quality);
+        transparent->hide();
+    }
+    else {
+        form->addRow(transparent);
+        quality->hide();
+    }
+    form->addRow(fills);
+    form->addRow(plain);
+    form->addRow(construction);
+    form->addRow(dimensions);
+    if (!m_doc->sketch().page()) {
+        form->addRow(tr("Margin"), margin);
+    }
+    else {
+        margin->hide();  // (the page is the page)
+    }
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    buttons->button(QDialogButtonBox::Ok)->setText(tr("Export..."));
+    form->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    auto options = [&] {
+        core::exporter::SvgOptions o = m_imageSvgOptions;
+        o.fills = fills->isChecked();
+        o.undecorated = plain->isChecked();
+        o.construction = construction->isChecked();
+        o.dimensions = dimensions->isChecked();
+        o.margin = margin->value();
+        o.page = true;  // (the page whenever there is one)
+        return o;
+    };
+    // The size it'll be, as the options change (too big: can't be exported).
+    auto showSize = [&] {
+        const QSize size = m_doc->exportImageSize(options(), dpi->value());
+        const bool tooBig = size.width() > Document::kMaxImageSide || size.height() > Document::kMaxImageSide
+                         || qint64(size.width()) * size.height() > Document::kMaxImagePixels;
+        pixels->setText(size.isEmpty() ? tr("(nothing to export)")
+                        : tooBig       ? tr("%1 × %2 pixels: too big, try a lower resolution").arg(size.width()).arg(size.height())
+                                       : tr("%1 × %2 pixels").arg(size.width()).arg(size.height()));
+        buttons->button(QDialogButtonBox::Ok)->setEnabled(!size.isEmpty() && !tooBig);
+    };
+    connect(dpi, &QDoubleSpinBox::valueChanged, &dialog, showSize);
+    connect(margin, &QDoubleSpinBox::valueChanged, &dialog, showSize);
+    for (QCheckBox* box : {fills, plain, construction, dimensions}) {
+        connect(box, &QCheckBox::toggled, &dialog, showSize);
+    }
+    showSize();
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    m_imageSvgOptions = options();
+    m_imageOptions.dpi = dpi->value();
+    m_imageOptions.transparent = transparent->isChecked();
+    m_imageOptions.quality = quality->value();
+
+    const QString path = jpeg ? exportPath(QStringLiteral("jpg"), tr("Export JPG"), tr("JPEG images (*.jpg *.jpeg)"))
+                              : exportPath(QStringLiteral("png"), tr("Export PNG"), tr("PNG images (*.png)"));
+    if (path.isEmpty()) {
+        return;
+    }
+    QString error;
+    QApplication::setOverrideCursor(Qt::WaitCursor);  // (a big one takes a moment)
+    const bool done = m_doc->exportImage(path, m_imageSvgOptions, m_imageOptions, &error);
+    QApplication::restoreOverrideCursor();
+    if (!done) {
+        QMessageBox::critical(this, tr("Export failed"), error);
+        return;
+    }
+    statusBar()->showMessage(tr("Exported %1").arg(QDir::toNativeSeparators(path)), 4000);
+}
+
 QString MainWindow::exportPath(const QString& suffix, const QString& title, const QString& filter)
 {
     const QFileInfo current(m_doc->filePath());
@@ -811,6 +935,14 @@ void MainWindow::createActions()
     exportPdfAction->setObjectName(QStringLiteral("exportPdfAction"));
     exportPdfAction->setToolTip(tr("The page as presentation view shows it, at true size, to print or share"));
     connect(exportPdfAction, &QAction::triggered, this, &MainWindow::exportPdf);
+    auto* exportPngAction = exportMenu->addAction(tr("P&NG..."));
+    exportPngAction->setObjectName(QStringLiteral("exportPngAction"));
+    exportPngAction->setToolTip(tr("A picture of the page as presentation view shows it, at the resolution you choose"));
+    connect(exportPngAction, &QAction::triggered, this, [this] { exportImage(false); });
+    auto* exportJpgAction = exportMenu->addAction(tr("&JPG..."));
+    exportJpgAction->setObjectName(QStringLiteral("exportJpgAction"));
+    exportJpgAction->setToolTip(tr("A picture of the page as presentation view shows it, at the resolution you choose"));
+    connect(exportJpgAction, &QAction::triggered, this, [this] { exportImage(true); });
     auto* historyAction = fileMenu->addAction(tr("Command &History..."));
     historyAction->setToolTip(tr("The commands that built this drawing (saved with it)"));
     connect(historyAction, &QAction::triggered, this, &MainWindow::showHistory);

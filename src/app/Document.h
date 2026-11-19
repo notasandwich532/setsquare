@@ -135,6 +135,20 @@ public:
     // A PDF of the drawing as the SVG export makes it (the page, at true size; or fitted round the
     // drawing): vectors, and text as text in its embedded font. Hatches are always their lines.
     bool exportPdf(const QString& path, const core::exporter::SvgOptions& options, QString* error = nullptr);
+    // A PNG or JPEG (by the path's suffix) of the drawing as the PDF export draws it, at `dpi`
+    // (saved in it, so it prints at true size). Text in its font; hatches as their lines.
+    struct ImageOptions
+    {
+        double dpi = 300.0;
+        bool transparent = false;  // PNG: nothing behind the drawing (else white; a page's colour shows anyway)
+        int quality = 92;          // JPEG, 1-100
+    };
+    bool exportImage(const QString& path, const core::exporter::SvgOptions& options, const ImageOptions& image,
+                     QString* error = nullptr);
+    // How big exportImage would make it (pixels); empty if there's nothing to export.
+    QSize exportImageSize(const core::exporter::SvgOptions& options, double dpi) const;
+    static constexpr int kMaxImageSide = 32768;
+    static constexpr qint64 kMaxImagePixels = 268'000'000;  // (about 1 GB while drawing it)
     void newSketch();
 
 signals:

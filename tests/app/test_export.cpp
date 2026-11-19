@@ -11,7 +11,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QFile>
+#include <QFileInfo>
 #include <QImage>
+#include <QImageReader>
 #include <QPainter>
 #include <QSvgRenderer>
 #include <QTemporaryDir>
@@ -130,4 +132,120 @@ TEST_CASE("PDF export: the page at true size, text as text in its embedded font"
     const QList<QByteArray> box = numbers.left(numbers.indexOf(']')).split(' ');
     CHECK(std::abs(box[0].toDouble() - 60.0 * 72 / 25.4) < 1.0);  // 50 + 2 x 5 mm wide (to the point)
     CHECK(std::abs(box[1].toDouble() - 40.0 * 72 / 25.4) < 1.0);  // 30 + 2 x 5 mm high
+}
+
+namespace
+{
+QImage readImage(const QString& path)
+{
+    QImageReader reader(path);
+    QImage image = reader.read();
+    REQUIRE(!image.isNull());
+    return image;
+}
+// Pixels in `area` not near `background` (something drawn there).
+int drawnIn(const QImage& image, const QRect& area, QColor background)
+{
+    int n = 0;
+    for (int y = area.top(); y <= area.bottom(); ++y) {
+        for (int x = area.left(); x <= area.right(); ++x) {
+            const QColor p = image.pixelColor(x, y);
+            n += std::abs(p.red() - background.red()) + std::abs(p.green() - background.green())
+                     + std::abs(p.blue() - background.blue()) > 60;
+        }
+    }
+    return n;
+}
+}  // namespace
+
+TEST_CASE("PNG and JPG export: the page at the resolution asked, as the PDF draws it", "[export][image]")
+{
+    Document doc;
+    Id anchor = kNoId;
+    doc.edit("page", [&](Editor& ed) {
+        Page page;
+        page.size = "A5";
+        page.width = 148;
+        page.height = 210;
+        ed.setPage(page);
+    });
+    doc.modify("drawing", [&](Sketch& s) {
+        build::rectangle(s, s.addPoint(10, 10), s.addPoint(60, 40));
+        anchor = s.addPoint(15, 100);
+    });
+    doc.edit("text", [&](Editor& ed) {
+        Text t;
+        t.text = "HELLO";
+        t.font = textshapes::defaultFamily().toStdString();
+        t.height = 10;
+        t.anchor = anchor;
+        ed.text(t);
+    });
+    doc.edit("fill", [&](Editor& ed) { ed.fill({50, 35}, Color{0x20, 0x80, 0xff, 255}); });
+    QTemporaryDir dir;
+    const double dpi = 100.0;
+    const double perMm = dpi / 25.4;
+    // Sketch mm -> pixel (y down, from the page's top).
+    auto at = [&](double x, double y) { return QPoint(int(x * perMm), int((210 - y) * perMm)); };
+
+    SECTION("PNG")
+    {
+        const QString path = dir.filePath(QStringLiteral("page.png"));
+        Document::ImageOptions image;
+        image.dpi = dpi;
+        QString error;
+        REQUIRE(doc.exportImage(path, {}, image, &error));
+        CHECK(doc.exportImageSize({}, dpi) == QSize(583, 827));  // 148 x 210 mm at 100 dpi
+        const QImage png = readImage(path);
+        CHECK(png.size() == QSize(583, 827));
+        CHECK(QFileInfo(path).size() < 583 * 827 * 4 / 10);  // (compressed: mostly white)
+        CHECK(std::abs(png.dotsPerMeterX() - dpi / 0.0254) < 2);  // (prints at true size)
+        CHECK(png.pixelColor(at(30, 25)) == QColor(0x20, 0x80, 0xff));  // the fill
+        CHECK(png.pixelColor(at(100, 150)) == QColor(Qt::white));      // nothing
+        // The text, drawn (in its font) where it is: dark pixels from its anchor up.
+        CHECK(drawnIn(png, QRect(at(15, 110), at(60, 100)), Qt::white) > 100);
+        CHECK(drawnIn(png, QRect(at(80, 110), at(140, 100)), Qt::white) == 0);
+    }
+    SECTION("Transparent PNG, without a page: fitted round the drawing, nothing behind it")
+    {
+        doc.edit("no page", [](Editor& ed) { ed.setPage(std::nullopt); });
+        const QString path = dir.filePath(QStringLiteral("clear.png"));
+        Document::ImageOptions image;
+        image.dpi = dpi;
+        image.transparent = true;
+        exporter::SvgOptions o;
+        o.margin = 5;
+        REQUIRE(doc.exportImage(path, o, image));
+        const QImage png = readImage(path);
+        CHECK(png.hasAlphaChannel());
+        CHECK(png.pixelColor(1, 1).alpha() == 0);  // (in the margin)
+        CHECK(png.pixelColor(png.width() / 2, png.height() - int(10 * perMm)).alpha() == 255);  // the fill
+    }
+    SECTION("JPG: no transparency (white behind), and its quality")
+    {
+        doc.edit("no page", [](Editor& ed) { ed.setPage(std::nullopt); });
+        const QString low = dir.filePath(QStringLiteral("low.jpg")), high = dir.filePath(QStringLiteral("high.jpeg"));
+        Document::ImageOptions image;
+        image.dpi = dpi;
+        image.transparent = true;  // (ignored)
+        image.quality = 20;
+        REQUIRE(doc.exportImage(low, {}, image));
+        image.quality = 98;
+        REQUIRE(doc.exportImage(high, {}, image));
+        const QImage jpg = readImage(high);
+        CHECK(!jpg.hasAlphaChannel());
+        CHECK(drawnIn(jpg, QRect(0, 0, 3, 3), Qt::white) == 0);  // white in the margin
+        CHECK(QFileInfo(low).size() < QFileInfo(high).size());
+    }
+    SECTION("Errors: an unknown suffix, or too big")
+    {
+        QString error;
+        CHECK(!doc.exportImage(dir.filePath(QStringLiteral("page.bmp")), {}, {}, &error));
+        CHECK(error.contains(QStringLiteral(".png")));
+        Document::ImageOptions huge;
+        huge.dpi = 9000;  // (A5: 52000 pixels high)
+        CHECK(!doc.exportImage(dir.filePath(QStringLiteral("huge.png")), {}, huge, &error));
+        CHECK(error.contains(QStringLiteral("too big")));
+        CHECK(!QFile::exists(dir.filePath(QStringLiteral("huge.png"))));
+    }
 }

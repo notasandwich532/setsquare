@@ -2798,6 +2798,31 @@ PYBIND11_EMBEDDED_MODULE(setsquare, m)
            "Write the drawing as a PDF, at true size: with a page set (and page=True), the PDF's page is it (what's "
            "off it cut off); else a page fitted round the drawing with `margin`. As export_svg draws it, text as "
            "selectable text in its embedded font (text_as_outlines=True: as its letters' shapes), hatches as lines.")
+        .def("export_image", [](const DocumentH&, const std::string& path, double dpi, bool transparent, int quality,
+                                bool fills, bool undecorated, bool construction, double margin, bool page,
+                                bool dimensions) {
+            core::exporter::SvgOptions o;
+            o.fills = fills;
+            o.undecorated = undecorated;
+            o.construction = construction;
+            o.margin = margin;
+            o.page = page;
+            o.dimensions = dimensions;
+            Document::ImageOptions image;
+            image.dpi = dpi;
+            image.transparent = transparent;
+            image.quality = quality;
+            Document::SilentRecording quiet(doc());
+            QString error;
+            if (!doc().exportImage(QString::fromStdString(path), o, image, &error)) {
+                throw std::runtime_error(error.toStdString());
+            }
+        }, py::arg("path"), py::arg("dpi") = 300.0, py::arg("transparent") = false, py::arg("quality") = 92,
+           py::arg("fills") = true, py::arg("undecorated") = true, py::arg("construction") = false,
+           py::arg("margin") = 2.0, py::arg("page") = true, py::arg("dimensions") = true,
+           "Write the drawing as a PNG or JPEG (by the path's suffix: .png, .jpg or .jpeg), as export_pdf draws it, "
+           "at `dpi` (saved in the file, so it prints at true size). transparent=True: a PNG with nothing behind "
+           "the drawing (else white; a page's colour shows either way). quality: the JPEG's, 1-100.")
         .def("to_svg", [](const DocumentH&, bool fills, bool undecorated, bool construction, double margin, bool page,
                           bool textAsOutlines, bool hatchLines, bool dimensions) {
             core::exporter::SvgOptions o;
