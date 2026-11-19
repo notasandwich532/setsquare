@@ -44,5 +44,10 @@ See [docs/scripting.md](docs/scripting.md).
 - `src/script/`: embedded Python host, the `setsquare` module, and `setsquare-cli`
 - `tests/`: Catch2 unit/GUI tests, plus `tests/scripts/*.py` run headless
 
+## Credits
+Setsquare was developed with [Claude](https://www.anthropic.com/claude), Anthropic's AI model, working in [Claude Code](https://www.anthropic.com/claude-code). The design, the decisions and the testing in use are the author's; Claude wrote much of the code, the tests and the documentation to that direction.
+
+The constraint solver is PlaneGCS, from [FreeCAD](https://www.freecad.org)'s Sketcher.
+
 ## Licence
 Setsquare is free software under the [GNU General Public License v3.0 or later](LICENSE). It's built on PlaneGCS (from FreeCAD, LGPL-2.1-or-later), Qt (LGPL-3.0), Python and other libraries: see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The Windows zip includes all of their licence texts.
