@@ -6,6 +6,7 @@
 #include "TextShapes.h"
 
 #include <QApplication>
+#include <QStandardPaths>
 
 #include <cstdio>
 
@@ -22,6 +23,7 @@ int main(int argc, char* argv[])
     }
 #endif
     QApplication app(argc, argv);
+    QStandardPaths::setTestModeEnabled(true);  // (app data, e.g. autosave copies, not in the real folders)
     textshapes::addUserFonts();
     QString error;
     if (!script::initialise(&error)) {

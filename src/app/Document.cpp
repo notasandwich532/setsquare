@@ -839,7 +839,7 @@ void Document::announce(const QString& python)
 // Files
 // ---------------------------------------------------------------------------------------------
 
-bool Document::save(const QString& path, QString* error)
+bool Document::saveCopy(const QString& path, QString* error) const
 {
     QSaveFile file(path);  // writes to a temp file and renames, so a failed save can't truncate
     std::vector<std::string> history;
@@ -854,10 +854,30 @@ bool Document::save(const QString& path, QString* error)
         }
         return false;
     }
+    return true;
+}
+
+bool Document::save(const QString& path, QString* error)
+{
+    if (!saveCopy(path, error)) {
+        return false;
+    }
     m_filePath = path;
     m_savedRevision = m_revision;
     emit fileStateChanged();
     announce(QStringLiteral("doc.save(%1)").arg(pyString(path)));
+    return true;
+}
+
+bool Document::openRecovered(const QString& copy, const QString& original, QString* error)
+{
+    if (!open(copy, error)) {
+        return false;
+    }
+    // Unsaved work on `original` (or on an untitled drawing): saving goes there, not to the copy.
+    m_filePath = original;
+    m_savedRevision = kNeverSaved;
+    emit fileStateChanged();
     return true;
 }
 

@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 
 #include "ImportDialog.h"
+#include "Recovery.h"
 #include "Images.h"
 #include "PageSetup.h"
 
@@ -44,6 +45,7 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QCloseEvent>
+#include <QLocale>
 #include <QDir>
 #include <QDockWidget>
 #include <QFile>
@@ -116,6 +118,7 @@ MainWindow::MainWindow(QWidget* parent)
     });
     connect(m_doc, &Document::changed, this, &MainWindow::updateSolveStatus);
     connect(m_doc, &Document::fileStateChanged, this, &MainWindow::updateTitle);
+    m_recovery = new Recovery(*m_doc, {}, this);  // autosave, for after a crash
 
     // Python scripts act on this window's document and can drive its view.
     script::setDocument(m_doc);
@@ -339,6 +342,45 @@ bool MainWindow::openFile(const QString& path)
     }
     m_view->setTool(ToolKind::Select);
     m_view->fitAll();
+    return true;
+}
+
+bool MainWindow::offerRecovery(const QString& folder)
+{
+    const std::vector<Recovery::Found> found = Recovery::left(folder);
+    if (found.empty()) {
+        return false;
+    }
+    const Recovery::Found& f = found.front();  // (the newest; any others are offered next time)
+    const QString name = f.original.isEmpty() ? tr("an untitled drawing") : QFileInfo(f.original).fileName();
+    QMessageBox box(QMessageBox::Warning, tr("Recover unsaved work?"),
+                    tr("Setsquare didn't close properly last time. Your unsaved work on %1 was autosaved at %2.")
+                        .arg(name, QLocale().toString(f.when, QLocale::ShortFormat)),
+                    QMessageBox::NoButton, this);
+    box.setObjectName(QStringLiteral("recoveryBox"));
+    box.setInformativeText(found.size() > 1 ? tr("(There's more from other windows: they'll be offered next time.)")
+                                            : QString());
+    QPushButton* recover = box.addButton(tr("Recover"), QMessageBox::AcceptRole);
+    QPushButton* discard = box.addButton(tr("Discard"), QMessageBox::DestructiveRole);
+    box.addButton(tr("Not now"), QMessageBox::RejectRole);
+    box.setDefaultButton(recover);
+    box.exec();
+    if (box.clickedButton() == discard) {
+        Recovery::remove(f);
+        return false;
+    }
+    if (box.clickedButton() != recover) {
+        return false;  // (kept for next time)
+    }
+    QString error;
+    if (!m_doc->openRecovered(f.copy, f.original, &error)) {
+        QMessageBox::critical(this, tr("Recovery failed"), error);
+        return false;
+    }
+    Recovery::remove(f);
+    m_view->setTool(ToolKind::Select);
+    m_view->fitAll();
+    statusBar()->showMessage(tr("Recovered your unsaved work on %1: save it to keep it").arg(name), 10000);
     return true;
 }
 

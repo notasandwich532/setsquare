@@ -134,6 +134,12 @@ public:
     bool isModified() const { return m_revision != m_savedRevision; }
     bool save(const QString& path, QString* error = nullptr);
     bool open(const QString& path, QString* error = nullptr);
+    // Writes the drawing to `path` as save does, but as a copy: the document's own file and its
+    // saved state stay as they were (for autosave; see Recovery).
+    bool saveCopy(const QString& path, QString* error = nullptr) const;
+    // Opens a copy autosaved before a crash as unsaved changes to `original` (empty: untitled), so
+    // saving goes to the original.
+    bool openRecovered(const QString& copy, const QString& original, QString* error = nullptr);
     // Writes the drawing as SVG (see core/Export.h). Doesn't change the document.
     bool exportSvg(const QString& path, const core::exporter::SvgOptions& options, QString* error = nullptr);
     bool exportDxf(const QString& path, const core::exporter::DxfOptions& options, QString* error = nullptr);
@@ -205,6 +211,7 @@ private:
     quint64 m_revision = 0;       // identifies the current state
     quint64 m_nextRevision = 1;
     quint64 m_savedRevision = 0;  // state last saved/opened
+    static constexpr quint64 kNeverSaved = ~quint64(0);  // (no state is: recovered work is unsaved)
     QString m_filePath;
 
     std::unique_ptr<core::Solver> m_dragSolver;

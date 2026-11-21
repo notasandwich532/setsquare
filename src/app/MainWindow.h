@@ -27,6 +27,9 @@ public:
 
     bool openFile(const QString& path);  // reports errors in a dialog
     void runScript(const QString& path);  // in the Python console
+    // Work autosaved by a session that didn't close (see Recovery): offers the newest back. True if
+    // it was recovered into this window. (older: for tests; empty: the app's own.)
+    bool offerRecovery(const QString& folder = {});
     // File > Insert Image: a reference image in the middle of the view (empty path: ask which).
     void insertImage(const QString& path = {});
     // File > Import: an SVG or DXF drawing (empty path: ask which), with its options.
@@ -81,4 +84,5 @@ private:
     core::exporter::SvgOptions m_imageSvgOptions;  // (so are PNGs and JPGs)
     Document::ImageOptions m_imageOptions;
     QAction* m_insertImage = nullptr;
+    class Recovery* m_recovery = nullptr;
 };

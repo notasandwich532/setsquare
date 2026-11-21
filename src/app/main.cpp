@@ -84,6 +84,9 @@ int main(int argc, char* argv[])
             if (!files.isEmpty()) {
                 window.openFile(files.first());
             }
+            else {
+                window.offerRecovery();  // (a crash's unsaved work; with a file to open, offered next time)
+            }
             if (!scriptPath.isEmpty()) {
                 window.runScript(scriptPath);
             }
