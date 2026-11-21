@@ -423,7 +423,7 @@ Constraint constraintFromJson(const json& j)
 }
 }  // namespace
 
-std::string toJson(const Sketch& sketch, bool compact, const std::vector<std::string>* history)
+std::string toJson(const Sketch& sketch, bool compact, const std::vector<std::string>* history, int recorder)
 {
     json entities = json::array();
     for (const auto& [id, e] : sketch.entities()) {
@@ -641,11 +641,12 @@ std::string toJson(const Sketch& sketch, bool compact, const std::vector<std::st
     }
     if (history && !history->empty()) {
         doc["history"] = *history;
+        doc["recorder"] = recorder;
     }
     return compact ? doc.dump() : doc.dump(2) + "\n";
 }
 
-Sketch fromJson(const std::string& text, std::vector<std::string>* history)
+Sketch fromJson(const std::string& text, std::vector<std::string>* history, int* recorder)
 {
     try {
         const json doc = json::parse(text);
@@ -892,6 +893,9 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history)
         sketch.setPage(loadedPage);
         if (history) {
             *history = doc.value("history", std::vector<std::string>{});
+        }
+        if (recorder) {
+            *recorder = doc.value("recorder", 0);
         }
         return sketch;
     }

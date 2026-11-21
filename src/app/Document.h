@@ -3,6 +3,7 @@
 #include "Editor.h"
 
 #include <core/Export.h>
+#include <core/Serialize.h>
 #include <core/Sketch.h>
 #include <core/Solver.h>
 
@@ -125,6 +126,9 @@ public:
     // the undone commands off (redo puts them back), so replaying the history on a new sketch
     // rebuilds this one. Saved in .setsq files.
     const QStringList& history() const { return m_history; }
+    // The history (or its first part) was recorded by an older version of the app, whose commands
+    // made other things: replayed now, it may not rebuild the drawing exactly (see kRecorderVersion).
+    bool historyFromOlderVersion() const { return !m_history.isEmpty() && m_historyRecorder < core::kRecorderVersion; }
 
     // Changes with every committed edit (not while a drag is in progress).
     quint64 revision() const { return m_revision; }
@@ -241,4 +245,5 @@ private:
 
     int m_silence = 0;
     QStringList m_history;
+    int m_historyRecorder = core::kRecorderVersion;  // (saved with it; older: see historyFromOlderVersion)
 };

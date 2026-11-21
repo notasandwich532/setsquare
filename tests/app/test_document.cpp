@@ -165,3 +165,41 @@ TEST_CASE("A refused change names what's in its way, fixed geometry included", "
     const auto items = blocked.first().first().value<std::vector<Id>>();
     CHECK(std::ranges::find(items, fixedLine) != items.end());
 }
+TEST_CASE("A history recorded by an older version is marked as such, and stays so when saved again", "[document][history]")
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath(QStringLiteral("drawing.setsq"));
+    Document doc;
+    doc.edit("circle", [](Editor& ed) { ed.circle(ed.point(0, 0), 5); });
+    REQUIRE(!doc.history().isEmpty());
+    CHECK(!doc.historyFromOlderVersion());
+    REQUIRE(doc.save(path));
+    Document reopened;
+    REQUIRE(reopened.open(path));
+    CHECK(!reopened.historyFromOlderVersion());  // (this version's)
+
+    // A file from before the version was saved with the history.
+    QFile file(path);
+    REQUIRE(file.open(QIODevice::ReadOnly));
+    QByteArray text = file.readAll();
+    file.close();
+    const qsizetype at = text.indexOf("\"recorder\"");
+    REQUIRE(at >= 0);
+    text.remove(at, text.indexOf('\n', at) - at);  // the line
+    text.replace(",\n}", "\n}");  // (its comma, if it was the last)
+    REQUIRE(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    file.write(text);
+    file.close();
+    Document old;
+    REQUIRE(old.open(path));
+    CHECK(old.history().size() == doc.history().size());
+    CHECK(old.historyFromOlderVersion());
+    old.edit("point", [](Editor& ed) { ed.point(9, 9); });  // (new commands after the old ones)
+    REQUIRE(old.save(path));
+    Document again;
+    REQUIRE(again.open(path));
+    CHECK(again.historyFromOlderVersion());  // (its first part is still the older version's)
+
+    again.newSketch();
+    CHECK(!again.historyFromOlderVersion());
+}

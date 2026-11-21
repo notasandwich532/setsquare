@@ -2756,6 +2756,8 @@ PYBIND11_EMBEDDED_MODULE(setsquare, m)
         })
         .def_property_readonly("path", [](const DocumentH&) { return doc().filePath().toStdString(); })
         .def_property_readonly("modified", [](const DocumentH&) { return doc().isModified(); })
+        .def_property_readonly("history_from_older_version", [](const DocumentH&) { return doc().historyFromOlderVersion(); },
+                               "True if the history was recorded by an older version: replaying it may not rebuild the drawing exactly")
         .def("transaction", [](const DocumentH&) { return Transaction{}; },
              "with doc.transaction(): ... groups changes into one undo step")
         .def("to_json", [](const DocumentH&) { return core::toJson(sketch()); })

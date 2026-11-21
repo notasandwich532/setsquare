@@ -21,10 +21,18 @@ namespace core
 inline constexpr int kFileVersion = 1;
 
 // `history`, if given, is stored too: the commands (Python) that built the sketch.
-std::string toJson(const Sketch& sketch, bool compact = false, const std::vector<std::string>* history = nullptr);
+// The recorder's version: what each recorded command makes. History refers to what was made by
+// its number (l26), so a history recorded when commands made something else no longer lines up.
+// Bump it whenever a command's recording would replay differently.
+constexpr int kRecorderVersion = 1;
+
+// `recorder`: the version the history was recorded by (saved with it; see kRecorderVersion).
+std::string toJson(const Sketch& sketch, bool compact = false, const std::vector<std::string>* history = nullptr,
+                   int recorder = kRecorderVersion);
 
 // Throws SketchError with a readable message for malformed or unsupported files. The stored
 // command history, if any, goes to *history.
-Sketch fromJson(const std::string& text, std::vector<std::string>* history = nullptr);
+// ecorder: set to the version its history was recorded by (0: before versions were saved).
+Sketch fromJson(const std::string& text, std::vector<std::string>* history = nullptr, int* recorder = nullptr);
 
 }  // namespace core

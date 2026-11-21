@@ -349,6 +349,11 @@ bool MainWindow::openFile(const QString& path)
     }
     m_view->setTool(ToolKind::Select);
     m_view->fitAll();
+    if (m_doc->historyFromOlderVersion()) {
+        statusBar()->showMessage(tr("This drawing's command history was recorded by an older version: replaying it "
+                                    "may not rebuild it exactly (File > Command History)"),
+                                 8000);
+    }
     return true;
 }
 
@@ -902,6 +907,16 @@ void MainWindow::showHistory()
                             &dialog);
     note->setWordWrap(true);
     layout->addWidget(note);
+    if (m_doc->historyFromOlderVersion()) {
+        auto* older = new QLabel(tr("⚠ This history was recorded by an older version of Setsquare. Commands refer to "
+                                    "what earlier ones made by number, and some commands now make different things, "
+                                    "so replaying it may not rebuild the drawing exactly."),
+                                 &dialog);
+        older->setObjectName(QStringLiteral("historyOlder"));
+        older->setWordWrap(true);
+        older->setStyleSheet(QStringLiteral("color: #f2b33d;"));
+        layout->addWidget(older);
+    }
     auto* text = new QPlainTextEdit(&dialog);
     text->setObjectName(QStringLiteral("historyText"));
     text->setReadOnly(true);

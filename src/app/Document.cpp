@@ -787,6 +787,7 @@ void Document::reset(core::Sketch sketch)
     m_sketch = std::move(sketch);
     m_sketch.ensureOrigin();
     m_history.clear();
+    m_historyRecorder = core::kRecorderVersion;
     m_undo.clear();
     m_redo.clear();
     m_revision = m_savedRevision = m_nextRevision++;
@@ -846,7 +847,7 @@ bool Document::saveCopy(const QString& path, QString* error) const
     for (const QString& entry : m_history) {
         history.push_back(entry.toStdString());
     }
-    const std::string json = core::toJson(m_sketch, false, &history);
+    const std::string json = core::toJson(m_sketch, false, &history, m_historyRecorder);
     if (!file.open(QIODevice::WriteOnly) || file.write(json.data(), qint64(json.size())) != qint64(json.size())
         || !file.commit()) {
         if (error) {
@@ -892,8 +893,9 @@ bool Document::open(const QString& path, QString* error)
     }
     core::Sketch loaded;
     std::vector<std::string> history;
+    int recorder = 0;
     try {
-        loaded = core::fromJson(file.readAll().toStdString(), &history);
+        loaded = core::fromJson(file.readAll().toStdString(), &history, &recorder);
     }
     catch (const core::SketchError& e) {
         if (error) {
@@ -917,6 +919,7 @@ bool Document::open(const QString& path, QString* error)
     for (const std::string& entry : history) {
         m_history << QString::fromStdString(entry);
     }
+    m_historyRecorder = history.empty() ? core::kRecorderVersion : recorder;  // (the oldest part decides)
     if (inTransaction()) {
         m_historyBeforeTransaction = m_history;
     }
