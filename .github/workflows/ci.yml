@@ -1,33 +1,20 @@
 name: CI
 
+# Windows only: it's what Setsquare is built and tested on. (The linux-gcc preset is kept for anyone
+# building it there, but it isn't checked.)
+
 on:
   push:
   pull_request:
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            preset: windows-msvc
-          - os: ubuntu-24.04
-            preset: linux-gcc
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Linux build deps
-        if: runner.os == 'Linux'
-        # autotools etc.: vcpkg builds the bundled CPython from source
-        run: >
-          sudo apt-get update && sudo apt-get install -y ninja-build libgl1-mesa-dev libxkbcommon-dev
-          autoconf autoconf-archive automake libtool pkg-config bison
-
       - name: Set up MSVC environment
-        if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Install Qt
@@ -41,10 +28,10 @@ jobs:
         run: echo "VCPKG_ROOT=$VCPKG_INSTALLATION_ROOT" >> "$GITHUB_ENV"
 
       - name: Configure
-        run: cmake --preset ${{ matrix.preset }}
+        run: cmake --preset windows-msvc
 
       - name: Build
-        run: cmake --build --preset ${{ matrix.preset }}
+        run: cmake --build --preset windows-msvc
 
       - name: Test
-        run: ctest --preset ${{ matrix.preset }}
+        run: ctest --preset windows-msvc

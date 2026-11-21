@@ -1,10 +1,10 @@
 # Setsquare
 
-A personal 2D parametric drawing app: Fusion-style constrained sketching, built on FreeCAD's PlaneGCS solver, with colours and other features layered on top. C++20 / Qt 6, dark mode by default, Windows and Linux.
+A personal 2D parametric drawing app: Fusion-style constrained sketching, built on FreeCAD's PlaneGCS solver, with colours and other features layered on top. C++20 / Qt 6, dark mode by default. Made for Windows; it can be compiled for Linux too (see below).
 
 ## Prerequisites
 - **Windows:** Visual Studio 2022 Build Tools (Desktop development with C++), Qt 6.8 (MSVC 2022 64-bit), vcpkg
-- **Linux:** GCC 13+, CMake 3.25+, Ninja, Qt 6.8, vcpkg
+- **Linux** (possible, but untested): GCC 13+, CMake 3.25+, Ninja, Qt 6.8, vcpkg
 
 Environment variables:
 - `VCPKG_ROOT`: your vcpkg checkout, e.g. `C:\dev\vcpkg`
@@ -17,7 +17,7 @@ cmake --preset windows-msvc
 cmake --build --preset windows-msvc
 ctest --preset windows-msvc
 ```
-Linux: use the `linux-gcc` preset instead.
+Linux: use the `linux-gcc` preset instead. It's possible to compile Setsquare there (the code avoids Windows-only parts), but it isn't built or tested on Linux, so expect to fix a thing or two.
 
 The first configure builds Eigen, Boost.Graph and Catch2 through vcpkg, which takes a few minutes.
 
