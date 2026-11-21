@@ -9,5 +9,4 @@ CMakeUserPresets.json
 # Personal: drawings and screenshots made while working on it
 /drawings/
 /*.png
-/ui example/*.png
-!/ui example/pattern.png
+/ui example/

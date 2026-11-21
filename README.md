@@ -1,48 +1,71 @@
-# Setsquare
+<p align="center">
+  <img src="icons/app/setsquare.svg" alt="Setsquare icon" width="112">
+</p>
 
-A personal 2D parametric drawing app: Fusion-style constrained sketching, built on FreeCAD's PlaneGCS solver, with colours and other features layered on top. C++20 / Qt 6, dark mode by default. Made for Windows; it can be compiled for Linux too (see below).
+<h1 align="center">Setsquare</h1>
 
-## Prerequisites
-- **Windows:** Visual Studio 2022 Build Tools (Desktop development with C++), Qt 6.8 (MSVC 2022 64-bit), vcpkg
-- **Linux** (possible, but untested): GCC 13+, CMake 3.25+, Ninja, Qt 6.8, vcpkg
+<p align="center">
+  A 2D parametric drawing app: sketch precisely with constraints and dimensions, then colour it in.
+</p>
 
-Environment variables:
-- `VCPKG_ROOT`: your vcpkg checkout, e.g. `C:\dev\vcpkg`
-- `QT_ROOT_DIR`: Qt kit directory, e.g. `C:\Qt\6.8.3\msvc2022_64`
+<p align="center">
+  <a href="https://github.com/notasandwich532/setsquare/releases/latest"><b>Download for Windows</b></a>
+</p>
 
-## Build and test
-Windows: run these from an **x64 Native Tools Command Prompt for VS 2022**, so `cl` and `ninja` are on PATH.
-```
-cmake --preset windows-msvc
-cmake --build --preset windows-msvc
-ctest --preset windows-msvc
-```
-Linux: use the `linux-gcc` preset instead. It's possible to compile Setsquare there, but it isn't built or tested on Linux, so it may need small fixes (such as a missing `#include` that MSVC happens to bring in by itself).
+![Setsquare, with a bracket drawn: dimensions, constraints, a gradient fill, a hatched hub and drawing annotations](docs/screenshot.png)
 
-The first configure builds Eigen, Boost.Graph and Catch2 through vcpkg, which takes a few minutes.
+Setsquare is a 2D drawing app built around Fusion-style constrained sketching. You draw roughly, then pin the drawing down with constraints (parallel, tangent, equal…) and dimensions, and the solver (FreeCAD's PlaneGCS) keeps everything exact as you change it. On top of that it has fills, gradients, hatches, strokes and text, so the same drawing can be a precise technical part or a finished, coloured illustration. Everything can also be scripted in Python. Dark mode by default.
 
-On Windows, the build copies the Qt DLLs next to `setsquare.exe` (windeployqt), so it starts on a double-click.
+## Getting it
+Download `Setsquare.zip` from the [latest release](https://github.com/notasandwich532/setsquare/releases/latest), unzip it anywhere and double-click `setsquare.exe`. Nothing needs installing (64-bit Windows 10 or 11). The app isn't code-signed, so the first time Windows may say "Windows protected your PC": click **More info**, then **Run anyway**.
 
-## Sharing it (Windows)
-```
-cmake --build --preset windows-msvc --target package_app
-```
-makes `build\windows-msvc\package\Setsquare.zip` (about 45 MB): the app, `setsquare-cli`, Qt, the bundled Python and Microsoft's C++ runtime, with a READ ME, so it runs on a PC with nothing installed (64-bit Windows 10 or 11). Unzip and double-click `setsquare.exe`. It isn't code-signed, so Windows SmartScreen asks once ("More info" → "Run anyway"). See `tools/package.cmake`.
+## Features
 
-## Scripting
-Everything in the UI can be done from Python (bundled CPython 3.14, no system Python needed), and UI actions are recorded as Python in the console. You can run Python in three places:
-- the in-app **Python** dock
-- **Macros → Run Script…**
-- headless, with `setsquare-cli script.py`
+### Sketching
+- **Shapes:** lines, points, rectangles (two-corner, three-point and centred), circles (centre, two-point, three-point, tangent to two or three curves), arcs (centre, three-point, tangent), ellipses, splines (through points, or by control points), regular polygons and five kinds of slot.
+- **Constraints:** coincident, horizontal/vertical, parallel, perpendicular, tangent, equal, ratio, midpoint, concentric, symmetric, collinear and fix.
+- **Dimensions** that drive the drawing: lengths, distances, radii, diameters and angles. Typing a new value reshapes the drawing to fit, and values accept arithmetic.
+- **Live solving:** drag anything and the rest follows as the constraints allow. The status bar counts the remaining degrees of freedom, and conflicting constraints are highlighted.
+- **Construction geometry** for guides that aren't part of the finished drawing.
 
-See [docs/scripting.md](docs/scripting.md).
+### Editing
+- **Trim, extend and break** at intersections, including ellipses and splines.
+- **Fillet and chamfer** (equal distances, two distances, or distance and angle). The original corner stays as construction, so dimensions to it survive.
+- **Move/Copy** with distances and rotation about any point, plus **scale** and **mirror**.
+- **Rectangular and circular patterns, offset and divide**, all kept linked: change the count or spacing later and the copies update.
+- **Groups**, copy and paste.
 
-## Layout
-- `third_party/planegcs/`: vendored solver (see its README for the local patches)
-- `src/core/`: sketch model, solver adapter, geometry, file format (no Qt)
-- `src/app/`: `Document` + the recording `Editor` (the command layer), and the Qt application
-- `src/script/`: embedded Python host, the `setsquare` module, and `setsquare-cli`
-- `tests/`: Catch2 unit/GUI tests, plus `tests/scripts/*.py` run headless
+### Appearance
+- **Fills** that work like a paint bucket but follow the geometry: they leave holes unfilled and reshape when the outline moves.
+- **Gradients**, linear and radial, tied to points in the drawing, for fills, strokes and text.
+- **Hatching** with standard patterns, at any angle, scale and line weight.
+- **Strokes:** colour, width and dash style for any curve.
+- **Text** in any installed font: bold and italic, in a box, or following a line, arc or circle. Merged outlines for script fonts.
+- **Colour palette and eyedropper.**
+- **Presentation view** to see the drawing as it will be exported, without the sketching aids.
+
+### Organising
+- **Layers and sublayers.** Geometry can be projected from one layer into another and stays linked.
+- **Reference images** to trace over, scaled to real size with Calibrate.
+- **Page setup:** paper size, orientation and colour.
+
+### Annotating and measuring
+- **Drawing annotations:** aligned, horizontal, vertical, radius, diameter, angle, arc length and ordinate dimensions, and leader notes.
+- **Measure** lengths, distances and areas.
+
+### Files
+- **Import** SVG and DXF drawings, keeping their curves, strokes, fills and layers.
+- **Export** SVG, DXF (exact curves, for CAD and CAM), PDF (true size, with real text), and PNG or JPG at any resolution.
+
+### Python scripting
+- Everything in the app can be done from Python, with Python bundled (no install needed).
+- Run it in the built-in **console**, as **macros**, or headless with `setsquare-cli script.py`.
+- Every action in the UI is **recorded as Python**, so a drawing's history can be read, replayed or turned into a macro.
+
+See [docs/scripting.md](docs/scripting.md) for the API.
+
+## Building from source
+Setsquare is C++20 with Qt 6, built with CMake and vcpkg (presets in `CMakePresets.json`). It's made for Windows; it can be compiled for Linux too, but it isn't built or tested there, so it may need small fixes.
 
 ## Credits
 Setsquare was developed with [Claude](https://www.anthropic.com/claude), Anthropic's AI model, working in [Claude Code](https://www.anthropic.com/claude-code). The design, the decisions and the testing in use are the author's; Claude wrote all of the code, to that direction.
