@@ -159,6 +159,33 @@ TEST_CASE("Replaying recorded UI actions reproduces the sketch", "[scripting][re
     requireSameSketch(f.doc.sketch(), replay.sketch());
 }
 
+TEST_CASE("Replaying recorded UI actions: a centre rectangle, then something that refers to its sides", "[scripting][recorder]")
+{
+    Fixture f;
+    f.view.setTool(ToolKind::RectangleCenter);
+    f.click(20, 10);  // the centre (a new point)
+    f.click(35, 20);  // a corner
+    f.key(Qt::Key_Escape);
+    f.view.setTool(ToolKind::Dimension);
+    f.click(20, 0);  // its bottom side
+    f.click(20, -8);
+    REQUIRE(f.editor());
+    f.editor()->selectAll();
+    QTest::keyClicks(f.editor(), "40");
+    QTest::keyClick(f.editor(), Qt::Key_Return);
+    f.view.setTool(ToolKind::Line);
+    f.click(35, 20);  // from its corner
+    f.click(50, 30);
+    f.key(Qt::Key_Escape);
+
+    INFO(f.recorded.join('\n').toStdString());
+    Document replay;
+    ScriptScope scope(replay);
+    const script::RunResult r = script::runConsole(f.recorded.join('\n'));
+    INFO(scope.err.toStdString());
+    REQUIRE(r.ok);
+    requireSameSketch(f.doc.sketch(), replay.sketch());
+}
 TEST_CASE("Console names like p12 resolve to sketch items", "[scripting][console]")
 {
     Document doc;
