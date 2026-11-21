@@ -18,6 +18,9 @@ namespace
 {
 constexpr double kDeg = std::numbers::pi / 180.0;
 
+const char* const kFunctions[] = {"sqrt", "abs",  "round", "floor", "ceil",  "exp",   "ln",  "log", "sin",
+                                  "cos",  "tan",  "asin",  "acos",  "atan",  "atan2", "hypot", "min", "max"};
+
 // Recursive descent over the text:
 //   sum     := product (('+' | '-') product)*
 //   product := unary (('*' | '/' | '%') unary | <juxtaposed> power)*
@@ -27,8 +30,12 @@ constexpr double kDeg = std::numbers::pi / 180.0;
 class Parser
 {
 public:
-    explicit Parser(std::string_view text)
+    // `lookup`: for names that aren't evaluate's own (else they're an error). `names`: instead of
+    // looking them up, note them (each once) and take them as 1.
+    explicit Parser(std::string_view text, const NameLookup* lookup = nullptr, std::vector<std::string>* names = nullptr)
         : m_text(text)
+        , m_lookup(lookup)
+        , m_names(names)
     {}
 
     double parse()
@@ -202,7 +209,8 @@ private:
         while (std::isalnum(static_cast<unsigned char>(peek())) || peek() == '_') {
             ++m_pos;
         }
-        std::string name(m_text.substr(start, m_pos - start));
+        const std::string written(m_text.substr(start, m_pos - start));
+        std::string name = written;
         std::ranges::transform(name, name.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
 
         struct Constant
@@ -222,7 +230,19 @@ private:
 
         skipSpace();
         if (peek() != '(') {
-            fail("don't know '" + name + "'");
+            // Not one of ours: the drawing's parameters, if there's a lookup.
+            if (m_names) {
+                if (std::ranges::find(*m_names, written) == m_names->end()) {
+                    m_names->push_back(written);
+                }
+                return 1.0;
+            }
+            if (m_lookup && *m_lookup) {
+                if (const std::optional<double> v = (*m_lookup)(written)) {
+                    return *v;
+                }
+            }
+            fail("don't know '" + written + "'");
         }
         ++m_pos;
         std::vector<double> args;
@@ -288,16 +308,44 @@ private:
 
     std::string_view m_text;
     size_t m_pos = 0;
+    const NameLookup* m_lookup = nullptr;
+    std::vector<std::string>* m_names = nullptr;
 };
 }  // namespace
 
 double evaluate(const std::string& text)
 {
-    const double v = Parser(text).parse();
+    return evaluate(text, NameLookup());
+}
+
+double evaluate(const std::string& text, const NameLookup& lookup)
+{
+    const double v = Parser(text, &lookup).parse();
     if (!std::isfinite(v)) {
         throw SketchError("that doesn't come out as a number");
     }
     return v;
+}
+
+std::vector<std::string> namesIn(const std::string& text)
+{
+    std::vector<std::string> names;
+    try {
+        Parser(text, nullptr, &names).parse();
+    }
+    catch (const SketchError&) {
+        // (what it found up to where it stopped)
+    }
+    return names;
+}
+
+bool isBuiltInName(const std::string& name)
+{
+    std::string lower = name;
+    std::ranges::transform(lower, lower.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    static const char* const constants[] = {"pi", "tau", "e", "mm", "cm", "m", "in", "ft", "deg"};
+    return std::ranges::any_of(constants, [&](const char* k) { return lower == k; })
+        || std::ranges::any_of(kFunctions, [&](const char* k) { return lower == k; });
 }
 
 bool tryEvaluate(const std::string& text, double& value, std::string* error)

@@ -36,6 +36,7 @@ private:
     {
         core::Id id;
         double value;
+        std::string expression;
         std::vector<double> params;
         bool conflicting;
         bool redundant;

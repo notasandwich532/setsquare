@@ -116,6 +116,24 @@ d.value = 40                  # re-solves; ValueError if impossible
 d.label = (0, -8)
 ```
 
+### Parameters
+Named values for dimensions to follow. A parameter's expression may use other parameters;
+a dimension's may use parameters (not other dimensions). Changing a parameter works out again
+everything using it and re-solves. Names are letters, digits and `_`, matched ignoring case.
+```python
+s.parameter("width", 120)                # set (or add); returns its value
+s.parameter("hole", "width / 10")        # using another
+s.parameter("width")                     # read: 120.0
+d.value = "width / 2 + 3"                # the dimension follows it
+d.expression                             # "width / 2 + 3" (None for a plain value)
+d.value = 60                             # a plain value again
+s.rename_parameter("width", "w")         # and every expression using it
+s.delete_parameter("hole")               # refused while something uses it
+s.parameters                             # each with .name, .expression, .value
+```
+In the app, the **Parameters** panel lists them; type a name into a dimension to use one (its label
+then shows ƒ). Unknown names, loops (`a` using `b` using `a`) and values a dimension can't have are
+refused, with nothing changed.
 ### Trimming and corners
 `near` is where you would click; it picks the part of the curve that's meant.
 

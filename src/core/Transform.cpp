@@ -272,6 +272,9 @@ std::map<Id, Id> copy(const Sketch& from, Sketch& to, const std::vector<Id>& sel
             }
             const double value = isLength(type) ? c.value * scale : c.value;
             const Id made = to.addConstraint(type, std::move(refs), value, groupParams(from, c, scale, t.mirrors()));
+            if (!c.expression.empty() && sameSketch && std::abs(scale - 1.0) < 1e-12) {
+                to.setConstraintExpression(made, c.expression);  // (same parameters, same size: still true)
+            }
             const Vec2 label = t.applyLinear({c.labelX, c.labelY});
             to.setConstraintLabel(made, label.x, label.y);
             to.setConstraintFlip(made, c.flip);
@@ -332,6 +335,7 @@ void apply(Sketch& s, const std::vector<Id>& selection, const Affine& t)
     for (Id id : scaled) {
         const Constraint& c = s.constraint(id);
         const Vec2 label = t.applyLinear({c.labelX, c.labelY});
+        s.setConstraintExpression(id, {});  // (a new size: no longer what its expression says)
         s.setConstraintValue(id, c.value * scale);
         s.setConstraintLabel(id, label.x, label.y);
     }

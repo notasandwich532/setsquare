@@ -12,6 +12,7 @@
 #include "TextShapes.h"
 
 #include <core/Annotations.h>
+#include <core/Parameters.h>
 #include <core/Curves.h>
 #include <numbers>
 #include <core/Dimensions.h>
@@ -1131,16 +1132,26 @@ PYBIND11_EMBEDDED_MODULE(setsquare, m)
                 const core::Constraint& k = constraintOf(c.id);
                 return core::hasValue(k.type) ? py::cast(k.value) : py::none();
             },
-            [](const ConstraintH& c, double v) {
+            [](const ConstraintH& c, py::handle v) {
                 constraintOf(c.id);
                 Call call;
                 QString error;
-                if (!call.target().setDimensionValue(c.id, v, &error)) {
+                const bool done = py::isinstance<py::str>(v)
+                    ? call.target().setDimensionExpression(c.id, QString::fromStdString(v.cast<std::string>()), &error)
+                    : call.target().setDimensionValue(c.id, v.cast<double>(), &error);
+                if (!done) {
                     throw py::value_error(error.toStdString());
                 }
             },
             "A dimension's value (lengths, or degrees for angles), a pattern's spacing or total angle, or an "
-            "offset's distance. Setting it re-solves.")
+            "offset's distance. Setting it re-solves. A string using the drawing's parameters (\"width / 2\") "
+            "makes it follow them (see s.parameter); a number makes it a plain value again.")
+        .def_property_readonly(
+            "expression", [](const ConstraintH& c) -> py::object {
+                const core::Constraint& k = constraintOf(c.id);
+                return k.expression.empty() ? py::none() : py::cast(k.expression);
+            },
+            "What a dimension is worked out from (\"width / 2\"), or None for a plain value.")
         .def_property(
             "label", [](const ConstraintH& c) {
                 const core::Constraint& k = constraintOf(c.id);
@@ -1855,6 +1866,48 @@ PYBIND11_EMBEDDED_MODULE(setsquare, m)
             call.target().dragTo(dx, dy);
             call.target().endDrag();
         }, py::arg("curve"), py::arg("grab"), py::arg("dx"), py::arg("dy"), "Drag a circle/arc rim from a grab point.")
+        // parameters
+        .def("parameter", [](const SketchH&, const std::string& name, py::object expression) -> double {
+            if (!expression.is_none()) {
+                const std::string text = py::isinstance<py::str>(expression) ? expression.cast<std::string>()
+                                                                            : py::str(expression).cast<std::string>();
+                Call call;
+                QString error;
+                if (!call.target().setParameter(QString::fromStdString(name), QString::fromStdString(text), &error)) {
+                    throw py::value_error(error.toStdString());
+                }
+            }
+            const int at = core::parameters::find(sketch(), name);
+            if (at < 0) {
+                throw py::key_error("no parameter called " + name);
+            }
+            return sketch().parameters()[static_cast<size_t>(at)].value;
+        }, py::arg("name"), py::arg("expression") = py::none(),
+           "A named value for dimensions to use: s.parameter(\"width\", 120), s.parameter(\"hole\", \"width / 10\") "
+           "(parameters may use each other). Changing one re-works out every dimension using it (d.value = "
+           "\"width / 2\") and re-solves. Returns its value; with no expression, just reads it.")
+        .def("rename_parameter", [](const SketchH&, const std::string& from, const std::string& to) {
+            Call call;
+            QString error;
+            if (!call.target().renameParameter(QString::fromStdString(from), QString::fromStdString(to), &error)) {
+                throw py::value_error(error.toStdString());
+            }
+        }, py::arg("old"), py::arg("new"), "Renames a parameter, and every expression using it.")
+        .def("delete_parameter", [](const SketchH&, const std::string& name) {
+            Call call;
+            QString error;
+            if (!call.target().deleteParameter(QString::fromStdString(name), &error)) {
+                throw py::value_error(error.toStdString());
+            }
+        }, py::arg("name"), "Deletes a parameter (not while a dimension or another parameter uses it).")
+        .def_property_readonly("parameters", [](const SketchH&) {
+            py::list out;
+            const py::object item = py::module_::import("types").attr("SimpleNamespace");
+            for (const core::Parameter& p : sketch().parameters()) {
+                out.append(item(py::arg("name") = p.name, py::arg("expression") = p.expression, py::arg("value") = p.value));
+            }
+            return out;
+        }, "The drawing's parameters, in order: each with .name, .expression and .value.")
         .def("move", [](const SketchH&, py::handle items, double dx, double dy, double angle, py::handle about) {
             std::vector<Id> points;
             for (Id id : core::xform::expand(sketch(), itemsOf(items))) {

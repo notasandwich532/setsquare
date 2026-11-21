@@ -73,7 +73,17 @@ public:
 
     // Changes a dimension or feature value (pattern spacing/angle, offset distance), rejecting
     // values the solver can't satisfy. A feature's source geometry stays put.
-    bool setDimensionValue(core::Id dimension, double value, QString* error = nullptr);
+    bool setDimensionValue(core::Id dimension, double value, QString* error = nullptr);  // (no longer an expression)
+    // A dimension worked out from the parameters ("width / 2"; see core/Parameters.h). Without a
+    // parameter in it, it's just a value. Recorded as d12.value = "width / 2".
+    bool setDimensionExpression(core::Id dimension, const QString& expression, QString* error = nullptr);
+
+    // The drawing's parameters. Each change works out again everything that uses them and
+    // re-solves; false (with why, nothing changed) if that can't be done. Recorded as
+    // s.parameter("width", "120"), s.rename_parameter(...), s.delete_parameter(...).
+    bool setParameter(const QString& name, const QString& expression, QString* error = nullptr);  // (new: added)
+    bool renameParameter(const QString& from, const QString& to, QString* error = nullptr);  // (and where it's used)
+    bool deleteParameter(const QString& name, QString* error = nullptr);  // (not while something uses it)
     // Groups items (curves, points) so they keep their places relative to each other (see
     // core/Groups.h). Checked like a constraint; kNoId (and why) if it can't be.
     core::Id addGroup(const std::vector<core::Id>& items, QString* error = nullptr);

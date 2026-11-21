@@ -25,6 +25,8 @@ add_library(setsquare_lib STATIC
     ImportDialog.cpp
     ImportDialog.h
     PageSetup.cpp
+    ParametersPanel.cpp
+    ParametersPanel.h
     PageSetup.h
     Recovery.cpp
     Recovery.h

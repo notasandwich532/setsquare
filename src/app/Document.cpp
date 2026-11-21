@@ -5,6 +5,8 @@
 #include <core/Annotations.h>
 #include <core/Features.h>
 #include <core/Groups.h>
+#include <core/Parameters.h>
+#include <core/Expression.h>
 #include <core/Regions.h>
 #include <core/Serialize.h>
 
@@ -248,6 +250,7 @@ bool Document::setDimensionValue(core::Id dimension, double value, QString* erro
     core::Sketch working = m_sketch;
     std::vector<core::Id> hold;
     try {
+        working.setConstraintExpression(dimension, {});  // (a value now, not worked out)
         working.setConstraintValue(dimension, value);
         const core::Constraint& c = working.constraint(dimension);
         if (core::isFeature(c.type)) {
@@ -270,6 +273,171 @@ bool Document::setDimensionValue(core::Id dimension, double value, QString* erro
     return true;
 }
 
+bool Document::setDimensionExpression(core::Id dimension, const QString& expression, QString* error)
+{
+    const std::string text = expression.trimmed().toStdString();
+    if (core::namesIn(text).empty()) {
+        // (No parameter in it: a plain value, worked out now.)
+        double value = 0.0;
+        std::string why;
+        if (!core::tryEvaluate(text, value, &why)) {
+            if (error) {
+                *error = QString::fromStdString(why);
+            }
+            return false;
+        }
+        return setDimensionValue(dimension, value, error);
+    }
+    auto fail = [&](const QString& why) {
+        if (error) {
+            *error = why;
+        }
+        return false;
+    };
+    if (!m_sketch.hasConstraint(dimension) || !core::hasValue(m_sketch.constraint(dimension).type)) {
+        return fail(tr("That isn't a dimension"));
+    }
+    if (core::isFeature(m_sketch.constraint(dimension).type)) {
+        return fail(tr("A pattern's, offset's or divide's settings can't use parameters (yet): only dimensions can"));
+    }
+    if (core::group::holder(m_sketch, dimension) != core::kNoId) {
+        return fail(tr("It's inside a group, which holds its size: ungroup it (delete the group) to change it"));
+    }
+    core::Sketch working = m_sketch;
+    try {
+        working.setConstraintExpression(dimension, text);
+        core::parameters::update(working);
+    }
+    catch (const core::SketchError& e) {
+        return fail(errorText(e));
+    }
+    if (!commitChecked(std::move(working), error, {}, {dimension})) {
+        return false;
+    }
+    record(QStringLiteral("%1.value = %2").arg(Editor::name(m_sketch, dimension), pyString(QString::fromStdString(text))));
+    return true;
+}
+
+bool Document::setParameter(const QString& name, const QString& expression, QString* error)
+{
+    auto fail = [&](const QString& why) {
+        if (error) {
+            *error = why;
+        }
+        return false;
+    };
+    const std::string n = name.trimmed().toStdString();
+    const std::string text = expression.trimmed().toStdString();
+    std::string why;
+    if (!core::parameters::validName(n, &why)) {
+        return fail(QString::fromStdString(why));
+    }
+    if (text.empty()) {
+        return fail(tr("%1 needs a value (a number, or a sum using other parameters)").arg(name.trimmed()));
+    }
+    core::Sketch working = m_sketch;
+    std::vector<core::Parameter> all = working.parameters();
+    const int at = core::parameters::find(working, n);
+    if (at >= 0) {
+        all[static_cast<size_t>(at)].expression = text;
+    }
+    else {
+        all.push_back({n, text});
+    }
+    working.setParameters(all);
+    try {
+        core::parameters::update(working);
+    }
+    catch (const core::SketchError& e) {
+        return fail(errorText(e));
+    }
+    if (!commitChecked(std::move(working), error, {}, core::parameters::usersOf(m_sketch, n).dimensions)) {
+        return false;
+    }
+    record(QStringLiteral("s.parameter(%1, %2)").arg(pyString(QString::fromStdString(n)), pyString(QString::fromStdString(text))));
+    return true;
+}
+
+bool Document::renameParameter(const QString& from, const QString& to, QString* error)
+{
+    auto fail = [&](const QString& why) {
+        if (error) {
+            *error = why;
+        }
+        return false;
+    };
+    const std::string a = from.trimmed().toStdString(), b = to.trimmed().toStdString();
+    const int at = core::parameters::find(m_sketch, a);
+    if (at < 0) {
+        return fail(tr("There's no parameter called %1").arg(from.trimmed()));
+    }
+    std::string why;
+    if (!core::parameters::validName(b, &why)) {
+        return fail(QString::fromStdString(why));
+    }
+    const int taken = core::parameters::find(m_sketch, b);
+    if (taken >= 0 && taken != at) {
+        return fail(tr("There's already a parameter called %1").arg(to.trimmed()));
+    }
+    // Its name, and everywhere it's used.
+    const std::string was = m_sketch.parameters()[static_cast<size_t>(at)].name;
+    core::Sketch working = m_sketch;
+    std::vector<core::Parameter> all = working.parameters();
+    for (core::Parameter& p : all) {
+        p.expression = core::parameters::renamed(p.expression, was, b);
+    }
+    all[static_cast<size_t>(at)].name = b;
+    working.setParameters(all);
+    for (core::Id d : core::parameters::usersOf(m_sketch, was).dimensions) {
+        working.setConstraintExpression(d, core::parameters::renamed(working.constraint(d).expression, was, b));
+    }
+    try {
+        core::parameters::update(working);
+    }
+    catch (const core::SketchError& e) {
+        return fail(errorText(e));
+    }
+    if (!commitChecked(std::move(working), error)) {
+        return false;
+    }
+    record(QStringLiteral("s.rename_parameter(%1, %2)").arg(pyString(QString::fromStdString(was)), pyString(QString::fromStdString(b))));
+    return true;
+}
+
+bool Document::deleteParameter(const QString& name, QString* error)
+{
+    auto fail = [&](const QString& why) {
+        if (error) {
+            *error = why;
+        }
+        return false;
+    };
+    const int at = core::parameters::find(m_sketch, name.trimmed().toStdString());
+    if (at < 0) {
+        return fail(tr("There's no parameter called %1").arg(name.trimmed()));
+    }
+    const std::string was = m_sketch.parameters()[static_cast<size_t>(at)].name;
+    const core::parameters::Users users = core::parameters::usersOf(m_sketch, was);
+    if (!users.empty()) {
+        QStringList uses;
+        for (const std::string& p : users.parameters) {
+            uses << QString::fromStdString(p);
+        }
+        for (core::Id d : users.dimensions) {
+            uses << Editor::name(m_sketch, d);
+        }
+        return fail(tr("%1 is used by %2: change those first").arg(QString::fromStdString(was), uses.join(QStringLiteral(", "))));
+    }
+    core::Sketch working = m_sketch;
+    std::vector<core::Parameter> all = working.parameters();
+    all.erase(all.begin() + at);
+    working.setParameters(all);
+    if (!commitChecked(std::move(working), error)) {
+        return false;
+    }
+    record(QStringLiteral("s.delete_parameter(%1)").arg(pyString(QString::fromStdString(was))));
+    return true;
+}
 namespace
 {
 }  // namespace

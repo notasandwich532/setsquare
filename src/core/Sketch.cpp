@@ -1062,6 +1062,18 @@ void Sketch::normalize(ConstraintType type, std::vector<Id>& refs) const
     }
 }
 
+void Sketch::setConstraintExpression(Id id, std::string expression)
+{
+    auto it = m_constraints.find(id);
+    if (it == m_constraints.end()) {
+        throw SketchError("unknown constraint " + std::to_string(id));
+    }
+    if (!expression.empty() && !hasValue(it->second.type)) {
+        throw SketchError(std::string(toString(it->second.type)) + " constraint has no value");
+    }
+    it->second.expression = std::move(expression);
+}
+
 void Sketch::setConstraintValue(Id id, double value)
 {
     auto it = m_constraints.find(id);

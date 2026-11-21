@@ -12,6 +12,7 @@
 #include "ColorBar.h"
 #include "Icons.h"
 #include "ConstraintPanel.h"
+#include "ParametersPanel.h"
 #include "Document.h"
 #include "PythonHost.h"
 #include "ScriptConsole.h"
@@ -1421,6 +1422,13 @@ void MainWindow::createActions()
     constraintsDock->setWidget(new ConstraintPanel(*m_doc, *m_view, constraintsDock));
     addDockWidget(Qt::RightDockWidgetArea, constraintsDock);
     resizeDocks({constraintsDock}, {300}, Qt::Horizontal);
+    // The parameters (named values for dimensions), under the constraints.
+    auto* parametersDock = new QDockWidget(tr("Parameters"), this);
+    parametersDock->setObjectName("ParametersDock");
+    parametersDock->setWidget(new ParametersPanel(*m_doc, parametersDock));
+    addDockWidget(Qt::RightDockWidgetArea, parametersDock);
+    splitDockWidget(constraintsDock, parametersDock, Qt::Vertical);
+    resizeDocks({constraintsDock, parametersDock}, {3, 1}, Qt::Vertical);
 
     auto* browserDock = new QDockWidget(tr("Browser"), this);
     browserDock->setObjectName("BrowserDock");
@@ -1484,6 +1492,7 @@ void MainWindow::createActions()
     auto* viewMenu = menuBar()->addMenu(tr("&View"));
     viewMenu->addAction(browserDock->toggleViewAction());
     viewMenu->addAction(constraintsDock->toggleViewAction());
+    viewMenu->addAction(parametersDock->toggleViewAction());
     viewMenu->addAction(m_consoleDock->toggleViewAction());
     auto* home = viewMenu->addAction(tr("&Fit All"));
     home->setShortcut(Qt::Key_Home);

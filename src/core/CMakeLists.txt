@@ -5,6 +5,8 @@ add_library(drawcore STATIC
     Builders.h
     Dimensions.cpp
     Expression.cpp
+    Parameters.cpp
+    Parameters.h
     Dimensions.h
     Export.cpp
     Export.h

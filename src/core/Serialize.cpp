@@ -1,4 +1,5 @@
 #include "Serialize.h"
+#include "Parameters.h"
 
 #include <algorithm>
 #include <charconv>
@@ -385,6 +386,9 @@ json constraintToJson(const Constraint& c)
     }
     if (hasValue(c.type)) {
         j["value"] = c.value;
+        if (!c.expression.empty()) {
+            j["expression"] = c.expression;
+        }
         if (c.labelX != 0.0 || c.labelY != 0.0) {
             j["label"] = {c.labelX, c.labelY};
         }
@@ -408,6 +412,7 @@ Constraint constraintFromJson(const json& j)
     }
     c.refs = j.at("refs").get<std::vector<Id>>();
     c.value = j.value("value", 0.0);
+    c.expression = j.value("expression", std::string());
     c.params = j.value("params", std::vector<double>{});
     if (j.contains("label")) {
         const auto& label = j.at("label");
@@ -445,6 +450,17 @@ std::string toJson(const Sketch& sketch, bool compact, const std::vector<std::st
     }
     doc["entities"] = std::move(entities);
     doc["constraints"] = std::move(constraints);
+    if (!sketch.parameters().empty()) {
+        json params = json::array();
+        for (const Parameter& p : sketch.parameters()) {
+            json j{{"name", p.name}, {"expression", p.expression}};
+            if (!p.comment.empty()) {
+                j["comment"] = p.comment;
+            }
+            params.push_back(std::move(j));
+        }
+        doc["parameters"] = std::move(params);
+    }
     if (!sketch.strokes().empty()) {
         json strokes = json::array();
         for (const auto& [curve, style] : sketch.strokes()) {
@@ -891,6 +907,24 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history, int*
         }
         // Last: setting the page puts its frame (loaded with the geometry) where the page is.
         sketch.setPage(loadedPage);
+        // Parameters, worked out (their values aren't saved: they're what their expressions say).
+        std::vector<Parameter> params;
+        for (const json& j : doc.value("parameters", json::array())) {
+            Parameter p;
+            p.name = j.at("name").get<std::string>();
+            p.expression = j.at("expression").get<std::string>();
+            p.comment = j.value("comment", std::string());
+            params.push_back(std::move(p));
+        }
+        if (!params.empty()) {
+            sketch.setParameters(std::move(params));
+            try {
+                parameters::update(sketch);
+            }
+            catch (const SketchError& e) {
+                throw SketchError(std::string("its parameters: ") + e.what());
+            }
+        }
         if (history) {
             *history = doc.value("history", std::vector<std::string>{});
         }

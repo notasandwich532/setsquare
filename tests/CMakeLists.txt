@@ -12,6 +12,7 @@ add_executable(core_tests
     core/test_dimensions.cpp
     core/test_expression.cpp
     core/test_export.cpp
+    core/test_parameters.cpp
     core/test_features.cpp
     core/test_geometry.cpp
     core/test_measure.cpp
@@ -48,6 +49,7 @@ add_executable(app_tests
     app/test_measure_tool.cpp
     app/test_modify_tools.cpp
     app/test_page.cpp
+    app/test_parameters.cpp
     app/test_project_tool.cpp
     app/test_recent_files.cpp
     app/test_recovery.cpp

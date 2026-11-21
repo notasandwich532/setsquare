@@ -255,7 +255,21 @@ struct Constraint
     // Features only: settings beyond the value (see ConstraintType).
     std::vector<double> params;
 
+    // Dimensions only: worked out from the drawing's parameters ("width / 2"), or empty for a plain
+    // value. `value` then holds what it comes to (see core/Parameters.h).
+    std::string expression;
+
     Id sublayer = kNoId;  // the sublayer it was made in (its symbol shows while that's active)
+};
+
+// A named value of the drawing ("width" = "120"), for dimensions' expressions to use. Its
+// expression may use other parameters; `value` is what it comes to (see core/Parameters.h).
+struct Parameter
+{
+    std::string name;
+    std::string expression;
+    double value = 0.0;
+    std::string comment;
 };
 
 // A colour filling a closed area of the drawing, as a paint bucket would. The area isn't stored:
@@ -487,6 +501,12 @@ public:
     void setConstraintParams(Id constraint, std::vector<double> params);  // features
     void setConstraintLabel(Id constraint, double dx, double dy);
     void setConstraintFlip(Id constraint, std::uint8_t flip);  // see Constraint::flip
+    // A dimension's expression (empty: a plain value). Unchecked: see core::parameters::update.
+    void setConstraintExpression(Id constraint, std::string expression);
+
+    // --- parameters (named values; see core/Parameters.h) ---
+    const std::vector<Parameter>& parameters() const { return m_parameters; }
+    void setParameters(std::vector<Parameter> parameters) { m_parameters = std::move(parameters); }
 
     // Whether addConstraint would accept these references (value checks use a valid
     // placeholder unless one is given). On failure, *why receives the reason.
@@ -720,6 +740,7 @@ private:
     std::map<Id, Image> m_images;
     std::map<Id, DrawnDimension> m_drawnDimensions;
     int m_dimensionDecimals = 2;
+    std::vector<Parameter> m_parameters;
     void checkDrawnDimension(DrawnDimension& d) const;  // throws unless valid; puts refs in order
     // Throws unless every one of these items is in `layer` (or is the origin/axes).
     void requireLayer(const std::vector<Id>& items, Id layer) const;

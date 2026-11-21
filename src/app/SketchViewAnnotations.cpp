@@ -7,6 +7,7 @@
 #include "Theme.h"
 
 #include <core/Curves.h>
+#include <core/Expression.h>
 #include <core/Features.h>
 
 #include <QFocusEvent>
@@ -306,11 +307,13 @@ protected:
 
 QString SketchView::formatDimension(const core::Constraint& c) const
 {
+    // (ƒ: worked out from the drawing's parameters; see core/Parameters.h)
+    const QString driven = c.expression.empty() ? QString() : QStringLiteral("\u0192 ");
     switch (c.type) {
-        case ConstraintType::Radius: return QStringLiteral("R") + formatNumber(c.value);
-        case ConstraintType::Diameter: return QStringLiteral("⌀") + formatNumber(c.value);  // ⌀
-        case ConstraintType::Angle: return formatNumber(c.value) + QStringLiteral("°");
-        default: return formatNumber(c.value);
+        case ConstraintType::Radius: return driven + QStringLiteral("R") + formatNumber(c.value);
+        case ConstraintType::Diameter: return driven + QStringLiteral("⌀") + formatNumber(c.value);  // ⌀
+        case ConstraintType::Angle: return driven + formatNumber(c.value) + QStringLiteral("°");
+        default: return driven + formatNumber(c.value);
     }
 }
 
@@ -798,10 +801,13 @@ void SketchView::editValue(Id id, QPointF at)
     auto* editor = new DimensionEditor(this);
     m_editor = editor;
     editor->setObjectName(QStringLiteral("dimensionEditor"));
-    editor->setText(formatNumber(c.value));
+    // (Worked out from the parameters: what it's worked out from, to change.)
+    const QString shown = c.expression.empty() ? formatNumber(c.value) : QString::fromStdString(c.expression);
+    editor->setText(shown);
     editor->setAlignment(Qt::AlignCenter);
-    editor->resize(90, editor->sizeHint().height());
-    editor->move((at - QPointF(45, editor->height() / 2.0)).toPoint());
+    const int wide = std::max(90, editor->fontMetrics().horizontalAdvance(shown) + 24);
+    editor->resize(wide, editor->sizeHint().height());
+    editor->move((at - QPointF(wide / 2.0, editor->height() / 2.0)).toPoint());
 
     // Idempotent: Enter closes, and the resulting focus loss calls it again.
     auto close = [this, editor] {
@@ -816,7 +822,13 @@ void SketchView::editValue(Id id, QPointF at)
     editor->onAccept = [this, editor, id, close] {
         double value = 0.0;
         QString error;
-        if (!readNumber(editor->text(), value, &error)) {
+        // Using a parameter: it follows it (see core/Parameters.h).
+        if (!core::namesIn(editor->text().trimmed().toStdString()).empty()) {
+            if (!m_doc.setDimensionExpression(id, editor->text(), &error)) {
+                emit message(tr("Can't use \"%1\": %2").arg(editor->text().trimmed(), error));
+            }
+        }
+        else if (!readNumber(editor->text(), value, &error)) {
             emit message(tr("Can't work out \"%1\": %2").arg(editor->text().trimmed(), error));
         }
         else if (!m_doc.setDimensionValue(id, value, &error)) {

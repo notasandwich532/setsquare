@@ -116,6 +116,9 @@ QString ConstraintPanel::describe(const core::Constraint& c) const
     QString text = typeName(c.type);
     if (core::isDimension(c.type)) {
         text += QStringLiteral("  ") + m_view.formatDimension(c);
+        if (!c.expression.empty()) {
+            text += QStringLiteral(" = ") + QString::fromStdString(c.expression);
+        }
     }
     if (c.type == core::ConstraintType::Ratio) {
         text += QStringLiteral("  %1 : 1").arg(QString::number(c.value, 'g', 6));
@@ -158,7 +161,7 @@ void ConstraintPanel::rebuild()
         if (c.sublayer != core::kNoId && c.sublayer != s.activeSublayer()) {
             continue;  // (the active sublayer's only, as on the canvas)
         }
-        shown.push_back({id, c.value, c.params, contains(r.conflicting, id), contains(r.redundant, id)});
+        shown.push_back({id, c.value, c.expression, c.params, contains(r.conflicting, id), contains(r.redundant, id)});
     }
     if (shown == m_shown) {
         return;  // e.g. a drag: geometry moved, constraints didn't change
