@@ -17,7 +17,7 @@ cmake --preset windows-msvc
 cmake --build --preset windows-msvc
 ctest --preset windows-msvc
 ```
-Linux: use the `linux-gcc` preset instead. It's possible to compile Setsquare there (the code avoids Windows-only parts), but it isn't built or tested on Linux, so expect to fix a thing or two.
+Linux: use the `linux-gcc` preset instead. It's possible to compile Setsquare there, but it isn't built or tested on Linux, so it may need small fixes (such as a missing `#include` that MSVC happens to bring in by itself).
 
 The first configure builds Eigen, Boost.Graph and Catch2 through vcpkg, which takes a few minutes.
 
