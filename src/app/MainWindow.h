@@ -30,6 +30,10 @@ public:
     // Work autosaved by a session that didn't close (see Recovery): offers the newest back. True if
     // it was recovered into this window. (older: for tests; empty: the app's own.)
     bool offerRecovery(const QString& folder = {});
+    // File > Open Recent: newest first (full paths, in the app's settings).
+    static QStringList recentFiles();
+    static void addRecentFile(const QString& path);
+    static constexpr int kRecentFiles = 10;
     // File > Insert Image: a reference image in the middle of the view (empty path: ask which).
     void insertImage(const QString& path = {});
     // File > Import: an SVG or DXF drawing (empty path: ask which), with its options.
@@ -85,4 +89,7 @@ private:
     Document::ImageOptions m_imageOptions;
     QAction* m_insertImage = nullptr;
     class Recovery* m_recovery = nullptr;
+    class QMenu* m_recentFilesMenu = nullptr;
+    void fillRecentMenu();
+    void openRecent(const QString& path);  // (one that's gone: said so, and off the list)
 };

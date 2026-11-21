@@ -6,6 +6,7 @@
 #include "TextShapes.h"
 
 #include <QApplication>
+#include <QSettings>
 #include <QStandardPaths>
 
 #include <cstdio>
@@ -24,6 +25,11 @@ int main(int argc, char* argv[])
 #endif
     QApplication app(argc, argv);
     QStandardPaths::setTestModeEnabled(true);  // (app data, e.g. autosave copies, not in the real folders)
+    // Settings (e.g. recent files) in a file of the tests' own, not the registry, emptied each run.
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
+                       QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + QStringLiteral("/setsquare-tests"));
+    QSettings().clear();
     textshapes::addUserFonts();
     QString error;
     if (!script::initialise(&error)) {

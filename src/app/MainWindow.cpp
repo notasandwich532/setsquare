@@ -45,6 +45,7 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QCloseEvent>
+#include <QSettings>
 #include <QLocale>
 #include <QDir>
 #include <QDockWidget>
@@ -119,6 +120,12 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_doc, &Document::changed, this, &MainWindow::updateSolveStatus);
     connect(m_doc, &Document::fileStateChanged, this, &MainWindow::updateTitle);
     m_recovery = new Recovery(*m_doc, {}, this);  // autosave, for after a crash
+    // Opened or saved (from the menus or from Python): to the top of File > Open Recent.
+    connect(m_doc, &Document::fileStateChanged, this, [this] {
+        if (!m_doc->filePath().isEmpty() && !m_doc->isModified()) {
+            addRecentFile(m_doc->filePath());
+        }
+    });
 
     // Python scripts act on this window's document and can drive its view.
     script::setDocument(m_doc);
@@ -343,6 +350,61 @@ bool MainWindow::openFile(const QString& path)
     m_view->setTool(ToolKind::Select);
     m_view->fitAll();
     return true;
+}
+
+QStringList MainWindow::recentFiles()
+{
+    return QSettings().value(QStringLiteral("recentFiles")).toStringList();
+}
+
+void MainWindow::addRecentFile(const QString& path)
+{
+    const QString full = QDir::cleanPath(QFileInfo(path).absoluteFilePath());
+    QStringList list = recentFiles();
+    list.removeIf([&](const QString& p) { return QString::compare(p, full, Qt::CaseInsensitive) == 0; });
+    list.prepend(full);
+    while (list.size() > kRecentFiles) {
+        list.removeLast();
+    }
+    QSettings().setValue(QStringLiteral("recentFiles"), list);
+}
+
+void MainWindow::fillRecentMenu()
+{
+    m_recentFilesMenu->clear();
+    const QStringList list = recentFiles();
+    for (int i = 0; i < list.size(); ++i) {
+        const QString path = list[i];
+        // "&1 coaster.setsq": a number to pick it by, then its name (the folder in the tooltip).
+        QAction* a = m_recentFilesMenu->addAction(
+            QStringLiteral("&%1  %2").arg(i < 9 ? QString::number(i + 1) : QStringLiteral("1&0"), QFileInfo(path).fileName()));
+        a->setToolTip(QDir::toNativeSeparators(path));
+        a->setStatusTip(QDir::toNativeSeparators(path));
+        connect(a, &QAction::triggered, this, [this, path] { openRecent(path); });
+    }
+    if (list.isEmpty()) {
+        m_recentFilesMenu->addAction(tr("(none yet)"))->setEnabled(false);
+        return;
+    }
+    m_recentFilesMenu->addSeparator();
+    QAction* clear = m_recentFilesMenu->addAction(tr("&Clear Recent"));
+    connect(clear, &QAction::triggered, this, [] { QSettings().remove(QStringLiteral("recentFiles")); });
+}
+
+void MainWindow::openRecent(const QString& path)
+{
+    if (!QFileInfo::exists(path)) {
+        QStringList list = recentFiles();
+        list.removeAll(path);
+        QSettings().setValue(QStringLiteral("recentFiles"), list);
+        QMessageBox::warning(this, tr("Open Recent"),
+                             tr("%1 isn't there any more (moved, renamed or deleted), so it's been taken off the list.")
+                                 .arg(QDir::toNativeSeparators(path)));
+        return;
+    }
+    if (maybeSave()) {
+        openFile(path);
+    }
 }
 
 bool MainWindow::offerRecovery(const QString& folder)
@@ -943,6 +1005,11 @@ void MainWindow::createActions()
     auto* open = fileMenu->addAction(tr("&Open..."));
     open->setShortcut(QKeySequence::Open);
     connect(open, &QAction::triggered, this, &MainWindow::open);
+    m_recentFilesMenu = fileMenu->addMenu(tr("Open &Recent"));
+    m_recentFilesMenu->setObjectName(QStringLiteral("recentFilesMenu"));
+    m_recentFilesMenu->setToolTipsVisible(true);
+    connect(m_recentFilesMenu, &QMenu::aboutToShow, this, &MainWindow::fillRecentMenu);
+    fillRecentMenu();
     auto* save = fileMenu->addAction(tr("&Save"));
     save->setShortcut(QKeySequence::Save);
     connect(save, &QAction::triggered, this, &MainWindow::save);

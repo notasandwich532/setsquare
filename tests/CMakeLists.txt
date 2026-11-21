@@ -49,6 +49,7 @@ add_executable(app_tests
     app/test_modify_tools.cpp
     app/test_page.cpp
     app/test_project_tool.cpp
+    app/test_recent_files.cpp
     app/test_recovery.cpp
     app/test_scripting.cpp
     app/test_shape_tools.cpp
