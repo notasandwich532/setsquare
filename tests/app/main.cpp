@@ -8,6 +8,7 @@
 #include <QApplication>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QTemporaryDir>
 
 #include <cstdio>
 
@@ -25,11 +26,11 @@ int main(int argc, char* argv[])
 #endif
     QApplication app(argc, argv);
     QStandardPaths::setTestModeEnabled(true);  // (app data, e.g. autosave copies, not in the real folders)
-    // Settings (e.g. recent files) in a file of the tests' own, not the registry, emptied each run.
+    // Settings (e.g. recent files) in a file of this run's own, not the registry: CTest runs many
+    // test processes at once, and they mustn't share one.
+    const QTemporaryDir settings;
     QSettings::setDefaultFormat(QSettings::IniFormat);
-    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
-                       QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + QStringLiteral("/setsquare-tests"));
-    QSettings().clear();
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settings.path());
     textshapes::addUserFonts();
     QString error;
     if (!script::initialise(&error)) {
