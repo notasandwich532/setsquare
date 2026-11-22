@@ -1409,11 +1409,53 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
         return l;
     };
 
+    // --- the layers ---------------------------------------------------------------------------
+    // The drawing's, each split by kind: its curves on "Top", the rest on "Top - FILLS",
+    // "Top - TEXT", "Top - DIMENSIONS" and (switched off) "Top - CONSTRUCTION". Names as DXF
+    // allows them (no < > / \ " : ; ? * | = `), and apart even where they differ only in case (a
+    // DXF reader takes those for one layer).
+    std::map<Id, std::string> layerNames;
+    {
+        std::set<std::string> taken;
+        for (auto l = s.layers().rbegin(); l != s.layers().rend(); ++l) {  // (bottom first: the older keeps its name)
+            const Layer& layer = *l;
+            std::string name;
+            for (char ch : layer.name) {
+                name += std::string_view("<>/\\\":;?*|=`").find(ch) == std::string_view::npos && ch >= ' ' ? ch : '_';
+            }
+            if (name.find_first_not_of(' ') == std::string::npos) {
+                name = "Layer " + std::to_string(layer.id);
+            }
+            auto folded = [](std::string n) {
+                std::ranges::transform(n, n.begin(), [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); });
+                return n;
+            };
+            std::string unique = name;
+            for (int k = 2; taken.contains(folded(unique)) || folded(unique) == "0"; ++k) {
+                unique = name + " (" + std::to_string(k) + ")";
+            }
+            taken.insert(folded(unique));
+            layerNames[layer.id] = unique;
+        }
+    }
+    std::vector<std::string> usedLayers;  // (in the order first used: the LAYER table's)
+    auto dxfLayer = [&](Id layer, const char* kind) -> std::string {
+        const auto it = layerNames.find(layer);
+        std::string name = it != layerNames.end() ? it->second : std::string("Layer");
+        if (kind) {
+            name += std::string(" - ") + kind;
+        }
+        if (std::ranges::find(usedLayers, name) == usedLayers.end()) {
+            usedLayers.push_back(name);
+        }
+        return name;
+    };
+
     // --- what goes in -------------------------------------------------------------------------
     struct Item
     {
         Id curve = kNoId;
-        const char* layer = "GEOMETRY";
+        std::string layer;
         Look look;
     };
     std::vector<Item> items;
@@ -1423,7 +1465,7 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
         }
         if (e.construction) {
             if (o.construction) {
-                items.push_back({id, "CONSTRUCTION", {}});
+                items.push_back({id, dxfLayer(s.layerOf(id), "CONSTRUCTION"), {}});
             }
         }
         else if (const StrokeStyle* style = s.stroke(id); style && o.styles && !style->none()) {
@@ -1431,10 +1473,10 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
             Look l = lookOf(style->gradient.active() ? style->gradient.average() : style->color);
             l.lineType = lineTypeFor(style->dash);
             l.weight = lineWeight(style->width);
-            items.push_back({id, "STROKES", l});
+            items.push_back({id, dxfLayer(s.layerOf(id), nullptr), l});
         }
         else {
-            items.push_back({id, "GEOMETRY", {}});
+            items.push_back({id, dxfLayer(s.layerOf(id), nullptr), {}});
         }
     }
     struct TextItem
@@ -1442,6 +1484,7 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
         const Text* text;
         bool asText;
         Look look;
+        std::string layer;
     };
     std::vector<TextItem> texts;
     for (const auto& [id, t] : s.texts()) {
@@ -1452,13 +1495,14 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
         if (t.hasColor) {
             l = lookOf(t.gradient.active() ? t.gradient.average() : t.color);
         }
-        texts.push_back({&t, asText(t, o.textAsOutlines), l});
+        texts.push_back({&t, asText(t, o.textAsOutlines), l, dxfLayer(s.layerOf(id), "TEXT")});
     }
     struct FillItem
     {
         const Fill* fill;
         regions::Region region;
         Look look;
+        std::string layer;
     };
     std::vector<FillItem> fills;
     if (o.fills) {
@@ -1475,7 +1519,7 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
                 if (f.hatch.active() && o.styles) {
                     l.weight = lineWeight(f.hatch.width);
                 }
-                fills.push_back({&f, std::move(*region), l});
+                fills.push_back({&f, std::move(*region), l, dxfLayer(f.layer, "FILLS")});
             }
         }
     }
@@ -1484,6 +1528,7 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
         const DrawnDimension* dim;
         annotation::Graphics g;
         Look look;
+        std::string layer;
     };
     std::vector<DimItem> dims;
     if (o.dimensions) {
@@ -1498,7 +1543,7 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
                 if (o.styles) {
                     l.weight = lineWeight(d.style.width);
                 }
-                dims.push_back({&d, std::move(g), l});
+                dims.push_back({&d, std::move(g), l, dxfLayer(s.layerOf(id), "DIMENSIONS")});
             }
         }
     }
@@ -1595,7 +1640,7 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
 
     // --- entities ---------------------------------------------------------------------------
     DxfWriter e;
-    auto begin = [&](const char* type, const char* layer, const Look& look) {
+    auto begin = [&](const char* type, const std::string& layer, const Look& look) {
         e.pair(0, type);
         e.pair(5, handle());
         e.pair(330, hModel);
@@ -1614,7 +1659,7 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
             e.pair(370, look.weight);
         }
     };
-    auto writeSpline = [&](const std::vector<curve::Bezier>& pieces, const char* layer, const Look& look) {
+    auto writeSpline = [&](const std::vector<curve::Bezier>& pieces, const std::string& layer, const Look& look) {
         std::vector<Vec2> controls;
         std::vector<double> knots;
         bezierSpline(pieces, controls, knots);
@@ -1640,7 +1685,7 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
             e.point(10, c);
         }
     };
-    auto writeLoopPolyline = [&](const std::vector<Vec2>& pts, const char* layer, const Look& look) {
+    auto writeLoopPolyline = [&](const std::vector<Vec2>& pts, const std::string& layer, const Look& look) {
         begin("LWPOLYLINE", layer, look);
         e.pair(100, "AcDbPolyline");
         e.pair(90, static_cast<int>(pts.size()));
@@ -1656,7 +1701,7 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
     for (const FillItem& f : fills) {
         const Hatch& h = f.fill->hatch;
         const bool hatched = h.active();
-        begin("HATCH", "FILLS", f.look);
+        begin("HATCH", f.layer, f.look);
         e.pair(100, "AcDbHatch");
         e.point(10, {0, 0});
         e.real(210, 0.0);
@@ -1875,7 +1920,7 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
                 if (words.find_first_not_of(' ') == std::string::npos) {
                     return;
                 }
-                begin("TEXT", "TEXT", ti.look);
+                begin("TEXT", ti.layer, ti.look);
                 e.pair(100, "AcDbText");
                 e.point(10, {at.x, at.y});
                 e.real(40, t.height);  // (a DXF text's height is its capitals', as here)
@@ -1913,7 +1958,7 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
             }
             if (c.ops.find('C') == std::string::npos) {
                 if (pts.size() >= 3) {
-                    writeLoopPolyline(pts, "TEXT", ti.look);
+                    writeLoopPolyline(pts, ti.layer, ti.look);
                 }
                 continue;
             }
@@ -1939,14 +1984,14 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
             if (std::hypot(last.x - pts[0].x, last.y - pts[0].y) > 1e-9) {
                 pieces.push_back(straight(last, pts[0]));  // (back to its start)
             }
-            writeSpline(pieces, "TEXT", ti.look);
+            writeSpline(pieces, ti.layer, ti.look);
         }
     }
 
     // Drawn dimensions: drawn out (the same in every program), on their own layer.
     for (const DimItem& di : dims) {
         for (const auto& l : di.g.lines) {
-            begin("LINE", "DIMENSIONS", di.look);
+            begin("LINE", di.layer, di.look);
             e.pair(100, "AcDbLine");
             e.point(10, l[0]);
             e.point(11, l[1]);
@@ -1954,7 +1999,7 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
         for (const auto& a : di.g.arcs) {
             // (counter-clockwise from its start, as DXF arcs go)
             const double start = a.sweep < 0 ? a.start + a.sweep : a.start;
-            begin("ARC", "DIMENSIONS", di.look);
+            begin("ARC", di.layer, di.look);
             e.pair(100, "AcDbCircle");
             e.point(10, a.center);
             e.real(40, a.radius);
@@ -1963,7 +2008,7 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
             e.real(51, degrees(start + std::abs(a.sweep)));
         }
         for (const auto& arrow : di.g.arrows) {
-            begin("SOLID", "DIMENSIONS", di.look);
+            begin("SOLID", di.layer, di.look);
             e.pair(100, "AcDbTrace");
             e.point(10, arrow[0]);
             e.point(11, arrow[1]);
@@ -1975,7 +2020,7 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
         if (words.find_first_not_of(' ') == std::string::npos) {
             continue;
         }
-        begin("TEXT", "DIMENSIONS", di.look);
+        begin("TEXT", di.layer, di.look);
         e.pair(100, "AcDbText");
         e.point(10, t.at);
         e.real(40, t.height);  // (capitals' height, as DXF's)
@@ -2134,14 +2179,16 @@ std::string toDxf(const Sketch& s, const DxfOptions& o)
 
     struct LayerDef
     {
-        const char* name;
+        std::string name;
         int color;  // negative: switched off
         const char* lineType;
     };
-    const LayerDef layers[] = {{"0", 7, "CONTINUOUS"},     {"GEOMETRY", 7, "CONTINUOUS"}, {"STROKES", 7, "CONTINUOUS"},
-                               {"TEXT", 7, "CONTINUOUS"},  {"FILLS", 7, "CONTINUOUS"},    {"DIMENSIONS", 7, "CONTINUOUS"},
-                               {"CONSTRUCTION", -8, "DASHED"}};
-    table("LAYER", hLayerTable, static_cast<int>(std::size(layers)));
+    std::vector<LayerDef> layers{{"0", 7, "CONTINUOUS"}};
+    for (const std::string& name : usedLayers) {
+        const bool construction = name.ends_with(" - CONSTRUCTION");
+        layers.push_back({name, construction ? -8 : 7, construction ? "DASHED" : "CONTINUOUS"});
+    }
+    table("LAYER", hLayerTable, static_cast<int>(layers.size()));
     for (const LayerDef& l : layers) {
         entry("LAYER", hLayerTable, "AcDbLayerTableRecord", l.name);
         t.pair(62, l.color);

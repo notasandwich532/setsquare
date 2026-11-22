@@ -122,7 +122,7 @@ strokes = svg()
 assert len(re.findall(r'stroke="url\(#gradient\d+\)"', strokes)) == 4, strokes[:600]
 s.stroke(sides[0], color="#000000")  # a plain colour replaces it
 assert "gradient" not in sides[0].stroke
-assert "STROKES" in doc.to_dxf()  # (DXF: the average colour)
+assert re.search(r"\n *62\r?\n", doc.to_dxf())  # (DXF: the average colour, as an AutoCAD colour)
 
 # --- text ---------------------------------------------------------------------------------------
 t = s.text("Hi", at=(0, 40), height=10, color=r)

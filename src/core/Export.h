@@ -91,8 +91,9 @@ struct DxfOptions
 
 // DXF (AutoCAD 2004, AC1018) of the drawing in millimetres, y up, every curve exact: LINE, CIRCLE,
 // ARC, ELLIPSE, SPLINE; TEXT in its font; fills as HATCH (solid, or the hatch's own pattern). Layers:
-// GEOMETRY (curves without a stroke), STROKES (with one: its colour, as true colour and the nearest
-// AutoCAD colour, line style and weight), TEXT, FILLS, DIMENSIONS, CONSTRUCTION (optional, off).
+// the drawing's, each split by kind: "Top" (its curves; stroked ones in their stroke's colour, as
+// true colour and the nearest AutoCAD colour, line style and weight), "Top - TEXT", "Top - FILLS",
+// "Top - DIMENSIONS", "Top - CONSTRUCTION" (optional, switched off). Only layers with something on.
 // Throws SketchError if there's nothing to export.
 std::string toDxf(const Sketch& sketch, const DxfOptions& options = {});
 

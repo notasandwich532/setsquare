@@ -156,7 +156,7 @@ TEST_CASE("DXF holds the exact geometry in millimetres", "[export][dxf]")
     const auto circle = dxfEntity(pairs, "CIRCLE");
     CHECK(circle.at(10) == "30");
     CHECK(circle.at(40) == "4");
-    CHECK(circle.at(8) == "GEOMETRY");
+    CHECK(circle.at(8) == "Layer 1");  // (the drawing's layer)
     const auto arc = dxfEntity(pairs, "ARC");
     CHECK(arc.at(10) == "50");
     CHECK(arc.at(40) == "6");
@@ -179,15 +179,15 @@ TEST_CASE("DXF strokes keep a colour and line style; construction is a switched-
     o.construction = true;
     const auto pairs = dxfPairs(exporter::toDxf(s, o));
     const auto stroked = dxfEntity(pairs, "LINE", 0);
-    CHECK(stroked.at(8) == "STROKES");
+    CHECK(stroked.at(8) == "Layer 1");  // (stroked curves too: in their stroke's look)
     CHECK(stroked.at(62) == "1");  // red
     CHECK(stroked.at(6) == "DASHDOT");
-    CHECK(dxfEntity(pairs, "LINE", 1).at(8) == "CONSTRUCTION");
-    // The CONSTRUCTION layer is off (negative colour).
+    CHECK(dxfEntity(pairs, "LINE", 1).at(8) == "Layer 1 - CONSTRUCTION");
+    // The construction layer is off (negative colour).
     bool found = false;
     for (size_t n = 0; n < 10; ++n) {
         const auto layer = dxfEntity(pairs, "LAYER", n);
-        if (layer.contains(2) && layer.at(2) == "CONSTRUCTION") {
+        if (layer.contains(2) && layer.at(2) == "Layer 1 - CONSTRUCTION") {
             CHECK(layer.at(62) == "-8");
             found = true;
         }
@@ -201,7 +201,7 @@ TEST_CASE("DXF strokes keep a colour and line style; construction is a switched-
     o.styles = false;
     const auto plain = dxfPairs(exporter::toDxf(s, o));
     CHECK(std::ranges::count(plain, std::pair<int, std::string>{0, "LINE"}) == 1);
-    CHECK(dxfEntity(plain, "LINE").at(8) == "GEOMETRY");
+    CHECK(dxfEntity(plain, "LINE").at(8) == "Layer 1");
 }
 
 TEST_CASE("SVG fills are outlined by the curves they're in, exactly; a gradient used twice is written once", "[export][svg]")
@@ -239,4 +239,51 @@ TEST_CASE("SVG fills are outlined by the curves they're in, exactly; a gradient 
     // The gradient (the fill's and the outline's): one definition.
     CHECK(svg.find("<linearGradient") != std::string::npos);
     CHECK(svg.find("<linearGradient", svg.find("<linearGradient") + 1) == std::string::npos);
+}
+
+TEST_CASE("DXF keeps the drawing's layers, each split by kind; names as DXF allows, apart even by case", "[export][dxf]")
+{
+    Sketch s;
+    s.ensureOrigin();
+    s.renameLayer(s.layers().front().id, "Outline");
+    s.addLine(0, 0, 40, 0);
+    const Id walls = s.addLayer("Walls/Inner", "Sublayer 1");
+    s.setActiveLayer(walls);
+    s.addCircle(10, 10, 4);
+    const Id helper = s.addLine(0, 20, 40, 20);
+    s.entity(helper).construction = true;
+    s.setActiveLayer(s.addLayer("outline", "Sublayer 1"));  // (the same name but for case)
+    s.addLine(0, 30, 40, 30);
+    exporter::DxfOptions o;
+    o.construction = true;
+    const auto pairs = dxfPairs(exporter::toDxf(s, o));
+    CHECK(dxfEntity(pairs, "LINE", 0).at(8) == "Outline");
+    CHECK(dxfEntity(pairs, "CIRCLE").at(8) == "Walls_Inner");  // (no / in a DXF layer's name)
+    std::vector<std::string> lines;
+    for (size_t n = 0;; ++n) {
+        const auto e = dxfEntity(pairs, "LINE", n);
+        if (e.empty()) {
+            break;
+        }
+        lines.push_back(e.at(8));
+    }
+    CHECK(std::ranges::find(lines, "Walls_Inner - CONSTRUCTION") != lines.end());
+    CHECK(std::ranges::find(lines, "outline (2)") != lines.end());
+
+    // The LAYER table: those used, and 0; not the old fixed ones.
+    std::vector<std::string> table;
+    for (size_t n = 0;; ++n) {
+        const auto e = dxfEntity(pairs, "LAYER", n);
+        if (e.empty()) {
+            break;
+        }
+        if (e.contains(2)) {
+            table.push_back(e.at(2));
+        }
+    }
+    CHECK(std::ranges::find(table, "0") != table.end());
+    CHECK(std::ranges::find(table, "Outline") != table.end());
+    CHECK(std::ranges::find(table, "Walls_Inner - CONSTRUCTION") != table.end());
+    CHECK(std::ranges::find(table, "GEOMETRY") == table.end());
+    CHECK(std::ranges::find(table, "Outline - FILLS") == table.end());  // (nothing on it)
 }

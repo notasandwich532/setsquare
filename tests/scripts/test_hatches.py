@@ -88,7 +88,7 @@ for a, b in segments(svg()):
     for x, y in (a, b):
         assert hypot(x - 20, y - 10) > 6 - 0.05, (x, y)  # (ends on the ring at most: its polygon)
 
-# Dashes and dots; and the DXF: a HATCH with the pattern's own lines (on the FILLS layer).
+# Dashes and dots; and the DXF: a HATCH with the pattern's own lines (on its layer's FILLS layer).
 f.hatch = setsquare.hatch("DOTS", scale=4)
 dots = segments(svg())
 assert dots and all(a == b for a, b in dots), dots[:5]
@@ -102,7 +102,7 @@ assert all(l <= 6.35 + 1e-3 for l in lengths), lengths  # (dashes 6.35 long; cut
 assert sum(isclose(l, 6.35, abs_tol=1e-3) for l in lengths) > len(lengths) / 2, lengths
 assert 'stroke-width="0.3"' in svg()
 dxf = doc.to_dxf().replace("\r\n", "\n")
-assert "\n2\nDASH\n" in dxf and "\n49\n6.35\n" in dxf and "\n8\nFILLS\n" in dxf
+assert "\n2\nDASH\n" in dxf and "\n49\n6.35\n" in dxf and "\n8\nLayer 1 - FILLS\n" in dxf
 
 # It follows the geometry.
 before = len(segments(svg()))

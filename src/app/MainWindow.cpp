@@ -639,7 +639,8 @@ void MainWindow::exportDxf()
     dialog.setWindowTitle(tr("Export DXF"));
     auto* form = new QFormLayout(&dialog);
     auto* note = new QLabel(tr("The exact geometry in millimetres (DXF 2004), for CAD and CAM: lines, arcs, "
-                               "ellipses and splines as themselves, text in its font, fills as hatches."),
+                               "ellipses and splines as themselves, text in its font, fills as hatches. Your "
+                               "layers are kept, each split by kind (\"Top\", \"Top - FILLS\", \"Top - TEXT\", ...)."),
                             &dialog);
     note->setWordWrap(true);
     form->addRow(note);
