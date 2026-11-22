@@ -20,6 +20,8 @@ setsquare_warnings(drawdoc)
 add_library(setsquare_lib STATIC
     ColorBar.cpp
     ColorBar.h
+    FileAssociation.cpp
+    FileAssociation.h
     GradientEditor.cpp
     GradientEditor.h
     ImportDialog.cpp

@@ -1,3 +1,4 @@
+#include "FileAssociation.h"
 #include "Icons.h"
 #include "MainWindow.h"
 #include "PythonHost.h"
@@ -87,6 +88,7 @@ int main(int argc, char* argv[])
             else {
                 window.offerRecovery();  // (a crash's unsaved work; with a file to open, offered next time)
             }
+            fileassoc::offerAtStartup(&window);  // (asked once: double-clicking .setsq files opens them here)
             if (!scriptPath.isEmpty()) {
                 window.runScript(scriptPath);
             }

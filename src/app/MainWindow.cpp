@@ -12,6 +12,7 @@
 #include "ColorBar.h"
 #include "Icons.h"
 #include "ConstraintPanel.h"
+#include "FileAssociation.h"
 #include "ParametersPanel.h"
 #include "Document.h"
 #include "PythonHost.h"
@@ -47,6 +48,7 @@
 #include <QActionGroup>
 #include <QCloseEvent>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QLocale>
 #include <QDir>
 #include <QDockWidget>
@@ -1068,6 +1070,30 @@ void MainWindow::createActions()
     exportJpgAction->setObjectName(QStringLiteral("exportJpgAction"));
     exportJpgAction->setToolTip(tr("A picture of the page as presentation view shows it, at the resolution you choose"));
     connect(exportJpgAction, &QAction::triggered, this, [this] { exportImage(true); });
+    if (fileassoc::supported()) {
+        // Double-clicking a .setsq file opens it here (see FileAssociation.h).
+        auto* associate = fileMenu->addAction(tr("Open .setsq Files with Setsquare"));
+        associate->setObjectName(QStringLiteral("fileAssociationAction"));
+        associate->setCheckable(true);
+        associate->setToolTip(tr("Double-clicking a .setsq drawing opens it in this copy of Setsquare"));
+        connect(fileMenu, &QMenu::aboutToShow, associate, [associate] {
+            const QSignalBlocker quiet(associate);
+            associate->setChecked(fileassoc::isRegistered());
+        });
+        connect(associate, &QAction::toggled, this, [this](bool on) {
+            QSettings().setValue(QStringLiteral("fileAssociation"), on ? QStringLiteral("yes") : QStringLiteral("no"));
+            if (!on) {
+                fileassoc::unregisterFiles();
+                statusBar()->showMessage(tr(".setsq files no longer open with Setsquare"), 4000);
+            }
+            else if (fileassoc::registerFiles()) {
+                statusBar()->showMessage(tr(".setsq files now open with Setsquare"), 4000);
+            }
+            else {
+                QMessageBox::warning(this, tr("Open .setsq Files"), tr("Windows didn't let Setsquare register .setsq files."));
+            }
+        });
+    }
     auto* historyAction = fileMenu->addAction(tr("Command &History..."));
     historyAction->setToolTip(tr("The commands that built this drawing (saved with it)"));
     connect(historyAction, &QAction::triggered, this, &MainWindow::showHistory);

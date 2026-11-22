@@ -38,6 +38,7 @@ add_executable(app_tests
     app/test_document.cpp
     app/test_export.cpp
     app/test_eyedropper.cpp
+    app/test_file_association.cpp
     app/test_gradient_tool.cpp
     app/test_hatch_tool.cpp
     app/test_groups.cpp
