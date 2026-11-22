@@ -25,15 +25,15 @@ Download `Setsquare.zip` from the [latest release](https://github.com/notasandwi
 - **Shapes:** lines, points, rectangles (two-corner, three-point and centred), circles (centre, two-point, three-point, tangent to two or three curves), arcs (centre, three-point, tangent), ellipses, splines (through points, or by control points), regular polygons and five kinds of slot.
 - **Constraints:** coincident, horizontal/vertical, parallel, perpendicular, tangent, equal, ratio, midpoint, concentric, symmetric, collinear and fix.
 - **Dimensions** that drive the drawing: lengths, distances, radii, diameters and angles. Typing a new value reshapes the drawing to fit, and values accept arithmetic.
-- **Parameters:** named values like `width = 120` that dimensions follow (`width / 2 + 3`). Parameters can use each other; change one and the drawing updates.
+- **Parameters:** named values like `width = 120` that dimensions follow (`width / 2 + 3`). Parameters can use each other, and pattern counts, spacings and offsets can use them too; change one and the drawing updates.
 - **Live solving:** drag anything and the rest follows as the constraints allow. The status bar counts the remaining degrees of freedom, and conflicting constraints are highlighted.
 - **Construction geometry** for guides that aren't part of the finished drawing.
 
 ### Editing
 - **Trim, extend and break** at intersections, including ellipses and splines.
 - **Fillet and chamfer** (equal distances, two distances, or distance and angle). The original corner stays as construction, so dimensions to it survive.
-- **Move/Copy** with distances and rotation about any point, plus **scale** and **mirror**.
-- **Rectangular and circular patterns, offset and divide**, all kept linked: change the count or spacing later and the copies update.
+- **Move/Copy** with distances and rotation about any point, plus **scale** and **mirror**. Text goes along, turning with the rest; mirrored, it stays readable.
+- **Rectangular and circular patterns, offset and divide**, all kept linked: change the count or spacing later and the copies update. Patterns repeat text too, each copy following its original.
 - **Groups**, copy and paste.
 
 ### Appearance
@@ -56,9 +56,9 @@ Download `Setsquare.zip` from the [latest release](https://github.com/notasandwi
 
 ### Files
 - **Autosave and crash recovery:** unsaved work is copied aside every minute and offered back if the app closes unexpectedly.
-- **Open Recent** for the last ten drawings.
-- **Import** SVG and DXF drawings, keeping their curves, strokes, fills and layers.
-- **Export** SVG, DXF (exact curves, for CAD and CAM), PDF (true size, with real text), and PNG or JPG at any resolution.
+- **Open Recent** for the last ten drawings, and .setsq files open with a double-click.
+- **Import** SVG and DXF drawings, keeping their curves, strokes, fills and layers (and an SVG's page, if you like).
+- **Export** SVG, DXF (exact curves, for CAD and CAM, on your layers), PDF (true size, with real text), and PNG or JPG at any resolution.
 
 ### Python scripting
 - Everything in the app can be done from Python, with Python bundled (no install needed).
