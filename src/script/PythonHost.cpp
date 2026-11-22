@@ -2280,13 +2280,14 @@ PYBIND11_EMBEDDED_MODULE(setsquare, m)
            "Change a text's settings (any of them); its letters are remade.")
         .def("import_file", [](const SketchH&, const std::string& path, const std::string& into, bool keepLayers,
                                const std::string& placement, py::object at, const std::string& curves, double pxPerInch,
-                               py::object units) {
+                               py::object units, bool usePage) {
             importer::Options o;
             if (into == "sublayer") o.into = importer::Into::Sublayer;
             else if (into == "new_sublayer") o.into = importer::Into::NewSublayer;
             else if (into == "new_layer") o.into = importer::Into::NewLayer;
             else throw py::value_error("into: 'sublayer', 'new_sublayer' or 'new_layer'");
             o.keepLayers = keepLayers;
+            o.usePage = usePage;
             if (placement == "file") o.placement = importer::Placement::AsInFile;
             else if (placement == "center") o.placement = importer::Placement::Center;
             else if (placement == "page") o.placement = importer::Placement::Page;
@@ -2334,8 +2335,8 @@ PYBIND11_EMBEDDED_MODULE(setsquare, m)
             return d;
         }, py::arg("path"), py::arg("into") = "new_sublayer", py::arg("keep_layers") = true, py::arg("placement") = "file",
            py::arg("at") = py::none(), py::arg("curves") = "exact", py::arg("px_per_inch") = 96.0,
-           py::arg("units") = py::none(),
-           "Import an SVG or DXF drawing: its curves (with their strokes) and fills, each of the file's layers held "
+           py::arg("units") = py::none(), py::arg("use_page") = false,
+           "Import an SVG or DXF drawing (use_page=True: an SVG's page, its size given in real units or one this app wrote, becomes the sketch's): its curves (with their strokes) and fills, each of the file's layers held "
            "together as a group. into: 'sublayer' (the one being edited), 'new_sublayer' or 'new_layer'; keep_layers: "
            "the file's layers each in a sublayer of their own. placement: 'file' (its own coordinates; an SVG's page "
            "with its bottom-left corner on the origin), 'center' (its middle at at=(x, y)) or 'page' (an SVG's page on "

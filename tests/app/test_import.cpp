@@ -1,6 +1,8 @@
 // File > Import's dialog (what it reads, its options), and an imported drawing as it shows.
 
 #include "Document.h"
+#include "Editor.h"
+#include "Import.h"
 #include "ImportDialog.h"
 #include "SketchView.h"
 #include "Snapshot.h"
@@ -89,4 +91,36 @@ TEST_CASE("An imported SVG as it shows", "[import]")
     saveSnapshot(view, "_sketch");
     view.setPresentation(true);
     saveSnapshot(view, "_presentation");
+}
+
+TEST_CASE("Import: an SVG's page becomes the sketch's (asked), not a shape; overlapping fills keep the top one", "[import]")
+{
+    QTemporaryDir dir;
+    const QString path = write(dir, "page.svg",
+        "<svg xmlns='http://www.w3.org/2000/svg' xmlns:inkscape='http://www.inkscape.org/namespaces/inkscape' "
+        "width='100mm' height='80mm' viewBox='0 0 100 80'>"
+        "<rect id='page' x='0' y='0' width='100' height='80' fill='#fff3d0'/>"
+        "<g inkscape:groupmode='layer' inkscape:label='Bottom'><path d='M10,10 L50,10 L50,50 L10,50 Z' fill='#ff0000'/></g>"
+        "<g inkscape:groupmode='layer' inkscape:label='Top'><path d='M10,10 L50,10 L50,50 L10,50 Z' fill='#0000ff'/></g>"
+        "</svg>");
+    const importer::Drawing d = importer::read(path);
+    CHECK(d.hasPage);
+    REQUIRE(d.pageColor);
+    CHECK(d.pageColor->hex() == "#fff3d0");
+    for (const bool use : {false, true}) {
+        Document doc;
+        importer::Options o;
+        o.usePage = use;
+        doc.edit("Import", [&](Editor& ed) { ed.importFile(path, o); });
+        CHECK(doc.sketch().page().has_value() == use);
+        REQUIRE(doc.sketch().fills().size() == 1);  // (not the page: the square, its top colour)
+        CHECK(doc.sketch().fills().begin()->second.color.hex() == "#0000ff");
+        if (use) {
+            CHECK(doc.sketch().page()->width == 100.0);
+            CHECK(doc.history().last().contains("use_page=True"));
+        }
+    }
+    // Pixels are a screen's, not a page.
+    CHECK(!importer::read(write(dir, "px.svg", "<svg xmlns='http://www.w3.org/2000/svg' width='200' height='100'>"
+                                               "<rect x='1' y='1' width='50' height='20'/></svg>")).hasPage);
 }

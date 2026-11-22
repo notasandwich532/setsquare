@@ -124,6 +124,11 @@ struct Drawing
     std::vector<std::string> layers;  // the file's layers, in order (bottom first)
     // The file's own canvas (an SVG's page), in drawing coordinates: x0, y0, x1, y1. None for DXF.
     std::optional<std::array<double, 4>> canvas;
+    // A page the file has: an SVG whose size is given in real units (mm, cm, in, pt, pc), or one of
+    // this app's (its page drawn as <rect id="page">, which is then the page's colour, not a shape).
+    // Its size is the canvas's.
+    bool hasPage = false;
+    std::optional<core::Color> pageColor;
     std::map<std::string, int> skipped;  // what couldn't be brought in, and how many
     std::vector<std::string> notes;      // what was brought in only approximately
     std::string units;                   // how its units were read, e.g. "mm (from the file)"
@@ -169,6 +174,7 @@ struct Options
     core::Vec2 at;           // Placement::Center
     Curves curves = Curves::Exact;
     std::string name;        // for a new sublayer / layer (the file's name)
+    bool usePage = false;    // the file's page (Drawing::hasPage) becomes the sketch's
 };
 
 struct Report
@@ -181,6 +187,7 @@ struct Report
     int texts = 0;
     int groups = 0;
     std::vector<std::string> sublayers;  // where it went
+    bool page = false;                   // the file's page became the sketch's
     std::map<std::string, int> skipped;
     std::vector<std::string> notes;
     QString summary() const;  // e.g. "312 curves, 4 fills in 2 sublayers; skipped 3 texts"

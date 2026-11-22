@@ -38,6 +38,8 @@ private:
     QLabel* m_summary = nullptr;
     QComboBox* m_into = nullptr;
     QCheckBox* m_keepLayers = nullptr;
+    QCheckBox* m_usePage = nullptr;  // (an SVG with a page: it becomes the sketch's)
+    bool m_sketchHasPage = false;
     QComboBox* m_placement = nullptr;
     QComboBox* m_curves = nullptr;
     QComboBox* m_pxPerInch = nullptr;

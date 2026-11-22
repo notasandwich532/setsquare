@@ -1055,6 +1055,9 @@ importer::Report Editor::importFile(const QString& path, importer::Options o, do
     if (mmPerUnit) {
         args << QStringLiteral("units=") + number(*mmPerUnit);
     }
+    if (o.usePage) {
+        args << QStringLiteral("use_page=True");
+    }
     log(QStringLiteral("s.import_file(%1)").arg(args.join(QStringLiteral(", "))));
     return report;
 }

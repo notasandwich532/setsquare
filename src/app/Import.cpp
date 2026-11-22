@@ -707,6 +707,9 @@ QString Report::summary() const
     if (gradients > 0) {
         parts << counted(gradients, QObject::tr("1 gradient"), QObject::tr("%1 gradients"));
     }
+    if (page) {
+        parts << QObject::tr("its page");
+    }
     QString text = parts.join(QStringLiteral(", "));
     if (!sublayers.empty()) {
         text += QStringLiteral(" ") + counted(static_cast<int>(sublayers.size()), QObject::tr("in 1 sublayer"),
@@ -888,6 +891,10 @@ public:
             }
         }
         const bool unitsGiven = m_root.attrs.value(QStringLiteral("width")).contains(QRegularExpression(QStringLiteral("[a-z]")));
+        // A page: a size in real units (not pixels: those are a screen's), or this app's own.
+        static const QRegularExpression realUnits(QStringLiteral("^\\s*[0-9.eE+-]+\\s*(mm|cm|in|pt|pc)\\s*$"));
+        m_out.hasPage = w && h && realUnits.match(m_root.attrs.value(QStringLiteral("width"))).hasMatch()
+                     && realUnits.match(m_root.attrs.value(QStringLiteral("height"))).hasMatch();
         m_out.units = unitsGiven ? "from the file's size" : "pixels, " + std::to_string(int(std::lround(m_pxPerInch))) + " to the inch";
         // To drawing coordinates: y up, the page's bottom-left corner on the origin.
         const double height = H.value_or(0.0);
@@ -1888,6 +1895,14 @@ private:
         inherit(paint, own);
         if (own.contains(QStringLiteral("opacity"))) {
             opacity *= firstOr(numbers(own.value(QStringLiteral("opacity"))), 1.0);
+        }
+        // This app's page (its export draws it first, as <rect id="page">): the page's colour, not a
+        // shape on it.
+        if (depth == 1 && n.tag == QStringLiteral("rect") && n.attrs.value(QStringLiteral("id")) == QStringLiteral("page")
+            && m_out.canvas) {
+            m_out.hasPage = true;
+            m_out.pageColor = color(paint.fill, paint, opacity * paint.fillOpacity);
+            return;
         }
         if (own.contains(QStringLiteral("mask")) && own.value(QStringLiteral("mask")) != QStringLiteral("none")) {
             skip("masks");
@@ -4259,6 +4274,32 @@ Report build(core::Sketch& sketch, const Drawing& drawing, const Options& o)
     double bx0 = 0, by0 = 0, bx1 = 0, by1 = 0;
     if (!drawing.bounds(bx0, by0, bx1, by1)) {
         throw core::SketchError("there's nothing in that file to import");
+    }
+
+    // The file's page, the sketch's (its size by name where it's a standard one), before where
+    // things go is worked out (they may go on it).
+    if (o.usePage && drawing.hasPage && drawing.canvas) {
+        const auto& c = *drawing.canvas;
+        core::Page page;
+        page.width = c[2] - c[0];
+        page.height = c[3] - c[1];
+        page.size = "custom";
+        for (const core::PageSize& standard : core::pageSizes()) {
+            const bool portrait = std::abs(standard.width - page.width) < 0.5 && std::abs(standard.height - page.height) < 0.5;
+            const bool landscape = std::abs(standard.height - page.width) < 0.5 && std::abs(standard.width - page.height) < 0.5;
+            if (portrait || landscape) {
+                page.size = standard.name;
+                page.width = portrait ? standard.width : standard.height;
+                page.height = portrait ? standard.height : standard.width;
+            }
+        }
+        page.origin = core::PageOrigin::BottomLeft;
+        page.hasColor = drawing.pageColor.has_value();
+        if (drawing.pageColor) {
+            page.color = *drawing.pageColor;
+        }
+        sketch.setPage(page);
+        report.page = true;
     }
 
     // Where it goes.

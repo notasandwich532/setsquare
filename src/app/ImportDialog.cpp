@@ -35,6 +35,12 @@ ImportDialog::ImportDialog(const QString& path, const QString& sublayer, bool ha
     m_keepLayers->setChecked(true);
     form->addRow(QString(), m_keepLayers);
 
+    // (Shown when the file has a page; ticked when the drawing hasn't one yet.)
+    m_sketchHasPage = hasPage;
+    m_usePage = new QCheckBox(this);
+    m_usePage->setObjectName(QStringLiteral("importUsePage"));
+    form->addRow(QString(), m_usePage);
+
     m_placement = new QComboBox(this);
     m_placement->setObjectName(QStringLiteral("importPlacement"));
     m_placement->addItem(m_svg ? tr("As in the file (its page's corner on the origin)") : tr("As in the file"),
@@ -118,6 +124,14 @@ void ImportDialog::reread()
         m_keepLayers->setText(layers > 1 ? tr("Each of its %1 layers in a sublayer of its own (each a group)").arg(layers)
                                          : tr("Its layers in sublayers of their own (it has one)"));
         m_keepLayers->setEnabled(layers > 1);
+        const bool page = d.hasPage && d.canvas;
+        if (page) {
+            const auto& c = *d.canvas;
+            m_usePage->setText(m_sketchHasPage ? tr("Use its page instead (%1 × %2 mm)").arg(c[2] - c[0], 0, 'f', 1).arg(c[3] - c[1], 0, 'f', 1)
+                                               : tr("Use its page (%1 × %2 mm)").arg(c[2] - c[0], 0, 'f', 1).arg(c[3] - c[1], 0, 'f', 1));
+            m_usePage->setChecked(!m_sketchHasPage);
+        }
+        m_usePage->setVisible(page);
     }
     catch (const core::SketchError& e) {
         m_readable = false;
@@ -131,6 +145,7 @@ importer::Options ImportDialog::options() const
     importer::Options o;
     o.into = static_cast<importer::Into>(m_into->currentData().toInt());
     o.keepLayers = m_keepLayers->isChecked();
+    o.usePage = m_usePage->isVisible() && m_usePage->isChecked();
     o.placement = static_cast<importer::Placement>(m_placement->currentData().toInt());
     o.curves = static_cast<importer::Curves>(m_curves->currentData().toInt());
     o.name = QFileInfo(m_path).completeBaseName().toStdString();
