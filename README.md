@@ -25,6 +25,7 @@ Download `Setsquare.zip` from the [latest release](https://github.com/notasandwi
 - **Shapes:** lines, points, rectangles (two-corner, three-point and centred), circles (centre, two-point, three-point, tangent to two or three curves), arcs (centre, three-point, tangent), ellipses, splines (through points, or by control points), regular polygons and five kinds of slot.
 - **Constraints:** coincident, horizontal/vertical, parallel, perpendicular, tangent, equal, ratio, midpoint, concentric, symmetric, collinear and fix.
 - **Dimensions** that drive the drawing: lengths, distances, radii, diameters and angles. Typing a new value reshapes the drawing to fit, and values accept arithmetic.
+- **Parameters:** named values like `width = 120` that dimensions follow (`width / 2 + 3`). Parameters can use each other; change one and the drawing updates.
 - **Live solving:** drag anything and the rest follows as the constraints allow. The status bar counts the remaining degrees of freedom, and conflicting constraints are highlighted.
 - **Construction geometry** for guides that aren't part of the finished drawing.
 
@@ -54,6 +55,8 @@ Download `Setsquare.zip` from the [latest release](https://github.com/notasandwi
 - **Measure** lengths, distances and areas.
 
 ### Files
+- **Autosave and crash recovery:** unsaved work is copied aside every minute and offered back if the app closes unexpectedly.
+- **Open Recent** for the last ten drawings.
 - **Import** SVG and DXF drawings, keeping their curves, strokes, fills and layers.
 - **Export** SVG, DXF (exact curves, for CAD and CAM), PDF (true size, with real text), and PNG or JPG at any resolution.
 
