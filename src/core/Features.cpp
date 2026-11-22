@@ -464,8 +464,11 @@ Id setLinearPattern(Sketch& s, Id id, const LinearPatternParams& p)
     }
     std::vector<Id> sources = pattern(c).sources;
     sources.insert(sources.end(), c.texts.begin(), c.texts.end());  // (its texts again)
+    const std::map<std::string, std::string> settings = c.settings;  // (and what it's worked out from)
     removeCopies(s, id);
-    return linearPattern(s, sources, p);
+    const Id made = linearPattern(s, sources, p);
+    s.setConstraintSettings(made, settings);
+    return made;
 }
 
 Id setCircularPattern(Sketch& s, Id id, const CircularPatternParams& p)
@@ -482,8 +485,11 @@ Id setCircularPattern(Sketch& s, Id id, const CircularPatternParams& p)
     const Pattern old = pattern(c);
     std::vector<Id> sources = old.sources;
     sources.insert(sources.end(), c.texts.begin(), c.texts.end());  // (its texts again)
+    const std::map<std::string, std::string> settings = c.settings;  // (and what it's worked out from)
     removeCopies(s, id);
-    return circularPattern(s, sources, old.center, p);
+    const Id made = circularPattern(s, sources, old.center, p);
+    s.setConstraintSettings(made, settings);
+    return made;
 }
 
 void placeCopies(Sketch& s, Id id)

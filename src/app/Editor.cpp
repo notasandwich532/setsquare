@@ -3,6 +3,7 @@
 #include "TextShapes.h"
 
 #include <core/Annotations.h>
+#include <core/Parameters.h>
 #include <core/Gradient.h>
 #include <core/Hatch.h>
 #include <core/Regions.h>
@@ -432,17 +433,26 @@ std::map<Id, Id> Editor::mirror(const std::vector<Id>& items, Id line)
 
 namespace
 {
-QString linearArgs(const feature::LinearPatternParams& p)
+// A setting's value as it's written: its expression, if it's worked out from parameters.
+QString setting(const Editor::Settings& settings, const char* key, const QString& value)
 {
-    QString args = QStringLiteral("count=%1, spacing=%2").arg(p.count).arg(Editor::number(p.spacing));
-    if (p.angle != 0.0) {
-        args += QStringLiteral(", angle=") + Editor::number(p.angle);
+    const auto it = settings.find(key);
+    return it == settings.end() ? value : QStringLiteral("\"%1\"").arg(QString::fromStdString(it->second));
+}
+
+QString linearArgs(const feature::LinearPatternParams& p, const Editor::Settings& s = {})
+{
+    QString args = QStringLiteral("count=%1, spacing=%2")
+                       .arg(setting(s, "count", QString::number(p.count)), setting(s, "spacing", Editor::number(p.spacing)));
+    if (p.angle != 0.0 || s.contains("angle")) {
+        args += QStringLiteral(", angle=") + setting(s, "angle", Editor::number(p.angle));
     }
     if (p.symmetric) {
         args += QStringLiteral(", symmetric=True");
     }
-    if (p.count2 != 1) {
-        args += QStringLiteral(", count2=%1, spacing2=%2").arg(p.count2).arg(Editor::number(p.spacing2));
+    if (p.count2 != 1 || s.contains("count2")) {
+        args += QStringLiteral(", count2=%1, spacing2=%2")
+                    .arg(setting(s, "count2", QString::number(p.count2)), setting(s, "spacing2", Editor::number(p.spacing2)));
     }
     if (p.symmetric2) {
         args += QStringLiteral(", symmetric2=True");
@@ -450,46 +460,55 @@ QString linearArgs(const feature::LinearPatternParams& p)
     return args;
 }
 
-QString circularArgs(const feature::CircularPatternParams& p)
+QString circularArgs(const feature::CircularPatternParams& p, const Editor::Settings& s = {})
 {
-    QString args = QStringLiteral("count=%1").arg(p.count);
-    if (p.angle != 360.0) {
-        args += QStringLiteral(", angle=") + Editor::number(p.angle);
+    QString args = QStringLiteral("count=%1").arg(setting(s, "count", QString::number(p.count)));
+    if (p.angle != 360.0 || s.contains("angle")) {
+        args += QStringLiteral(", angle=") + setting(s, "angle", Editor::number(p.angle));
     }
     return args;
 }
 }  // namespace
 
-Id Editor::rectangularPattern(const std::vector<Id>& items, const feature::LinearPatternParams& p)
+Id Editor::rectangularPattern(const std::vector<Id>& items, feature::LinearPatternParams p, const Settings& settings)
 {
     const QString what = list(m_sketch, items);
+    core::parameters::applySettings(m_sketch, settings, p);  // (worked out from the parameters)
     const Id id = feature::linearPattern(m_sketch, items, p);
-    log(QStringLiteral("%1 = s.rectangular_pattern(%2, %3)").arg(name(m_sketch, id), what, linearArgs(p)));
+    m_sketch.setConstraintSettings(id, settings);
+    log(QStringLiteral("%1 = s.rectangular_pattern(%2, %3)").arg(name(m_sketch, id), what, linearArgs(p, settings)));
     return id;
 }
 
-Id Editor::circularPattern(const std::vector<Id>& items, Id center, const feature::CircularPatternParams& p)
+Id Editor::circularPattern(const std::vector<Id>& items, Id center, feature::CircularPatternParams p,
+                           const Settings& settings)
 {
     const QString what = list(m_sketch, items);
+    core::parameters::applySettings(m_sketch, settings, p);
     const Id id = feature::circularPattern(m_sketch, items, center, p);
+    m_sketch.setConstraintSettings(id, settings);
     log(QStringLiteral("%1 = s.circular_pattern(%2, %3, %4)")
-            .arg(name(m_sketch, id), what, name(m_sketch, center), circularArgs(p)));
+            .arg(name(m_sketch, id), what, name(m_sketch, center), circularArgs(p, settings)));
     return id;
 }
 
-Id Editor::setPattern(Id pattern, const feature::LinearPatternParams& p)
+Id Editor::setPattern(Id pattern, feature::LinearPatternParams p, const Settings& settings)
 {
     const QString what = name(m_sketch, pattern);
+    core::parameters::applySettings(m_sketch, settings, p);
     const Id id = feature::setLinearPattern(m_sketch, pattern, p);
-    log(QStringLiteral("%1 = s.set_pattern(%2, %3)").arg(name(m_sketch, id), what, linearArgs(p)));
+    m_sketch.setConstraintSettings(id, settings);
+    log(QStringLiteral("%1 = s.set_pattern(%2, %3)").arg(name(m_sketch, id), what, linearArgs(p, settings)));
     return id;
 }
 
-Id Editor::setPattern(Id pattern, const feature::CircularPatternParams& p)
+Id Editor::setPattern(Id pattern, feature::CircularPatternParams p, const Settings& settings)
 {
     const QString what = name(m_sketch, pattern);
+    core::parameters::applySettings(m_sketch, settings, p);
     const Id id = feature::setCircularPattern(m_sketch, pattern, p);
-    log(QStringLiteral("%1 = s.set_pattern(%2, %3)").arg(name(m_sketch, id), what, circularArgs(p)));
+    m_sketch.setConstraintSettings(id, settings);
+    log(QStringLiteral("%1 = s.set_pattern(%2, %3)").arg(name(m_sketch, id), what, circularArgs(p, settings)));
     return id;
 }
 

@@ -1,6 +1,9 @@
 #pragma once
 
+#include "Features.h"
 #include "Sketch.h"
+
+#include <map>
 
 #include <string>
 #include <vector>
@@ -24,11 +27,21 @@ int find(const Sketch& sketch, const std::string& name);
 // comes out as a value the dimension can't have).
 void update(Sketch& sketch);
 
-// What uses a parameter: other parameters (by name) and dimensions.
+// What `expression` comes to with the drawing's parameters as they are. Throws SketchError.
+double valueOf(const Sketch& sketch, const std::string& expression);
+
+// A pattern's settings with those given as expressions (Constraint::settings) worked out; a count
+// that doesn't come out whole is an error. Throws SketchError.
+void applySettings(const Sketch& sketch, const std::map<std::string, std::string>& settings,
+                   feature::LinearPatternParams& params);
+void applySettings(const Sketch& sketch, const std::map<std::string, std::string>& settings,
+                   feature::CircularPatternParams& params);
+
+// What uses a parameter: other parameters (by name), and dimensions, patterns and offsets.
 struct Users
 {
     std::vector<std::string> parameters;
-    std::vector<Id> dimensions;
+    std::vector<Id> dimensions;  // (and patterns and offsets)
     bool empty() const { return parameters.empty() && dimensions.empty(); }
 };
 Users usersOf(const Sketch& sketch, const std::string& name);

@@ -1,4 +1,5 @@
 #include "TransformTools.h"
+#include "../NumberInput.h"
 
 #include "../CommandPanel.h"
 #include "../Document.h"
@@ -92,6 +93,9 @@ double wrapDegrees(double a)  // to (-180, 180]
 void setQuietly(QDoubleSpinBox* box, double value)
 {
     const QSignalBlocker block(box);
+    if (auto* e = qobject_cast<ExpressionSpinBox*>(box)) {
+        e->clearExpression();  // (dragged: a value of its own now)
+    }
     box->setValue(value);
 }
 
@@ -884,7 +888,51 @@ void RectangularPatternTool::buildPanel()
     if (m_editing != kNoId) {
         setPicked(m_objects, sources);
         setPickEnabled(m_objects, false);
+        // What it's worked out from, shown to change: a spacing as itself (Spacing, not Extent).
+        const auto& settings = s.constraint(m_editing).settings;
+        const char* countKeys[2] = {"count", "count2"};
+        const char* spacingKeys[2] = {"spacing", "spacing2"};
+        for (int d = 0; d < 2; ++d) {
+            if (const auto it = settings.find(countKeys[d]); it != settings.end()) {
+                static_cast<ExpressionCountBox*>(m_count[d])->setExpression(QString::fromStdString(it->second));
+            }
+            if (const auto it = settings.find(spacingKeys[d]); it != settings.end()) {
+                m_distribution->setCurrentIndex(1);
+                static_cast<ExpressionSpinBox*>(m_distance[d])->setExpression(QString::fromStdString(it->second));
+            }
+        }
     }
+}
+
+Editor::Settings RectangularPatternTool::settings() const
+{
+    Editor::Settings out;
+    QString counts[2];
+    for (int d = 0; d < 2; ++d) {
+        const QString e = static_cast<ExpressionCountBox*>(m_count[d])->expression();
+        counts[d] = e.isEmpty() ? QString::number(m_count[d]->value()) : QStringLiteral("(%1)").arg(e);
+        if (!e.isEmpty()) {
+            out[d == 0 ? "count" : "count2"] = e.toStdString();
+        }
+    }
+    // A distance worked out: the spacing from it as params() makes it (its size; an extent shared
+    // between the gaps; the second direction's sign as the flips make it).
+    const bool flip1 = m_distance[0]->value() < 0, flip2 = m_distance[1]->value() < 0;
+    for (int d = 0; d < 2; ++d) {
+        const QString e = static_cast<ExpressionSpinBox*>(m_distance[d])->expression();
+        if (e.isEmpty()) {
+            continue;
+        }
+        QString size = m_distance[d]->value() < 0 ? QStringLiteral("-(%1)").arg(e) : e;
+        if (m_distribution->currentIndex() == 0) {
+            size = QStringLiteral("(%1) / max(1, %2 - 1)").arg(size, counts[d]);
+        }
+        if (d == 1 && flip1 != flip2) {
+            size = QStringLiteral("-(%1)").arg(size);
+        }
+        out[d == 0 ? "spacing" : "spacing2"] = size.toStdString();
+    }
+    return out;
 }
 
 double RectangularPatternTool::baseAngle() const
@@ -959,13 +1007,14 @@ void RectangularPatternTool::changed()
 bool RectangularPatternTool::commit()
 {
     const auto p = params();
+    const Editor::Settings worked = settings();
     const std::vector<Id> objects = picked(m_objects);
     return view().tryEdit(QObject::tr("Pattern"), [&](Editor& ed) {
         if (m_editing != kNoId) {
-            ed.setPattern(m_editing, p);
+            ed.setPattern(m_editing, p, worked);
         }
         else {
-            ed.rectangularPattern(objects, p);
+            ed.rectangularPattern(objects, p, worked);
         }
     });
 }
@@ -1053,7 +1102,29 @@ void CircularPatternTool::buildPanel()
         setPicked(m_center, {existing.center});
         setPickEnabled(m_objects, false);
         setPickEnabled(m_center, false);
+        const auto& settings = s.constraint(m_editing).settings;
+        if (const auto it = settings.find("count"); it != settings.end()) {
+            static_cast<ExpressionCountBox*>(m_count)->setExpression(QString::fromStdString(it->second));
+        }
+        if (const auto it = settings.find("angle"); it != settings.end()) {
+            m_type->setCurrentIndex(1);
+            static_cast<ExpressionSpinBox*>(m_angle)->setExpression(QString::fromStdString(it->second));
+        }
     }
+}
+
+Editor::Settings CircularPatternTool::settings() const
+{
+    Editor::Settings out;
+    if (const QString e = static_cast<ExpressionCountBox*>(m_count)->expression(); !e.isEmpty()) {
+        out["count"] = e.toStdString();
+    }
+    if (m_type->currentIndex() == 1) {
+        if (const QString e = static_cast<ExpressionSpinBox*>(m_angle)->expression(); !e.isEmpty()) {
+            out["angle"] = e.toStdString();
+        }
+    }
+    return out;
 }
 
 core::feature::CircularPatternParams CircularPatternTool::params() const
@@ -1081,14 +1152,15 @@ void CircularPatternTool::changed()
 bool CircularPatternTool::commit()
 {
     const auto p = params();
+    const Editor::Settings worked = settings();
     const std::vector<Id> objects = picked(m_objects);
     const Id center = picked(m_center).front();
     return view().tryEdit(QObject::tr("Pattern"), [&](Editor& ed) {
         if (m_editing != kNoId) {
-            ed.setPattern(m_editing, p);
+            ed.setPattern(m_editing, p, worked);
         }
         else {
-            ed.circularPattern(objects, center, p);
+            ed.circularPattern(objects, center, p, worked);
         }
     });
 }
@@ -1279,7 +1351,20 @@ bool OffsetTool::commit()
     const double distance = std::abs(m_distance->value());
     const Vec2 side = toward();
     const bool both = bothSides(), capped = caps();
-    return view().tryEdit(QObject::tr("Offset"), [&](Editor& ed) { ed.offset(curves, distance, side, both, capped); });
+    Id made = kNoId;
+    if (!view().tryEdit(QObject::tr("Offset"), [&](Editor& ed) { made = ed.offset(curves, distance, side, both, capped); })) {
+        return false;
+    }
+    // Its distance worked out from parameters: kept so (as typing it into the offset afterwards).
+    const QString e = static_cast<ExpressionSpinBox*>(m_distance)->expression();
+    if (!e.isEmpty() && made != kNoId) {
+        const QString size = m_distance->value() < 0 ? QStringLiteral("-(%1)").arg(e) : e;
+        QString error;
+        if (!doc().setDimensionExpression(made, size, &error)) {
+            emit view().message(error);
+        }
+    }
+    return true;
 }
 
 void OffsetTool::paintPreview(QPainter& painter)

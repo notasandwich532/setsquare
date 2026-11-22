@@ -1062,6 +1062,15 @@ void Sketch::normalize(ConstraintType type, std::vector<Id>& refs) const
     }
 }
 
+void Sketch::setConstraintSettings(Id id, std::map<std::string, std::string> settings)
+{
+    auto it = m_constraints.find(id);
+    if (it == m_constraints.end()) {
+        throw SketchError("unknown constraint " + std::to_string(id));
+    }
+    it->second.settings = std::move(settings);
+}
+
 void Sketch::setConstraintTexts(Id id, std::vector<Id> texts)
 {
     auto it = m_constraints.find(id);

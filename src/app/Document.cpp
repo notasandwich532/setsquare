@@ -251,6 +251,11 @@ bool Document::setDimensionValue(core::Id dimension, double value, QString* erro
     std::vector<core::Id> hold;
     try {
         working.setConstraintExpression(dimension, {});  // (a value now, not worked out)
+        auto settings = working.constraint(dimension).settings;  // (likewise a pattern's or offset's value)
+        for (const char* key : {"spacing", "angle", "distance"}) {
+            settings.erase(key);
+        }
+        working.setConstraintSettings(dimension, settings);
         working.setConstraintValue(dimension, value);
         const core::Constraint& c = working.constraint(dimension);
         if (core::isFeature(c.type)) {
@@ -297,15 +302,30 @@ bool Document::setDimensionExpression(core::Id dimension, const QString& express
     if (!m_sketch.hasConstraint(dimension) || !core::hasValue(m_sketch.constraint(dimension).type)) {
         return fail(tr("That isn't a dimension"));
     }
-    if (core::isFeature(m_sketch.constraint(dimension).type)) {
-        return fail(tr("A pattern's, offset's or divide's settings can't use parameters (yet): only dimensions can"));
+    // A pattern's or offset's value (its spacing, total angle or distance): that setting.
+    const char* setting = nullptr;
+    switch (m_sketch.constraint(dimension).type) {
+        case core::ConstraintType::LinearPattern: setting = "spacing"; break;
+        case core::ConstraintType::CircularPattern: setting = "angle"; break;
+        case core::ConstraintType::Offset: setting = "distance"; break;
+        default: break;
+    }
+    if (core::isFeature(m_sketch.constraint(dimension).type) && !setting) {
+        return fail(tr("A divide's settings can't use parameters"));
     }
     if (core::group::holder(m_sketch, dimension) != core::kNoId) {
         return fail(tr("It's inside a group, which holds its size: ungroup it (delete the group) to change it"));
     }
     core::Sketch working = m_sketch;
     try {
-        working.setConstraintExpression(dimension, text);
+        if (setting) {
+            auto settings = working.constraint(dimension).settings;
+            settings[setting] = text;
+            working.setConstraintSettings(dimension, settings);
+        }
+        else {
+            working.setConstraintExpression(dimension, text);
+        }
         core::parameters::update(working);
     }
     catch (const core::SketchError& e) {
@@ -390,6 +410,11 @@ bool Document::renameParameter(const QString& from, const QString& to, QString* 
     working.setParameters(all);
     for (core::Id d : core::parameters::usersOf(m_sketch, was).dimensions) {
         working.setConstraintExpression(d, core::parameters::renamed(working.constraint(d).expression, was, b));
+        auto settings = working.constraint(d).settings;  // (a pattern's or offset's)
+        for (auto& [key, expression] : settings) {
+            expression = core::parameters::renamed(expression, was, b);
+        }
+        working.setConstraintSettings(d, settings);
     }
     try {
         core::parameters::update(working);

@@ -1,6 +1,10 @@
 #include "Parameters.h"
 
 #include "Expression.h"
+#include "Features.h"
+
+#include <cmath>
+#include <cstdio>
 
 #include <algorithm>
 #include <cctype>
@@ -11,6 +15,14 @@ namespace core::parameters
 
 namespace
 {
+// A number as people write it (2.5, not 2.500000).
+std::string number(double v)
+{
+    char text[32];
+    std::snprintf(text, sizeof text, "%g", v);
+    return text;
+}
+
 bool sameName(const std::string& a, const std::string& b)
 {
     return std::ranges::equal(a, b, [](unsigned char x, unsigned char y) { return std::tolower(x) == std::tolower(y); });
@@ -120,6 +132,114 @@ void update(Sketch& sketch)
             throw SketchError("dimension d" + std::to_string(id) + " (" + expression + "): " + e.what());
         }
     }
+
+    // Patterns' and offsets' settings. (A pattern given a new count is made again, with a new id.)
+    std::vector<Id> features;
+    for (const auto& [id, c] : sketch.constraints()) {
+        if (!c.settings.empty()) {
+            features.push_back(id);
+        }
+    }
+    for (Id id : features) {
+        const Constraint c = sketch.constraint(id);
+        const std::string what = c.type == ConstraintType::Offset ? "offset" : "pattern";
+        auto value = [&](const char* key, double& field) {
+            const auto it = c.settings.find(key);
+            if (it == c.settings.end()) {
+                return;
+            }
+            try {
+                field = evaluate(it->second, lookup);
+            }
+            catch (const SketchError& e) {
+                throw SketchError(what + " k" + std::to_string(id) + " (" + key + " = "
+                                  + it->second + "): " + e.what());
+            }
+        };
+        auto whole = [&](const char* key, int& field) {
+            double v = field;
+            value(key, v);
+            if (std::abs(v - std::round(v)) > 1e-9) {
+                throw SketchError(what + " k" + std::to_string(id) + " (" + key + " = "
+                                  + c.settings.at(key) + "): a count has to come out whole, not " + number(v));
+            }
+            field = static_cast<int>(std::lround(v));
+        };
+        if (c.type == ConstraintType::LinearPattern) {
+            feature::LinearPatternParams p = feature::linearParams(c), was = p;
+            whole("count", p.count);
+            value("spacing", p.spacing);
+            value("angle", p.angle);
+            whole("count2", p.count2);
+            value("spacing2", p.spacing2);
+            if (p.count != was.count || p.spacing != was.spacing || p.angle != was.angle || p.count2 != was.count2
+                || p.spacing2 != was.spacing2) {
+                feature::setLinearPattern(sketch, id, p);
+            }
+        }
+        else if (c.type == ConstraintType::CircularPattern) {
+            feature::CircularPatternParams p = feature::circularParams(c), was = p;
+            whole("count", p.count);
+            value("angle", p.angle);
+            if (p.count != was.count || p.angle != was.angle) {
+                feature::setCircularPattern(sketch, id, p);
+            }
+        }
+        else if (c.type == ConstraintType::Offset) {
+            double d = c.value;
+            value("distance", d);
+            if (d != c.value) {
+                sketch.setConstraintValue(id, d);
+            }
+        }
+    }
+}
+
+double valueOf(const Sketch& sketch, const std::string& expression)
+{
+    return evaluate(expression, [&](const std::string& name) -> std::optional<double> {
+        const int at = find(sketch, name);
+        return at < 0 ? std::nullopt : std::optional<double>(sketch.parameters()[static_cast<size_t>(at)].value);
+    });
+}
+
+namespace
+{
+void setting(const Sketch& s, const std::map<std::string, std::string>& settings, const char* key, double& field)
+{
+    if (const auto it = settings.find(key); it != settings.end()) {
+        try {
+            field = valueOf(s, it->second);
+        }
+        catch (const SketchError& e) {
+            throw SketchError(std::string(key) + " (" + it->second + "): " + e.what());
+        }
+    }
+}
+void wholeSetting(const Sketch& s, const std::map<std::string, std::string>& settings, const char* key, int& field)
+{
+    double v = field;
+    setting(s, settings, key, v);
+    if (std::abs(v - std::round(v)) > 1e-9) {
+        throw SketchError(std::string(key) + " (" + settings.at(key) + "): a count has to come out whole, not " + number(v));
+    }
+    field = static_cast<int>(std::lround(v));
+}
+}  // namespace
+
+void applySettings(const Sketch& s, const std::map<std::string, std::string>& settings, feature::LinearPatternParams& p)
+{
+    wholeSetting(s, settings, "count", p.count);
+    setting(s, settings, "spacing", p.spacing);
+    setting(s, settings, "angle", p.angle);
+    wholeSetting(s, settings, "count2", p.count2);
+    setting(s, settings, "spacing2", p.spacing2);
+}
+
+void applySettings(const Sketch& s, const std::map<std::string, std::string>& settings, feature::CircularPatternParams& p)
+{
+    wholeSetting(s, settings, "count", p.count);
+    setting(s, settings, "angle", p.angle);
 }
 
 Users usersOf(const Sketch& sketch, const std::string& name)
@@ -134,7 +254,8 @@ Users usersOf(const Sketch& sketch, const std::string& name)
         }
     }
     for (const auto& [id, c] : sketch.constraints()) {
-        if (!c.expression.empty() && uses(c.expression)) {
+        const bool setting = std::ranges::any_of(c.settings, [&](const auto& kv) { return uses(kv.second); });
+        if ((!c.expression.empty() && uses(c.expression)) || setting) {
             out.dimensions.push_back(id);
         }
     }

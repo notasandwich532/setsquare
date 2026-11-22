@@ -239,6 +239,7 @@ protected:
 
 private:
     core::feature::LinearPatternParams params() const;
+    Editor::Settings settings() const;  // what of params() is worked out from parameters
     double baseAngle() const;  // degrees: the first direction before any flip
     core::Vec2 axis(int direction) const;
     double extent(int direction) const;  // signed, along axis(direction)
@@ -277,6 +278,7 @@ protected:
 
 private:
     core::feature::CircularPatternParams params() const;
+    Editor::Settings settings() const;
 
     core::Id m_editing;
     int m_objects = 0;

@@ -105,3 +105,43 @@ TEST_CASE("Parameters: dimensions follow them; saved and loaded; copies keep the
     CHECK(s.constraint(w).expression.empty());  // (scaled: a value of its own now)
     CHECK(s.constraint(w).value == Approx(200.0));
 }
+TEST_CASE("Parameters: patterns' counts and spacings follow them (a new count makes the copies again)", "[parameters]")
+{
+    Sketch s;
+    const Id c = s.addCircle(0, 0, 2);
+    s.setParameters({{"holes", "3"}, {"pitch", "12"}});
+    parameters::update(s);
+    feature::LinearPatternParams p;
+    std::map<std::string, std::string> settings{{"count", "holes"}, {"spacing", "pitch / 2"}};
+    parameters::applySettings(s, settings, p);
+    CHECK(p.count == 3);
+    CHECK(p.spacing == Approx(6.0));
+    Id k = feature::linearPattern(s, {c}, p);
+    s.setConstraintSettings(k, settings);
+    auto circles = [&] { return std::ranges::count_if(s.entities(), [](const auto& kv) { return kv.second.kind() == EntityKind::Circle; }); };
+    CHECK(circles() == 3);
+
+    s.setParameters({{"holes", "5"}, {"pitch", "20"}});
+    parameters::update(s);
+    CHECK(circles() == 5);
+    k = s.constraints().rbegin()->first;  // (made again: a new id)
+    for (const auto& [id, kc] : s.constraints()) {
+        if (kc.type == ConstraintType::LinearPattern) {
+            k = id;
+        }
+    }
+    CHECK(s.constraint(k).value == Approx(10.0));
+    CHECK(s.constraint(k).settings == settings);  // (kept through being made again)
+    CHECK(parameters::usersOf(s, "holes").dimensions == std::vector<Id>{k});
+
+    s.setParameters({{"holes", "2.5"}, {"pitch", "20"}});
+    CHECK(failure([&] { parameters::update(s); }).find("whole, not 2.5") != std::string::npos);
+
+    const Sketch loaded = fromJson(toJson([&] {
+        Sketch ok = s;
+        ok.setParameters({{"holes", "4"}, {"pitch", "20"}});
+        parameters::update(ok);
+        return ok;
+    }()));
+    CHECK(std::ranges::count_if(loaded.entities(), [](const auto& kv) { return kv.second.kind() == EntityKind::Circle; }) == 4);
+}

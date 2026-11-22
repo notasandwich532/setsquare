@@ -285,6 +285,22 @@ struct PaintArg
     core::Gradient gradient;  // active when one was given
 };
 
+// A pattern's setting given from Python: a number (a plain value: no longer worked out), or an
+// expression using the drawing's parameters (kept in `settings`; `field` is what it comes to, for
+// now: the Editor works it out again). None: as it is.
+template<typename T>
+void setting(Editor::Settings& settings, const char* key, const py::object& given, T& field)
+{
+    if (given.is_none()) {
+        return;
+    }
+    if (py::isinstance<py::str>(given)) {
+        settings[key] = given.cast<std::string>();
+        return;
+    }
+    field = given.cast<T>();
+    settings.erase(key);
+}
 PaintArg paintArg(py::handle h)
 {
     PaintArg p;
@@ -2629,29 +2645,46 @@ PYBIND11_EMBEDDED_MODULE(setsquare, m)
         }, py::arg("items"), py::arg("line"),
            "Mirror items across a line, kept symmetric to the originals. Returns the mirror images (items lying "
            "on the line have none).")
-        .def("rectangular_pattern", [](const SketchH&, py::handle items, int count, double spacing, double angle,
-                                       int count2, double spacing2, bool symmetric, bool symmetric2) {
+        .def("rectangular_pattern", [](const SketchH&, py::handle items, py::object count, py::object spacing,
+                                       py::object angle, py::object count2, py::object spacing2, bool symmetric,
+                                       bool symmetric2) {
             const std::vector<Id> ids = itemsOf(items);
-            const core::feature::LinearPatternParams p{count, spacing, angle, count2, spacing2, symmetric, symmetric2};
-            return wrap(editReturningId("Pattern", [&](Editor& ed) { return ed.rectangularPattern(ids, p); }));
+            core::feature::LinearPatternParams p;
+            Editor::Settings settings;
+            setting(settings, "count", count, p.count);
+            setting(settings, "spacing", spacing, p.spacing);
+            setting(settings, "angle", angle, p.angle);
+            setting(settings, "count2", count2, p.count2);
+            setting(settings, "spacing2", spacing2, p.spacing2);
+            p.symmetric = symmetric;
+            p.symmetric2 = symmetric2;
+            return wrap(editReturningId("Pattern", [&](Editor& ed) { return ed.rectangularPattern(ids, p, settings); }));
         }, py::arg("items"), py::arg("count") = 3, py::arg("spacing") = 10.0, py::arg("angle") = 0.0,
            py::arg("count2") = 1, py::arg("spacing2") = 10.0, py::arg("symmetric") = false,
            py::arg("symmetric2") = false,
            "Linked copies in rows: `count` along `angle` degrees, `count2` at right angles to it (counts include "
-           "the original; symmetric= repeats them both ways). Returns the pattern; its value is the spacing.")
-        .def("circular_pattern", [](const SketchH&, py::handle items, py::handle center, int count, double angle) {
+           "the original; symmetric= repeats them both ways). Any of the numbers may be an expression using the "
+           "drawing's parameters (count=\"holes\"), which it then follows. Returns the pattern; its value is the "
+           "spacing.")
+        .def("circular_pattern", [](const SketchH&, py::handle items, py::handle center, py::object count,
+                                    py::object angle) {
             const std::vector<Id> ids = itemsOf(items);
             const Id c = idOf(center);
-            const core::feature::CircularPatternParams p{count, angle};
-            return wrap(editReturningId("Pattern", [&](Editor& ed) { return ed.circularPattern(ids, c, p); }));
+            core::feature::CircularPatternParams p;
+            Editor::Settings settings;
+            setting(settings, "count", count, p.count);
+            setting(settings, "angle", angle, p.angle);
+            return wrap(editReturningId("Pattern", [&](Editor& ed) { return ed.circularPattern(ids, c, p, settings); }));
         }, py::arg("items"), py::arg("center"), py::arg("count") = 6, py::arg("angle") = 360.0,
            "Linked copies around a centre point: `count` (including the original) over `angle` degrees. A full "
-           "turn spaces them evenly. Returns the pattern; its value is the angle.")
+           "turn spaces them evenly. Either may be an expression using the drawing's parameters. Returns the "
+           "pattern; its value is the angle.")
         .def("set_pattern", [](const SketchH&, py::handle pattern, py::object count, py::object spacing,
                                py::object angle, py::object count2, py::object spacing2, py::object symmetric,
                                py::object symmetric2) {
             const Id id = idOf(pattern);
             const core::Constraint& k = constraintOf(id);
+            Editor::Settings settings = k.settings;  // (those not given stay as they are)
             auto set = [](auto& field, const py::object& v) {
                 if (!v.is_none()) {
                     field = v.cast<std::remove_reference_t<decltype(field)>>();
@@ -2659,27 +2692,27 @@ PYBIND11_EMBEDDED_MODULE(setsquare, m)
             };
             if (k.type == ConstraintType::LinearPattern) {
                 auto p = core::feature::linearParams(k);
-                set(p.count, count);
-                set(p.spacing, spacing);
-                set(p.angle, angle);
-                set(p.count2, count2);
-                set(p.spacing2, spacing2);
+                setting(settings, "count", count, p.count);
+                setting(settings, "spacing", spacing, p.spacing);
+                setting(settings, "angle", angle, p.angle);
+                setting(settings, "count2", count2, p.count2);
+                setting(settings, "spacing2", spacing2, p.spacing2);
                 set(p.symmetric, symmetric);
                 set(p.symmetric2, symmetric2);
-                return wrap(editReturningId("Pattern", [&](Editor& ed) { return ed.setPattern(id, p); }));
+                return wrap(editReturningId("Pattern", [&](Editor& ed) { return ed.setPattern(id, p, settings); }));
             }
             if (k.type == ConstraintType::CircularPattern) {
                 auto p = core::feature::circularParams(k);
-                set(p.count, count);
-                set(p.angle, angle);
-                return wrap(editReturningId("Pattern", [&](Editor& ed) { return ed.setPattern(id, p); }));
+                setting(settings, "count", count, p.count);
+                setting(settings, "angle", angle, p.angle);
+                return wrap(editReturningId("Pattern", [&](Editor& ed) { return ed.setPattern(id, p, settings); }));
             }
             throw py::value_error("not a pattern");
         }, py::arg("pattern"), py::arg("count") = py::none(), py::arg("spacing") = py::none(),
            py::arg("angle") = py::none(), py::arg("count2") = py::none(), py::arg("spacing2") = py::none(),
            py::arg("symmetric") = py::none(), py::arg("symmetric2") = py::none(),
-           "Change a pattern's settings. A new count remakes the copies; returns the pattern (a new one then).")
-        .def("offset", [](const SketchH&, py::handle curves, double distance, py::object toward, bool bothSides,
+           "Change a pattern's settings (numbers, or expressions using the drawing's parameters; those not given "
+           "stay as they are). A new count remakes the copies; returns the pattern (a new one then).")        .def("offset", [](const SketchH&, py::handle curves, double distance, py::object toward, bool bothSides,
                           bool caps) {
             std::vector<Id> ids = itemsOf(curves);
             if (ids.size() == 1 && !py::isinstance<py::sequence>(curves)) {

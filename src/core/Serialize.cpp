@@ -387,6 +387,9 @@ json constraintToJson(const Constraint& c)
     if (!c.texts.empty()) {
         j["texts"] = c.texts;
     }
+    if (!c.settings.empty()) {
+        j["settings"] = c.settings;
+    }
     if (hasValue(c.type)) {
         j["value"] = c.value;
         if (!c.expression.empty()) {
@@ -418,6 +421,7 @@ Constraint constraintFromJson(const json& j)
     c.expression = j.value("expression", std::string());
     c.params = j.value("params", std::vector<double>{});
     c.texts = j.value("texts", std::vector<Id>{});
+    c.settings = j.value("settings", std::map<std::string, std::string>{});
     if (j.contains("label")) {
         const auto& label = j.at("label");
         c.labelX = label.at(0).get<double>();

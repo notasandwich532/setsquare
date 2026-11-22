@@ -130,9 +130,13 @@ d.value = 60                             # a plain value again
 s.rename_parameter("width", "w")         # and every expression using it
 s.delete_parameter("hole")               # refused while something uses it
 s.parameters                             # each with .name, .expression, .value
+k = s.rectangular_pattern(items, count="holes", spacing="pitch")   # patterns follow them too
+k = s.circular_pattern(items, s.origin, count="holes")              # (a count must come out whole)
+k = s.set_pattern(k, spacing=12)         # a number: that setting is a plain value again
+o.value = "gap"                          # an offset's distance (a pattern's value: its spacing or angle)
 ```
-In the app, the **Parameters** panel lists them; type a name into a dimension to use one (its label
-then shows ƒ). Unknown names, loops (`a` using `b` using `a`) and values a dimension can't have are
+In the app, the **Parameters** panel lists them; type a name into a dimension, or into a pattern's or
+offset's number boxes, to use one (they then show ƒ). Unknown names, loops (`a` using `b` using `a`) and values a dimension can't have are
 refused, with nothing changed.
 ### Trimming and corners
 `near` is where you would click; it picks the part of the curve that's meant.

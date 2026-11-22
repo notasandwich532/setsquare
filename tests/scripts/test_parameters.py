@@ -30,3 +30,16 @@ for bad, says in [(lambda: s.parameter("a", "b"), "don't know 'b'"),
 w.value = 150                                   # a number: a plain value again
 assert w.expression is None
 print("ok")
+# Patterns follow parameters too.
+s.parameter("holes", 3)
+dot = s.circle((0, 100), 1)
+k = s.rectangular_pattern([dot], count="holes", spacing="W / 40")
+assert len([c for c in s.circles if c.radius == 1]) == 3
+s.parameter("holes", 5)
+assert len([c for c in s.circles if c.radius == 1]) == 5
+try:
+    s.parameter("holes", 4.5)
+    raise AssertionError("a count of 4.5 should be refused")
+except ValueError as e:
+    assert "whole" in str(e), e
+print("ok, patterns")

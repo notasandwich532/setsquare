@@ -262,6 +262,11 @@ struct Constraint
     // Patterns only: texts repeated with it (their copies linked: see core::feature::syncPatternTexts).
     std::vector<Id> texts;
 
+    // Patterns and offsets: settings worked out from the drawing's parameters, by name ("count",
+    // "spacing", "angle", "count2", "spacing2"; an offset's "distance"), as expressions (see
+    // core/Parameters.h). Settings not here are plain values.
+    std::map<std::string, std::string> settings;
+
     Id sublayer = kNoId;  // the sublayer it was made in (its symbol shows while that's active)
 };
 
@@ -514,6 +519,8 @@ public:
     void setConstraintExpression(Id constraint, std::string expression);
     // A pattern's texts (copied with it: see Constraint::texts).
     void setConstraintTexts(Id constraint, std::vector<Id> texts);
+    // A pattern's or offset's settings worked out from parameters (see Constraint::settings).
+    void setConstraintSettings(Id constraint, std::map<std::string, std::string> settings);
 
     // --- parameters (named values; see core/Parameters.h) ---
     const std::vector<Parameter>& parameters() const { return m_parameters; }

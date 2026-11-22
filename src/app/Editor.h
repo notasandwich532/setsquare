@@ -74,12 +74,17 @@ public:
     std::map<core::Id, core::Id> mirror(const std::vector<core::Id>& items, core::Id line);
     // (the letters of the texts among what was just made, made: mirrored, they're laid out afresh)
     void makeLetters(const std::map<core::Id, core::Id>& made);
-    core::Id rectangularPattern(const std::vector<core::Id>& items, const core::feature::LinearPatternParams& p);
-    core::Id circularPattern(const std::vector<core::Id>& items, core::Id center,
-                             const core::feature::CircularPatternParams& p);
+    // Settings worked out from the drawing's parameters, by name ("count" = "holes"; see
+    // core::Constraint::settings): those in `p` are worked out from them, and kept so.
+    using Settings = std::map<std::string, std::string>;
+    core::Id rectangularPattern(const std::vector<core::Id>& items, core::feature::LinearPatternParams p,
+                                const Settings& settings = {});
+    core::Id circularPattern(const std::vector<core::Id>& items, core::Id center, core::feature::CircularPatternParams p,
+                             const Settings& settings = {});
     // Returns the pattern's id, which changes when the count does (the copies are remade).
-    core::Id setPattern(core::Id pattern, const core::feature::LinearPatternParams& p);
-    core::Id setPattern(core::Id pattern, const core::feature::CircularPatternParams& p);
+    // (`settings` replaces those it had: settings not in it become plain values)
+    core::Id setPattern(core::Id pattern, core::feature::LinearPatternParams p, const Settings& settings = {});
+    core::Id setPattern(core::Id pattern, core::feature::CircularPatternParams p, const Settings& settings = {});
     // `toward` picks the side; with bothSides it's ignored (and caps closes an open chain's ends).
     core::Id offset(const std::vector<core::Id>& curves, double distance, core::Vec2 toward, bool bothSides = false,
                     bool caps = false);

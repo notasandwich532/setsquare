@@ -2,6 +2,11 @@
 // history; typed into a dimension; and the Parameters panel.
 
 #include "Document.h"
+#include <algorithm>
+#include <QFocusEvent>
+#include <QAbstractSpinBox>
+#include "NumberInput.h"
+#include "CommandPanel.h"
 #include "ParametersPanel.h"
 #include "PythonHost.h"
 #include "SketchView.h"
@@ -185,4 +190,139 @@ TEST_CASE("Parameters panel: edit an expression or a name; what can't be done is
     panel.findChild<QPushButton*>("removeParameter")->click();  // (used: refused)
     CHECK(table->rowCount() == 1);
     CHECK(problem->text().contains("used by"));
+}
+TEST_CASE("Number boxes take parameters: kept as an expression (marked), shown again to edit, dropped by the arrows", "[parameters][ui]")
+{
+    setNumberInputNames([](const std::string& name) -> std::optional<double> {
+        return name == "w" ? std::optional<double>(120.0) : std::nullopt;
+    });
+    ExpressionSpinBox box;
+    box.setRange(-1e6, 1e6);
+    box.show();
+    box.setFocus();
+    box.findChild<QLineEdit*>()->selectAll();
+    QTest::keyClicks(&box, "w / 4");
+    QTest::keyClick(&box, Qt::Key_Return);
+    CHECK(box.value() == Approx(30.0));
+    CHECK(box.expression() == "w / 4");
+    CHECK(box.text().startsWith(QStringLiteral("ƒ")));
+    box.clearFocus();
+    QFocusEvent in(QEvent::FocusIn);
+    QCoreApplication::sendEvent(&box, &in);
+    CHECK(box.findChild<QLineEdit*>()->text() == "w / 4");  // (to edit: the expression)
+    static_cast<QAbstractSpinBox&>(box).stepBy(1);  // (the arrows)
+    CHECK(box.expression().isEmpty());
+    CHECK(box.value() == Approx(31.0));
+
+    ExpressionCountBox count;
+    count.setRange(1, 1000);
+    CHECK(!count.setExpression("w / 7"));  // (not whole)
+    CHECK(count.setExpression("w / 10"));
+    CHECK(count.value() == 12);
+    CHECK(count.expression() == "w / 10");
+    setNumberInputNames({});
+}
+
+TEST_CASE("Pattern panels: a count or spacing typed as a parameter follows it, and opens showing it", "[parameters][ui]")
+{
+    Document doc;
+    SketchView view(doc);
+    view.resize(1000, 700);
+    view.show();
+    view.resetView();
+    Id c = kNoId;
+    doc.modify("circle", [&](Sketch& s) { c = s.addCircle(0, 0, 2); });
+    QString error;
+    REQUIRE(doc.setParameter("holes", "3", &error));
+    auto circles = [&] {
+        return std::ranges::count_if(doc.sketch().entities(), [](const auto& kv) { return kv.second.kind() == EntityKind::Circle; });
+    };
+    auto field = [&](const char* name) {
+        QCoreApplication::processEvents();
+        auto* panel = view.findChild<CommandPanel*>("commandPanel");
+        REQUIRE(panel != nullptr);
+        auto* w = panel->findChild<QAbstractSpinBox*>(name);
+        REQUIRE(w != nullptr);
+        return w;
+    };
+    // (Tab to the next box; Enter in one is the panel's OK, as it is for anyone typing.)
+    auto type = [&](const char* name, const char* text, Qt::Key then) {
+        QAbstractSpinBox* box = field(name);
+        box->setFocus();
+        box->selectAll();
+        QTest::keyClicks(box, text);
+        QTest::keyClick(box, then);
+    };
+    auto ok = [&] {
+        view.findChild<CommandPanel*>("commandPanel")->findChild<QPushButton*>("ok")->click();
+        QCoreApplication::processEvents();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    };
+
+    view.setSelection({c});
+    view.setTool(ToolKind::RectangularPattern);
+    type("quantity", "holes", Qt::Key_Tab);
+    type("distance", "holes * 10", Qt::Key_Return);  // (Extent: shared between the gaps; Enter: OK)
+    QCoreApplication::processEvents();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    CHECK(circles() == 3);
+    Id k = kNoId;
+    for (const auto& [id, kc] : doc.sketch().constraints()) {
+        if (kc.type == ConstraintType::LinearPattern) {
+            k = id;
+        }
+    }
+    REQUIRE(k != kNoId);
+    CHECK(doc.sketch().constraint(k).settings.at("count") == "holes");
+    CHECK(doc.sketch().constraint(k).value == Approx(15.0));  // 30 over 2 gaps
+
+    REQUIRE(doc.setParameter("holes", "5", &error));
+    CHECK(circles() == 5);
+    for (const auto& [id, kc] : doc.sketch().constraints()) {
+        if (kc.type == ConstraintType::LinearPattern) {
+            k = id;
+        }
+    }
+    CHECK(doc.sketch().constraint(k).value == Approx(12.5));  // 50 over 4
+
+    view.editFeature(k);  // opened again: what it's worked out from
+    CHECK(static_cast<ExpressionCountBox*>(field("quantity"))->expression() == "holes");
+    CHECK(!static_cast<ExpressionSpinBox*>(field("distance"))->expression().isEmpty());
+    view.setTool(ToolKind::Select);
+}
+
+TEST_CASE("Offset panel: a distance typed as a parameter follows it", "[parameters][ui]")
+{
+    Document doc;
+    SketchView view(doc);
+    view.resize(1000, 700);
+    view.show();
+    view.resetView();
+    Id l = kNoId;
+    doc.modify("line", [&](Sketch& s) { l = s.addLine(-20, 0, 20, 0); });
+    QString error;
+    REQUIRE(doc.setParameter("gap", "4", &error));
+    view.setSelection({l});
+    view.setTool(ToolKind::Offset);
+    QCoreApplication::processEvents();
+    auto* panel = view.findChild<CommandPanel*>("commandPanel");
+    REQUIRE(panel != nullptr);
+    auto* distance = panel->findChild<ExpressionSpinBox*>("distance");
+    REQUIRE(distance != nullptr);
+    distance->setFocus();
+    distance->selectAll();
+    QTest::keyClicks(distance, "gap");
+    QTest::keyClick(distance, Qt::Key_Return);
+    panel->findChild<QPushButton*>("ok")->click();
+    QCoreApplication::processEvents();
+    Id k = kNoId;
+    for (const auto& [id, kc] : doc.sketch().constraints()) {
+        if (kc.type == ConstraintType::Offset) {
+            k = id;
+        }
+    }
+    REQUIRE(k != kNoId);
+    CHECK(doc.sketch().constraint(k).settings.at("distance") == "gap");
+    REQUIRE(doc.setParameter("gap", "7", &error));
+    CHECK(doc.sketch().constraint(k).value == Approx(7.0));
 }

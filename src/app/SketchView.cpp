@@ -1,6 +1,8 @@
+#include "NumberInput.h"
 #include "SketchView.h"
 
 #include <core/Annotations.h>
+#include <core/Parameters.h>
 #include <core/Curves.h>
 #include <core/Features.h>
 #include <core/Modify.h>
@@ -88,6 +90,11 @@ SketchView::SketchView(Document& document, QWidget* parent)
     : QWidget(parent)
     , m_doc(document)
 {
+    // Number boxes (tools' panels) take this drawing's parameters by name.
+    setNumberInputNames([doc = &m_doc](const std::string& name) -> std::optional<double> {
+        const int at = core::parameters::find(doc->sketch(), name);
+        return at < 0 ? std::nullopt : std::optional<double>(doc->sketch().parameters()[static_cast<size_t>(at)].value);
+    });
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
     setAttribute(Qt::WA_OpaquePaintEvent);
@@ -142,7 +149,10 @@ void SketchView::scheduleRepaint()
     }
 }
 
-SketchView::~SketchView() = default;
+SketchView::~SketchView()
+{
+    setNumberInputNames({});  // (its drawing goes with it)
+}
 
 // ---------------------------------------------------------------------------------------------
 // Transform
