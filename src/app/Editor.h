@@ -72,6 +72,8 @@ public:
                                       core::Vec2 about = {});
     void scale(const std::vector<core::Id>& items, double factor, core::Vec2 about);
     std::map<core::Id, core::Id> mirror(const std::vector<core::Id>& items, core::Id line);
+    // (the letters of the texts among what was just made, made: mirrored, they're laid out afresh)
+    void makeLetters(const std::map<core::Id, core::Id>& made);
     core::Id rectangularPattern(const std::vector<core::Id>& items, const core::feature::LinearPatternParams& p);
     core::Id circularPattern(const std::vector<core::Id>& items, core::Id center,
                              const core::feature::CircularPatternParams& p);

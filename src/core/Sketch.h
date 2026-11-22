@@ -259,6 +259,9 @@ struct Constraint
     // value. `value` then holds what it comes to (see core/Parameters.h).
     std::string expression;
 
+    // Patterns only: texts repeated with it (their copies linked: see core::feature::syncPatternTexts).
+    std::vector<Id> texts;
+
     Id sublayer = kNoId;  // the sublayer it was made in (its symbol shows while that's active)
 };
 
@@ -384,6 +387,12 @@ struct Text
     bool grow = false;
     Id sublayer = kNoId;
     bool inBox() const { return boxSide != kNoId && boxCorner != kNoId; }
+    // A pattern's copy of another text (core::feature::syncPatternTexts keeps it so): the original,
+    // the pattern, and which of its instances (1 on). Not edited on its own.
+    Id copyOf = kNoId;
+    Id copyFeature = kNoId;
+    int copyInstance = 0;
+    bool isPatternCopy() const { return copyOf != kNoId; }
     std::size_t layoutKey = 0;  // (not saved) what the shape was last made from, to skip remaking
     bool hasColor = false;
     Color color;  // when set: filled in this colour in the drawing (else like plain geometry)
@@ -503,6 +512,8 @@ public:
     void setConstraintFlip(Id constraint, std::uint8_t flip);  // see Constraint::flip
     // A dimension's expression (empty: a plain value). Unchecked: see core::parameters::update.
     void setConstraintExpression(Id constraint, std::string expression);
+    // A pattern's texts (copied with it: see Constraint::texts).
+    void setConstraintTexts(Id constraint, std::vector<Id> texts);
 
     // --- parameters (named values; see core/Parameters.h) ---
     const std::vector<Parameter>& parameters() const { return m_parameters; }
@@ -550,9 +561,11 @@ public:
     // Texts share the id space too. Removing a text's anchor point removes the text; remove()
     // deletes a text (and its anchor, if nothing else uses it).
     Id addText(const Text& text);     // text.id is ignored; returns the new id
+    Id addText(const Text& text, Id sublayer);  // into that sublayer rather than the active one
     void setText(const Text& text);   // replaces an existing text (by id)
     void insertText(const Text& text);  // with its id (loading)
     bool hasText(Id id) const { return m_texts.contains(id); }
+    void eraseText(Id id) { m_texts.erase(id); }  // just the text (remove() also tidies what it was on)
     const Text& text(Id id) const;
     const std::map<Id, Text>& texts() const { return m_texts; }
 

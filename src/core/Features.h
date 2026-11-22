@@ -66,6 +66,13 @@ Id setCircularPattern(Sketch& sketch, Id pattern, const CircularPatternParams& p
 // so a solve after changing the settings starts from the answer. Patterns only.
 void placeCopies(Sketch& sketch, Id pattern);
 
+// Patterns' texts (Constraint::texts): each instance has a copy of each, on the instance's copies
+// of what it hangs on, turned as the instance is, looking just like the original (made to, after
+// any change: the copies aren't edited on their own). Copies of patterns or texts that are gone,
+// or instances there no longer are, go. Their letters, where they changed, need making again
+// (layoutKey 0: see textshapes). Returns whether anything changed.
+bool syncPatternTexts(Sketch& sketch);
+
 // The points that define a feature's source geometry (and a circular pattern's centre): held
 // in place when the feature's value changes, so the copies move rather than the original.
 std::vector<Id> sourcePoints(const Sketch& sketch, const Constraint& c);

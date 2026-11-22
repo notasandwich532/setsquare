@@ -1,6 +1,7 @@
 #include "Features.h"
 
 #include "Curves.h"
+#include "Transform.h"
 
 #include <algorithm>
 #include <cmath>
@@ -375,9 +376,33 @@ std::vector<Id> patternSources(const Sketch& s, const std::vector<Id>& selection
     return {out.begin(), out.end()};
 }
 
+namespace
+{
+// The selection with what its texts hang on (repeated so the texts can be: see syncPatternTexts),
+// and those texts (not ones that are already a pattern's copies).
+std::vector<Id> withTextHolders(const Sketch& s, const std::vector<Id>& selection, std::vector<Id>& texts)
+{
+    std::vector<Id> out;
+    for (Id id : selection) {
+        if (s.hasText(id)) {
+            if (!s.text(id).isPatternCopy() && std::ranges::find(texts, id) == texts.end()) {
+                texts.push_back(id);
+                for (Id h : xform::textHolders(s, id)) {
+                    out.push_back(h);
+                }
+            }
+            continue;
+        }
+        out.push_back(id);
+    }
+    return out;
+}
+}  // namespace
+
 Id linearPattern(Sketch& s, const std::vector<Id>& selection, const LinearPatternParams& p)
 {
-    const std::vector<Id> sources = patternSources(s, selection);
+    std::vector<Id> texts;
+    const std::vector<Id> sources = patternSources(s, withTextHolders(s, selection, texts));
     if (sources.empty()) {
         throw SketchError("pattern: nothing selected to repeat");
     }
@@ -389,7 +414,10 @@ Id linearPattern(Sketch& s, const std::vector<Id>& selection, const LinearPatter
     }
     const size_t total = along(p.count, p.symmetric) * along(p.count2, p.symmetric2);
     std::vector<Id> refs = makeCopies(s, sources, total, [&](size_t k) { return linearAt(p, k); });
-    return s.addConstraint(ConstraintType::LinearPattern, std::move(refs), p.spacing, linearParamVector(p));
+    const Id made = s.addConstraint(ConstraintType::LinearPattern, std::move(refs), p.spacing, linearParamVector(p));
+    s.setConstraintTexts(made, texts);
+    syncPatternTexts(s);
+    return made;
 }
 
 Id circularPattern(Sketch& s, const std::vector<Id>& selection, Id center, const CircularPatternParams& p)
@@ -397,7 +425,8 @@ Id circularPattern(Sketch& s, const std::vector<Id>& selection, Id center, const
     if (!s.hasEntity(center) || s.entity(center).kind() != EntityKind::Point) {
         throw SketchError("pattern: the centre must be a point");
     }
-    std::vector<Id> sources = patternSources(s, selection);
+    std::vector<Id> texts;
+    std::vector<Id> sources = patternSources(s, withTextHolders(s, selection, texts));
     std::erase(sources, center);
     if (sources.empty()) {
         throw SketchError("pattern: nothing selected to repeat");
@@ -413,7 +442,10 @@ Id circularPattern(Sketch& s, const std::vector<Id>& selection, Id center, const
     for (Id r : makeCopies(s, sources, static_cast<size_t>(p.count), [&](size_t k) { return circularAt(p, c, k); })) {
         refs.push_back(r);
     }
-    return s.addConstraint(ConstraintType::CircularPattern, std::move(refs), p.angle, {double(p.count)});
+    const Id made = s.addConstraint(ConstraintType::CircularPattern, std::move(refs), p.angle, {double(p.count)});
+    s.setConstraintTexts(made, texts);
+    syncPatternTexts(s);
+    return made;
 }
 
 Id setLinearPattern(Sketch& s, Id id, const LinearPatternParams& p)
@@ -430,7 +462,8 @@ Id setLinearPattern(Sketch& s, Id id, const LinearPatternParams& p)
         placeCopies(s, id);
         return id;
     }
-    const std::vector<Id> sources = pattern(c).sources;
+    std::vector<Id> sources = pattern(c).sources;
+    sources.insert(sources.end(), c.texts.begin(), c.texts.end());  // (its texts again)
     removeCopies(s, id);
     return linearPattern(s, sources, p);
 }
@@ -447,8 +480,10 @@ Id setCircularPattern(Sketch& s, Id id, const CircularPatternParams& p)
         return id;
     }
     const Pattern old = pattern(c);
+    std::vector<Id> sources = old.sources;
+    sources.insert(sources.end(), c.texts.begin(), c.texts.end());  // (its texts again)
     removeCopies(s, id);
-    return circularPattern(s, old.sources, old.center, p);
+    return circularPattern(s, sources, old.center, p);
 }
 
 void placeCopies(Sketch& s, Id id)
@@ -1065,6 +1100,100 @@ void placeDividePoints(Sketch& s, Id id)
         const Vec2 q = a + t[i] * (b - a);
         s.point(c.refs[i + 1]) = Point{q.x, q.y};
     }
+}
+
+namespace
+{
+// Whether two texts look the same and sit in the same place (all but their ids, sublayers and
+// letters: those follow from the rest).
+bool sameText(const Text& a, const Text& b)
+{
+    return a.anchor == b.anchor && a.path == b.path && a.pathMore == b.pathMore && a.boxSide == b.boxSide
+        && a.boxCorner == b.boxCorner && a.text == b.text && a.font == b.font && a.bold == b.bold
+        && a.italic == b.italic && a.height == b.height && a.angle == b.angle && a.outline == b.outline
+        && a.minThickness == b.minThickness && a.spacing == b.spacing && a.align == b.align
+        && a.valign == b.valign && a.flipH == b.flipH && a.flipV == b.flipV && a.wrap == b.wrap
+        && a.grow == b.grow && a.hasColor == b.hasColor && a.color == b.color && a.gradient == b.gradient
+        && a.copyOf == b.copyOf && a.copyFeature == b.copyFeature && a.copyInstance == b.copyInstance;
+}
+}  // namespace
+
+bool syncPatternTexts(Sketch& s)
+{
+    // What there should be: for each pattern, each instance, each of its texts, a copy on that
+    // instance's copies of what the text hangs on, turned as the instance is.
+    std::map<std::tuple<Id, Id, int>, Text> wanted;  // (pattern, original, instance)
+    for (const auto& [id, c] : s.constraints()) {
+        if ((c.type != ConstraintType::LinearPattern && c.type != ConstraintType::CircularPattern) || c.texts.empty()) {
+            continue;
+        }
+        const Pattern p = pattern(c);
+        for (size_t k = 0; k < p.copies.size(); ++k) {
+            std::map<Id, Id> map;
+            for (size_t i = 0; i < p.sources.size() && i < p.copies[k].size(); ++i) {
+                map[p.sources[i]] = p.copies[k][i];
+                const std::vector<Id> from = s.definingPoints(p.sources[i]), to = s.definingPoints(p.copies[k][i]);
+                for (size_t j = 0; j < from.size() && j < to.size(); ++j) {
+                    map[from[j]] = to[j];
+                }
+            }
+            const Affine t = instanceTransform(s, c, k + 1);
+            for (Id original : c.texts) {
+                if (!s.hasText(original)) {
+                    continue;
+                }
+                const std::vector<Id> holders = xform::textHolders(s, original);
+                if (!std::ranges::all_of(holders, [&](Id h) { return map.contains(h); })) {
+                    continue;
+                }
+                Text x = xform::copyText(s.text(original), map, t);
+                x.copyOf = original;
+                x.copyFeature = id;
+                x.copyInstance = static_cast<int>(k + 1);
+                wanted.emplace(std::tuple{id, original, x.copyInstance}, std::move(x));
+            }
+        }
+    }
+
+    // The copies there are: kept as they are where nothing's changed, updated, or gone.
+    bool changed = false;
+    std::vector<Id> gone;
+    std::vector<Text> updated;
+    for (const auto& [id, t] : s.texts()) {
+        if (!t.isPatternCopy()) {
+            continue;
+        }
+        const auto it = wanted.find({t.copyFeature, t.copyOf, t.copyInstance});
+        if (it == wanted.end()) {
+            gone.push_back(id);
+            continue;
+        }
+        if (!sameText(it->second, t)) {
+            Text x = it->second;
+            x.id = id;
+            x.sublayer = t.sublayer;
+            updated.push_back(std::move(x));
+        }
+        wanted.erase(it);
+    }
+    for (Id id : gone) {
+        s.eraseText(id);
+        changed = true;
+    }
+    for (const Text& x : updated) {
+        s.setText(x);
+        changed = true;
+    }
+    for (const auto& [key, x] : wanted) {
+        try {
+            s.addText(x, s.text(std::get<1>(key)).sublayer);  // (beside its original)
+            changed = true;
+        }
+        catch (const SketchError&) {
+            // (its holders' copies aren't where the original's sublayer can use them: left out)
+        }
+    }
+    return changed;
 }
 
 }  // namespace core::feature

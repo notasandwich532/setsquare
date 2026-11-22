@@ -330,6 +330,41 @@ TEST_CASE("Move: turning by other than half turns drops the horizontal/vertical 
         CHECK(messages.last().contains("leaves out 4"));
     }
 }
+TEST_CASE("Move/Copy and Mirror take text: picked like geometry, turned and mirrored with it", "[transform][text]")
+{
+    Fixture f;
+    Id t = kNoId, axis = kNoId;
+    f.doc.modify("axis", [&](Sketch& s) { axis = s.addLine(60, -20, 60, 40); });
+    f.doc.edit("text", [&](Editor& ed) {
+        Text x;
+        x.text = "Label";
+        x.height = 5;
+        x.anchor = ed.point(40, 10);
+        t = ed.text(x);
+    });
+
+    SECTION("Move/Copy: turned about its own middle")
+    {
+        f.view.setSelection({t});
+        f.view.setTool(ToolKind::Move);
+        f.field<QDoubleSpinBox>("angle")->setValue(90);
+        f.ok();
+        CHECK(f.sketch().text(t).angle == Approx(90.0));
+        CHECK(f.recorded.last().startsWith("s.move("));
+    }
+    SECTION("Mirror: a readable copy, right-aligned, where the mirror puts it")
+    {
+        f.view.setSelection({t});
+        f.view.setTool(ToolKind::Mirror);
+        f.click(60, 30);  // the mirror line
+        f.ok();
+        REQUIRE(f.sketch().texts().size() == 2);
+        const Text& copy = f.sketch().texts().rbegin()->second;
+        CHECK(copy.align == TextAlign::Right);
+        CHECK(f.pos(copy.anchor).x == Approx(80.0).margin(1e-6));
+        CHECK(copy.angle == Approx(0.0).margin(1e-9));  // (still left to right: readable)
+    }
+}
 TEST_CASE("Scale: pick the point, set the factor", "[transform][scale]")
 {
     Fixture f;

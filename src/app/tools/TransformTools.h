@@ -75,6 +75,7 @@ protected:
     // Geometry the selection inputs may take.
     bool isGeometry(core::Id id) const;
     bool isLine(core::Id id) const;
+    bool isText(core::Id id) const;
     bool isPoint(core::Id id) const;
     bool isCurve(core::Id id) const;
 

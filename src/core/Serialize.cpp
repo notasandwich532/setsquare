@@ -384,6 +384,9 @@ json constraintToJson(const Constraint& c)
     if (!c.params.empty()) {
         j["params"] = c.params;
     }
+    if (!c.texts.empty()) {
+        j["texts"] = c.texts;
+    }
     if (hasValue(c.type)) {
         j["value"] = c.value;
         if (!c.expression.empty()) {
@@ -414,6 +417,7 @@ Constraint constraintFromJson(const json& j)
     c.value = j.value("value", 0.0);
     c.expression = j.value("expression", std::string());
     c.params = j.value("params", std::vector<double>{});
+    c.texts = j.value("texts", std::vector<Id>{});
     if (j.contains("label")) {
         const auto& label = j.at("label");
         c.labelX = label.at(0).get<double>();
@@ -534,6 +538,9 @@ std::string toJson(const Sketch& sketch, bool compact, const std::vector<std::st
             }
             if (t.inBox()) {
                 j["box"] = {t.boxSide, t.boxCorner};
+            }
+            if (t.isPatternCopy()) {
+                j["copy"] = {t.copyOf, t.copyFeature, t.copyInstance};
             }
             if (t.sublayer != kNoId) {
                 j["sublayer"] = t.sublayer;
@@ -825,6 +832,11 @@ Sketch fromJson(const std::string& text, std::vector<std::string>* history, int*
             if (j.contains("box")) {
                 t.boxSide = j.at("box").at(0).get<Id>();
                 t.boxCorner = j.at("box").at(1).get<Id>();
+            }
+            if (j.contains("copy")) {
+                t.copyOf = j.at("copy").at(0).get<Id>();
+                t.copyFeature = j.at("copy").at(1).get<Id>();
+                t.copyInstance = j.at("copy").at(2).get<int>();
             }
             if (!textAlignFromString(j.value("align", std::string("left")), t.align)
                 || !textVAlignFromString(j.value("valign", std::string("baseline")), t.valign)) {

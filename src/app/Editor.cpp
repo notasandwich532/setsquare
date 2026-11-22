@@ -395,6 +395,7 @@ std::map<Id, Id> Editor::copy(const std::vector<Id>& items, double dx, double dy
 {
     const QString what = list(m_sketch, items);
     std::map<Id, Id> map = xform::copy(m_sketch, items, moveMap(dx, dy, angle, about));
+    makeLetters(map);
     log(QStringLiteral("s.copy(%1%2)").arg(what, moveArgs(dx, dy, angle, about)));
     return map;
 }
@@ -409,10 +410,22 @@ void Editor::scale(const std::vector<Id>& items, double factor, core::Vec2 about
     log(call + QLatin1Char(')'));
 }
 
+void Editor::makeLetters(const std::map<Id, Id>& made)
+{
+    for (const auto& [from, to] : made) {
+        if (m_sketch.hasText(to)) {
+            core::Text t = m_sketch.text(to);
+            textshapes::update(t, &m_sketch);
+            m_sketch.setText(t);
+        }
+    }
+}
+
 std::map<Id, Id> Editor::mirror(const std::vector<Id>& items, Id line)
 {
     const QString what = list(m_sketch, items);
     std::map<Id, Id> map = xform::mirror(m_sketch, items, line);
+    makeLetters(map);
     log(QStringLiteral("s.mirror(%1, %2)").arg(what, name(m_sketch, line)));
     return map;
 }
@@ -525,6 +538,7 @@ Id Editor::offset(const std::vector<Id>& curves, double distance, core::Vec2 tow
 std::map<Id, Id> Editor::paste(const core::Sketch& fragment, core::Vec2 at)
 {
     std::map<Id, Id> map = xform::paste(m_sketch, fragment, at);
+    makeLetters(map);
     // The fragment travels as JSON (single-quoted: it has no single quotes or backslashes).
     log(QStringLiteral("s.paste('%1', at=%2)").arg(QString::fromStdString(core::toJson(fragment, true)), pair(at)));
     return map;
@@ -736,6 +750,11 @@ void Editor::fitBox(Id text)
 
 void Editor::setText(core::Text t)
 {
+    if (t.isPatternCopy()) {
+        throw core::SketchError(QStringLiteral("%1 is a pattern's copy of %2: change that, and the copies follow")
+                                    .arg(name(m_sketch, t.id), name(m_sketch, t.copyOf))
+                                    .toStdString());
+    }
     settleGradient(t.gradient, t.color, m_sketch.layerOf(t.id));
     textshapes::update(t, &m_sketch);
     m_sketch.setText(t);

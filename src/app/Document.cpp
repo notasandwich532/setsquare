@@ -706,6 +706,13 @@ void Document::beginDrag(const std::vector<core::Id>& points)
     m_dragAngle = 0.0;
     m_dragAbout = {};
     m_dragDropped.clear();
+    // Texts placed at a dragged point: turned with them by a move's rotation (see dragMove).
+    m_dragTexts.clear();
+    for (const auto& [id, t] : m_sketch.texts()) {
+        if (t.path == core::kNoId && !t.inBox() && std::ranges::find(points, t.anchor) != points.end()) {
+            m_dragTexts.emplace_back(id, t.angle);
+        }
+    }
     m_dragSolver = std::make_unique<core::Solver>(m_sketch, m_sketch.activeLayer());
     m_dragSolver->beginDrag(points);
 }
@@ -788,6 +795,13 @@ void Document::dragMove(double dx, double dy, double angle, core::Vec2 about)
     const core::Affine t = Editor::moveMap(dx, dy, angle, about);
     if (m_dragSolver->dragMap([&](core::Vec2 p) { return t.apply(p); })) {
         m_dragSolver->writeBack(m_sketch);
+        for (const auto& [id, was] : m_dragTexts) {
+            if (m_sketch.hasText(id)) {
+                core::Text onPoint = m_sketch.text(id);
+                onPoint.angle = was + angle;
+                m_sketch.setText(onPoint);  // (its letters are the same: they're drawn turned)
+            }
+        }
         core::regions::carryFills(m_sketch, m_beforeDrag);
         followProjections();
         textshapes::refreshPathTexts(m_sketch);
@@ -974,6 +988,7 @@ void Document::reset(core::Sketch sketch)
 
 void Document::resolve(const core::Sketch* before)
 {
+    core::feature::syncPatternTexts(m_sketch);  // (patterns' text copies, as their originals are)
     m_result = core::solve(m_sketch);
     textshapes::refreshPathTexts(m_sketch);  // text along a curve follows it
     if (textshapes::fitBoxes(m_sketch)) {    // boxes that grow with their text (a new width: new lines)

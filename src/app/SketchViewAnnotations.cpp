@@ -758,6 +758,11 @@ void SketchView::editDimension(Id id)
 
 void SketchView::editText(Id id)
 {
+    if (m_doc.sketch().hasText(id) && m_doc.sketch().text(id).isPatternCopy()) {
+        // (a pattern's copy follows its original: that's what's edited)
+        emit message(tr("That's a pattern's copy: editing its original, which the copies follow"));
+        id = m_doc.sketch().text(id).copyOf;
+    }
     if (m_doc.sketch().hasText(id)) {
         m_editFeature = id;
         setTool(ToolKind::Text);

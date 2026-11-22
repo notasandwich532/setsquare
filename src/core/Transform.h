@@ -38,6 +38,15 @@ namespace xform
 // and the axes' hidden ends are left out.
 std::vector<Id> expand(const Sketch& sketch, const std::vector<Id>& selection);
 
+// What a text hangs on, moved and copied with it: its anchor; the curves of text along a path;
+// a box text's corners and the construction lines between them.
+std::vector<Id> textHolders(const Sketch& sketch, Id text);
+
+// A text copied by `t`: on what `map` says its holders were copied to, turned as `t` turns it, and
+// mirrored still readable (running back the other way, aligned to the other end). Its letters
+// need making again (textshapes::update).
+Text copyText(const Text& source, const std::map<Id, Id>& map, const Affine& t);
+
 // Copies the selected entities from `from` into `to`, mapped by `t`, and returns old -> new ids
 // for every copied entity and constraint. Copies are never fixed (the origin comes along as a
 // plain point). With `constraints`, constraints among the copied entities come too: dimensions

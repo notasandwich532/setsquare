@@ -59,6 +59,7 @@ add_executable(app_tests
     app/test_style_tools.cpp
     app/test_sublayers.cpp
     app/test_text.cpp
+    app/test_text_transforms.cpp
     app/test_threaded_paint.cpp
     app/test_tiled_fill.cpp
     app/test_tools.cpp

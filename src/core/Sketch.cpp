@@ -1062,6 +1062,15 @@ void Sketch::normalize(ConstraintType type, std::vector<Id>& refs) const
     }
 }
 
+void Sketch::setConstraintTexts(Id id, std::vector<Id> texts)
+{
+    auto it = m_constraints.find(id);
+    if (it == m_constraints.end()) {
+        throw SketchError("unknown constraint " + std::to_string(id));
+    }
+    it->second.texts = std::move(texts);
+}
+
 void Sketch::setConstraintExpression(Id id, std::string expression)
 {
     auto it = m_constraints.find(id);
@@ -1390,6 +1399,15 @@ void Sketch::remove(Id id)
         return;
     }
     if (auto t = m_texts.find(id); t != m_texts.end()) {
+        // A pattern's copy: its original no longer repeated by the pattern (all its copies go; the
+        // anchor's the pattern's, and stays).
+        if (t->second.isPatternCopy()) {
+            if (auto k = m_constraints.find(t->second.copyFeature); k != m_constraints.end()) {
+                std::erase(k->second.texts, t->second.copyOf);
+            }
+            m_texts.erase(t);
+            return;
+        }
         // The text, and its anchor too unless something else is built on it. A box text takes
         // its box (the construction lines between its corners) with it.
         const Id anchor = t->second.anchor;
@@ -2055,14 +2073,22 @@ void checkText(const Sketch& s, const Text& t)
 
 Id Sketch::addText(const Text& text)
 {
+    return addText(text, m_activeSublayer);
+}
+
+Id Sketch::addText(const Text& text, Id sublayer)
+{
+    if (!hasSublayer(sublayer)) {
+        sublayer = m_activeSublayer;
+    }
     checkText(*this, text);
     std::vector<Id> on = textPoints(*this, text);
     on.push_back(text.path);
     on.insert(on.end(), text.pathMore.begin(), text.pathMore.end());
-    requireLayer(on, activeLayer());
+    requireLayer(on, layerOfSublayer(sublayer));
     Text t = text;
     t.id = nextId();
-    t.sublayer = m_activeSublayer;
+    t.sublayer = sublayer;
     m_texts.emplace(t.id, std::move(t));
     return m_nextId - 1;
 }

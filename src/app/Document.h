@@ -245,6 +245,7 @@ private:
     double m_dragAngle = 0.0;
     core::Vec2 m_dragAbout;
     std::vector<core::Id> m_dragDropped;
+    std::vector<std::pair<core::Id, double>> m_dragTexts;  // texts on dragged points, and their angles then
     core::Id m_labelDimension = core::kNoId;
 
     int m_transactionDepth = 0;

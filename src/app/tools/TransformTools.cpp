@@ -217,6 +217,11 @@ bool CommandTool::isGeometry(Id id) const
     return s.hasEntity(id) && !s.isReference(id);
 }
 
+bool CommandTool::isText(Id id) const
+{
+    return doc().sketch().hasText(id);
+}
+
 bool CommandTool::isLine(Id id) const
 {
     const core::Sketch& s = doc().sketch();
@@ -239,12 +244,27 @@ Vec2 CommandTool::centreOf(const std::vector<Id>& items) const
 {
     const core::Sketch& s = doc().sketch();
     double x0 = 1e300, y0 = 1e300, x1 = -1e300, y1 = -1e300;
+    auto include = [&](Vec2 p) {
+        x0 = std::min(x0, p.x);
+        y0 = std::min(y0, p.y);
+        x1 = std::max(x1, p.x);
+        y1 = std::max(y1, p.y);
+    };
     for (Id id : core::xform::expand(s, items)) {
         for (const Vec2& p : core::sample(s, id, 16)) {
-            x0 = std::min(x0, p.x);
-            y0 = std::min(y0, p.y);
-            x1 = std::max(x1, p.x);
-            y1 = std::max(y1, p.y);
+            include(p);
+        }
+    }
+    // Texts: their letters too (so one turns about its middle, not where it starts).
+    for (Id id : items) {
+        if (s.hasText(id) && s.hasEntity(s.text(id).anchor)) {
+            const core::Text& t = s.text(id);
+            for (const auto& contour : t.shape) {
+                for (const core::Point& p : contour) {
+                    const core::Point w = core::textToWorld(s.point(t.anchor), t.angle, p);
+                    include({w.x, w.y});
+                }
+            }
         }
     }
     return x0 > x1 ? Vec2{} : Vec2{(x0 + x1) / 2, (y0 + y1) / 2};
@@ -434,8 +454,8 @@ MoveTool::~MoveTool()
 void MoveTool::buildPanel()
 {
     const SketchView::ModifyOptions& o = view().modifyOptions();
-    m_objects = addPick(QObject::tr("Objects"), "objects", QObject::tr("click the objects to move"),
-                        [this](Id id) { return isGeometry(id); }, true);
+    m_objects = addPick(QObject::tr("Objects"), "objects", QObject::tr("click the objects (and texts) to move"),
+                        [this](Id id) { return isGeometry(id) || isText(id); }, true);
     m_about = addPick(QObject::tr("Rotate about"), "about",
                       QObject::tr("click the point to rotate about, or anywhere (none: the objects' centre)"),
                       [this](Id id) { return isPoint(id); }, false);
@@ -793,8 +813,8 @@ QString ScaleTool::dragLabel(int /*id*/) const
 
 void MirrorTool::buildPanel()
 {
-    m_objects = addPick(QObject::tr("Objects"), "objects", QObject::tr("click the objects to mirror"),
-                        [this](Id id) { return isGeometry(id); }, true);
+    m_objects = addPick(QObject::tr("Objects"), "objects", QObject::tr("click the objects (and texts) to mirror"),
+                        [this](Id id) { return isGeometry(id) || isText(id); }, true);
     m_line = addPick(QObject::tr("Mirror line"), "line", QObject::tr("click the line (or axis) to mirror across"),
                      [this](Id id) { return isLine(id); }, false);
 }
@@ -841,8 +861,8 @@ void RectangularPatternTool::buildPanel()
     }
     m_angle = p.angle;
 
-    m_objects = addPick(QObject::tr("Objects"), "objects", QObject::tr("click the objects to pattern"),
-                        [this](Id id) { return isGeometry(id); }, true);
+    m_objects = addPick(QObject::tr("Objects"), "objects", QObject::tr("click the objects (and texts) to pattern"),
+                        [this](Id id) { return isGeometry(id) || isText(id); }, true);
     m_direction = addPick(QObject::tr("Direction/s"), "direction",
                           QObject::tr("click a line for the first direction (or OK for the X/Y axes)"),
                           [this](Id id) { return isLine(id); }, false);
@@ -1019,8 +1039,8 @@ void CircularPatternTool::buildPanel()
     else {
         m_editing = kNoId;
     }
-    m_objects = addPick(QObject::tr("Objects"), "objects", QObject::tr("click the objects to pattern"),
-                        [this](Id id) { return isGeometry(id); }, true);
+    m_objects = addPick(QObject::tr("Objects"), "objects", QObject::tr("click the objects (and texts) to pattern"),
+                        [this](Id id) { return isGeometry(id) || isText(id); }, true);
     m_center = addPick(QObject::tr("Center point"), "center", QObject::tr("click the centre point"),
                        [this](Id id) { return isPoint(id); }, false);
     const bool full = p.angle >= 360.0 - 1e-9;

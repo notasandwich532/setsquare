@@ -117,10 +117,40 @@ ConstraintType swapped(ConstraintType type)
 }
 }  // namespace
 
+std::vector<Id> textHolders(const Sketch& s, Id text)
+{
+    const Text& t = s.text(text);
+    std::vector<Id> out;
+    if (t.path != kNoId) {
+        out.push_back(t.path);
+        out.insert(out.end(), t.pathMore.begin(), t.pathMore.end());
+        return out;
+    }
+    out = textPoints(s, t);  // (the anchor; a box's corners)
+    if (t.inBox()) {
+        for (const auto& [id, e] : s.entities()) {
+            const auto* l = std::get_if<Line>(&e.geom);
+            if (l && e.construction && std::ranges::find(out, l->p1) != out.end()
+                && std::ranges::find(out, l->p2) != out.end()) {
+                out.push_back(id);
+            }
+        }
+    }
+    return out;
+}
+
 std::vector<Id> expand(const Sketch& s, const std::vector<Id>& selection)
 {
     std::set<Id> out;
+    std::vector<Id> all = selection;
     for (Id id : selection) {
+        if (s.hasText(id)) {
+            for (Id h : textHolders(s, id)) {
+                all.push_back(h);  // (a text: what it hangs on)
+            }
+        }
+    }
+    for (Id id : all) {
         if (!s.hasEntity(id) || s.isAxis(id) || s.isHiddenReference(id)) {
             continue;
         }
@@ -157,12 +187,103 @@ std::vector<double> groupParams(const Sketch& s, const Constraint& c, double sca
     return p;
 }}  // namespace
 
+namespace
+{
+// Mirrored, the lines and splines that selected texts run along: made running the other way (as
+// arcs are anyway), so the text along each, still read left to right, is the mirror image's.
+std::set<Id> runBackwards(const Sketch& s, const std::vector<Id>& selection, const Affine& t)
+{
+    std::set<Id> out;
+    if (!t.mirrors()) {
+        return out;
+    }
+    for (Id id : selection) {
+        if (!s.hasText(id) || s.text(id).path == kNoId) {
+            continue;
+        }
+        const Text& text = s.text(id);
+        std::vector<Id> along{text.path};
+        along.insert(along.end(), text.pathMore.begin(), text.pathMore.end());
+        for (Id c : along) {
+            if (s.hasEntity(c) && (s.entity(c).kind() == EntityKind::Line || s.entity(c).kind() == EntityKind::Spline)) {
+                out.insert(c);
+            }
+        }
+    }
+    return out;
+}
+
+// A spline the other way: its points in reverse (a piece's ends swapped).
+Spline reversed(Spline sp)
+{
+    std::ranges::reverse(sp.points);
+    std::swap(sp.start, sp.end);
+    return sp;
+}
+}  // namespace
+
+Text copyText(const Text& source, const std::map<Id, Id>& map, const Affine& t)
+{
+    Text x = source;
+    x.anchor = map.at(source.anchor);
+    if (x.path != kNoId) {
+        x.path = map.at(source.path);
+        for (Id& more : x.pathMore) {
+            more = map.at(more);
+        }
+    }
+    if (x.inBox()) {
+        x.boxSide = map.at(source.boxSide);
+        x.boxCorner = map.at(source.boxCorner);
+    }
+    x.copyOf = x.copyFeature = kNoId;
+    x.copyInstance = 0;
+    x.height *= t.scale();
+    x.minThickness *= t.scale();
+    // Which way its baseline runs now (a box's and a path's own come from them).
+    const double a = source.angle * std::numbers::pi / 180.0;
+    const Vec2 run = t.applyLinear({std::cos(a), std::sin(a)});
+    const bool onPoint = x.path == kNoId && !x.inBox();
+    if (!t.mirrors()) {
+        if (onPoint) {
+            x.angle = std::atan2(run.y, run.x) * 180.0 / std::numbers::pi;
+        }
+    }
+    else {
+        // Readable: a mirror image read the other way round. It runs back along the mirrored
+        // baseline, so it starts from the other end: left and right alignment swap.
+        if (onPoint) {
+            x.angle = std::atan2(-run.y, -run.x) * 180.0 / std::numbers::pi;
+        }
+        else if (x.inBox()) {
+            std::swap(x.anchor, x.boxSide);  // (its bottom side the other way)
+        }
+        else {
+            // (Its curves were made running the other way: the chain's order reverses too.)
+            std::vector<Id> along{x.path};
+            along.insert(along.end(), x.pathMore.begin(), x.pathMore.end());
+            std::ranges::reverse(along);
+            x.path = along.front();
+            x.pathMore.assign(along.begin() + 1, along.end());
+        }
+        if (x.align == TextAlign::Left) {
+            x.align = TextAlign::Right;
+        }
+        else if (x.align == TextAlign::Right) {
+            x.align = TextAlign::Left;
+        }
+    }
+    x.layoutKey = 0;  // (made afresh: see textshapes::update)
+    return x;
+}
+
 std::map<Id, Id> copy(const Sketch& from, Sketch& to, const std::vector<Id>& selection, const Affine& t,
                       bool constraints)
 {
     const std::vector<Id> ids = expand(from, selection);
     std::map<Id, Id> map;
     const double scale = t.scale();
+    const std::set<Id> backwards = runBackwards(from, selection, t);
 
     for (Id id : ids) {
         if (from.entity(id).kind() == EntityKind::Point) {
@@ -176,7 +297,7 @@ std::map<Id, Id> copy(const Sketch& from, Sketch& to, const std::vector<Id>& sel
         const Entity e = from.entity(id);  // a copy: `to` may be `from`
         Id made = kNoId;
         if (const auto* l = std::get_if<Line>(&e.geom)) {
-            made = to.addLine(map.at(l->p1), map.at(l->p2));
+            made = backwards.contains(id) ? to.addLine(map.at(l->p2), map.at(l->p1)) : to.addLine(map.at(l->p1), map.at(l->p2));
         }
         else if (const auto* c = std::get_if<Circle>(&e.geom)) {
             made = to.addCircle(map.at(c->center), c->radius * scale);
@@ -204,7 +325,7 @@ std::map<Id, Id> copy(const Sketch& from, Sketch& to, const std::vector<Id>& sel
                 copied.start = map.at(sp->start);
                 copied.end = map.at(sp->end);
             }
-            made = to.addSpline(copied);
+            made = to.addSpline(backwards.contains(id) ? reversed(copied) : copied);
         }
         if (made != kNoId) {
             to.entity(made).construction = e.construction;
@@ -280,6 +401,19 @@ std::map<Id, Id> copy(const Sketch& from, Sketch& to, const std::vector<Id>& sel
             to.setConstraintFlip(made, c.flip);
             map[c.id] = made;
         }
+    }
+
+    // Texts selected: on the copies of what they hang on, turned as it turns. Mirrored, still
+    // readable: running the other way, aligned to the other end (see copyText).
+    for (Id id : selection) {
+        if (!from.hasText(id) || map.contains(id)) {
+            continue;
+        }
+        Text x = copyText(from.text(id), map, t);
+        if (x.path != kNoId) {
+            x.anchor = to.definingPoints(x.path).front();  // (its curve's first point: it may run the other way)
+        }
+        map[id] = to.addText(x);
     }
     return map;
 }
@@ -379,6 +513,7 @@ std::map<Id, Id> mirror(Sketch& s, const std::vector<Id>& selection, Id line)
     const Affine t = Affine::mirror(a, b);
     const double len = std::hypot(b.x - a.x, b.y - a.y);
 
+    const std::set<Id> backwards = runBackwards(s, selection, t);
     std::vector<Id> ids;
     for (Id id : expand(s, selection)) {
         if (id != line) {
@@ -421,7 +556,7 @@ std::map<Id, Id> mirror(Sketch& s, const std::vector<Id>& selection, Id line)
             if (map.at(l->p1) == l->p1 && map.at(l->p2) == l->p2) {
                 continue;  // lies on the mirror line: its own mirror image
             }
-            made = s.addLine(map.at(l->p1), map.at(l->p2));
+            made = backwards.contains(id) ? s.addLine(map.at(l->p2), map.at(l->p1)) : s.addLine(map.at(l->p1), map.at(l->p2));
         }
         else if (const auto* c = std::get_if<Circle>(&e.geom)) {
             if (map.at(c->center) == c->center) {
@@ -458,7 +593,7 @@ std::map<Id, Id> mirror(Sketch& s, const std::vector<Id>& selection, Id line)
                     copied.start = map.at(copied.start);
                     copied.end = map.at(copied.end);
                 }
-                made = s.addSpline(copied);
+                made = s.addSpline(backwards.contains(id) ? reversed(copied) : copied);
             }
         }
         if (made != kNoId) {
@@ -473,6 +608,21 @@ std::map<Id, Id> mirror(Sketch& s, const std::vector<Id>& selection, Id line)
     }
     for (const auto& [c, copy] : circles) {
         s.addConstraint(ConstraintType::Equal, {c, copy});
+    }
+    // Texts selected: mirrored onto their holders' images, still readable (see copyText). (A
+    // text on a curve lying on the mirror line has no image to go on: left out.)
+    for (Id id : selection) {
+        if (!s.hasText(id)) {
+            continue;
+        }
+        const std::vector<Id> holders = textHolders(s, id);
+        if (std::ranges::all_of(holders, [&](Id h) { return map.contains(h); })) {
+            Text x = copyText(s.text(id), map, t);
+            if (x.path != kNoId) {
+                x.anchor = s.definingPoints(x.path).front();  // (its curve's first point: it runs the other way)
+            }
+            map[id] = s.addText(x);
+        }
     }
     std::erase_if(map, [](const auto& kv) { return kv.first == kv.second; });
     return map;
