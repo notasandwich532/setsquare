@@ -4,6 +4,7 @@
 
 #include "Curves.h"
 #include "Features.h"
+#include "Modify.h"
 
 #include <planegcs/GCS.h>
 
@@ -1432,7 +1433,16 @@ void Solver::Impl::addConstraint(const Sketch& sketch, const Constraint& c)
                 sys.addConstraintEqualLength(pa, pb, tag);
             }
             else if (kind(0) == EntityKind::Line) {
-                sys.addConstraintEqualLength(ln(r[0]), ln(r[1]), tag);
+                // Each line whole: with any part trimmed to construction (modify::wholeLine).
+                auto whole = [&](Id id) {
+                    const auto [p1, p2] = modify::wholeLine(sketch, id);
+                    GCS::Line l;
+                    l.p1 = pt(p1);
+                    l.p2 = pt(p2);
+                    return l;
+                };
+                GCS::Line a = whole(r[0]), b = whole(r[1]);
+                sys.addConstraintEqualLength(a, b, tag);
             }
             else {
                 sys.addConstraintEqualRadius(round(r[0]), round(r[1]), tag);

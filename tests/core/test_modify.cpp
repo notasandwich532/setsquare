@@ -130,6 +130,52 @@ TEST_CASE("Trim to construction keeps the piece, dashed and still joined", "[mod
     CHECK(u.entity(lone).construction);
 }
 
+TEST_CASE("Equal lines stay whole when part of one is trimmed to construction", "[modify][trim]")
+{
+    // A tapered hole: equal sides, a level bottom, the tops level; a rib crosses the left side.
+    Sketch s;
+    const Id a = s.addPoint(-69, 0), b = s.addPoint(-65, -26), c = s.addPoint(-37, -26), d = s.addPoint(-33, 0);
+    const Id left = s.addLine(a, b), bottom = s.addLine(b, c), right = s.addLine(c, d);
+    s.addConstraint(ConstraintType::Horizontal, {bottom});
+    s.addConstraint(ConstraintType::Horizontal, {a, d});
+    s.addConstraint(ConstraintType::Equal, {left, right});
+    const Id rib = s.addLine(-80, -10, -60, -10);
+    s.entity(s.line(rib).p1).fixed = s.entity(s.line(rib).p2).fixed = true;
+    s.entity(a).fixed = s.entity(b).fixed = true;
+    REQUIRE(solve(s).ok);
+    auto length = [&](Id p, Id q) { return std::hypot(pos(s, p).x - pos(s, q).x, pos(s, p).y - pos(s, q).y); };
+    const double side = length(a, b);
+    const Vec2 was = pos(s, d);
+
+    // The top of the left side, above the rib, to construction: the sides are still equal as
+    // drawn, so nothing moves (it used to make the right side as short as the piece).
+    const Id piece = mod::trimToConstruction(s, left, {-68.5, -3});
+    REQUIRE(s.entity(piece).construction);
+    CHECK(mod::wholeLine(s, piece) == std::pair{a, b});
+    requireClean(s, 1);  // (the bottom's width is free)
+    CHECK(length(c, d) == Approx(side));
+    CHECK(pos(s, d).x == Approx(was.x).margin(1e-6));
+    CHECK(pos(s, d).y == Approx(was.y).margin(1e-6));
+
+    // A middle piece too: solid, construction, solid make one line.
+    Sketch t;
+    const Id h = t.addLine(0, 0, 30, 0);
+    t.addLine(10, -5, 10, 5);
+    t.addLine(20, -5, 20, 5);
+    mod::trimToConstruction(t, h, {15, 0});
+    const auto [e1, e2] = mod::wholeLine(t, h);
+    CHECK(std::abs(pos(t, e1).x - pos(t, e2).x) == Approx(30.0));
+
+    // Pieces only broken apart (no construction between) stay lines of their own.
+    Sketch u;
+    const Id g = u.addLine(0, 0, 30, 0);
+    u.addLine(10, -5, 10, 5);
+    const std::vector<Id> pieces = mod::breakCurve(u, g, {5, 0});
+    REQUIRE(pieces.size() == 2);
+    const auto [f1, f2] = mod::wholeLine(u, pieces[0]);
+    CHECK(std::abs(pos(u, f1).x - pos(u, f2).x) == Approx(10.0));
+}
+
 TEST_CASE("Trim a curve that crosses nothing removes it", "[modify][trim]")
 {
     Sketch s;

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <map>
 #include <numbers>
 #include <optional>
 
@@ -590,6 +591,53 @@ Id trimToConstruction(Sketch& s, Id curve, Vec2 near)
     const Id clicked = *std::ranges::min_element(pieces, {}, [&](Id p) { return distanceTo(s, p, near); });
     s.entity(clicked).construction = true;
     return clicked;
+}
+
+std::pair<Id, Id> wholeLine(const Sketch& s, Id line)
+{
+    const Line& own = s.line(line);
+    // The pieces: lines collinear with one already found, sharing an end with it, where one of
+    // the two is construction (pieces only Break split apart stay lines of their own).
+    std::vector<Id> pieces{line};
+    for (size_t i = 0; i < pieces.size(); ++i) {
+        const Id at = pieces[i];
+        const Line& l = s.line(at);
+        for (Id k : s.constraintsOn(at)) {
+            const Constraint& c = s.constraint(k);
+            if (c.type != CT::Collinear || c.refs.size() != 2) {
+                continue;
+            }
+            const Id other = c.refs[0] == at ? c.refs[1] : c.refs[0];
+            if (std::ranges::find(pieces, other) != pieces.end() || !s.hasEntity(other)
+                || s.entity(other).kind() != EntityKind::Line
+                || !(s.entity(at).construction || s.entity(other).construction)) {
+                continue;
+            }
+            const Line& o = s.line(other);
+            if (o.p1 == l.p1 || o.p1 == l.p2 || o.p2 == l.p1 || o.p2 == l.p2) {
+                pieces.push_back(other);
+            }
+        }
+    }
+    if (pieces.size() == 1) {
+        return {own.p1, own.p2};
+    }
+    // Its ends: the points only one piece has.
+    std::map<Id, int> uses;
+    for (Id p : pieces) {
+        ++uses[s.line(p).p1];
+        ++uses[s.line(p).p2];
+    }
+    std::vector<Id> ends;
+    for (const auto& [p, n] : uses) {
+        if (n == 1) {
+            ends.push_back(p);
+        }
+    }
+    if (ends.size() != 2) {
+        return {own.p1, own.p2};  // (not a simple run: a loop, or a branch)
+    }
+    return {ends[0], ends[1]};
 }
 
 std::vector<Vec2> trimPreview(const Sketch& s, Id curve, Vec2 near)

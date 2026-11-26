@@ -3,6 +3,7 @@
 #include "Geometry.h"
 #include "Sketch.h"
 
+#include <utility>
 #include <vector>
 
 // Editing operations that cut and join curves: trim, extend, break, fillet and chamfer.
@@ -36,6 +37,12 @@ void trim(Sketch& sketch, Id curve, Vec2 near);
 // Like trim, but the piece is kept as construction geometry instead of removed (still joined to
 // the rest: collinear / on the same circle). Returns the construction piece.
 Id trimToConstruction(Sketch& sketch, Id curve, Vec2 near);
+
+// A line as it was before trimming to construction cut it up: the far ends of the run of
+// collinear pieces it's joined to end to end, through construction pieces (a piece the trim
+// turned to construction, and the pieces either side of it). Its own ends when it hasn't been
+// cut so. Lines are equal by this, so trimming part of one to construction doesn't change it.
+std::pair<Id, Id> wholeLine(const Sketch& sketch, Id line);
 
 // Lengthens the end of a line or arc nearest `near` until it meets another curve.
 void extend(Sketch& sketch, Id curve, Vec2 near);
