@@ -30,7 +30,7 @@ Download `Setsquare.zip` from the [latest release](https://github.com/notasandwi
 - **Construction geometry** for guides that aren't part of the finished drawing.
 
 ### Editing
-- **Trim, extend and break** at intersections, including ellipses and splines.
+- **Trim, extend and break** at intersections, including ellipses and splines. A line you break or partly trim to construction stays the same line for equal constraints.
 - **Fillet and chamfer** (equal distances, two distances, or distance and angle). The original corner stays as construction, so dimensions to it survive.
 - **Move/Copy** with distances and rotation about any point, plus **scale** and **mirror**. Text goes along, turning with the rest; mirrored, it stays readable.
 - **Rectangular and circular patterns, offset and divide**, all kept linked: change the count or spacing later and the copies update. Patterns repeat text too, each copy following its original.
@@ -52,7 +52,7 @@ Download `Setsquare.zip` from the [latest release](https://github.com/notasandwi
 
 ### Annotating and measuring
 - **Drawing annotations:** aligned, horizontal, vertical, radius, diameter, angle, arc length and ordinate dimensions, and leader notes.
-- **Measure** lengths, distances and areas.
+- **Measure** lengths, distances, areas and the angle between two lines.
 
 ### Files
 - **Autosave and crash recovery:** unsaved work is copied aside every minute and offered back if the app closes unexpectedly.
