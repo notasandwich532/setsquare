@@ -8,6 +8,16 @@ assert isclose(s.measure_length(sides[0]), 20, abs_tol=1e-9)
 assert isclose(s.measure_length(sides), 60, abs_tol=1e-9)  # (a list: the total)
 assert isclose(s.measure_length(hole), 4 * pi, abs_tol=1e-9)
 
+# Angles between lines, as drawn: a corner's inside angle; a taper's narrow one (the lines meet
+# beyond their ends); parallel lines, 0.
+assert isclose(s.measure_angle(sides[0], sides[1]), 90)
+left = s.line((40, 0), (44, -26))
+right = s.line((72, -26), (76, 0))
+bottom = s.line((44, -26), (72, -26))
+assert isclose(s.measure_angle(left, right), 2 * 8.746162, rel_tol=1e-6), s.measure_angle(left, right)
+assert isclose(s.measure_angle(left, bottom), 180 - 81.253838, rel_tol=1e-6), s.measure_angle(left, bottom)
+assert s.measure_angle(sides[0], sides[2]) == 0
+
 d, dx, dy = s.measure_between(sides[0].p1, (3, 4))
 assert isclose(d, 5) and isclose(dx, 3) and isclose(dy, 4), (d, dx, dy)
 d, dx, dy = s.measure_between(sides[0].p2, sides[0].p1)

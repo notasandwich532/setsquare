@@ -166,14 +166,43 @@ TEST_CASE("Equal lines stay whole when part of one is trimmed to construction", 
     const auto [e1, e2] = mod::wholeLine(t, h);
     CHECK(std::abs(pos(t, e1).x - pos(t, e2).x) == Approx(30.0));
 
-    // Pieces only broken apart (no construction between) stay lines of their own.
+    // Broken apart, likewise.
     Sketch u;
     const Id g = u.addLine(0, 0, 30, 0);
     u.addLine(10, -5, 10, 5);
     const std::vector<Id> pieces = mod::breakCurve(u, g, {5, 0});
     REQUIRE(pieces.size() == 2);
     const auto [f1, f2] = mod::wholeLine(u, pieces[0]);
-    CHECK(std::abs(pos(u, f1).x - pos(u, f2).x) == Approx(10.0));
+    CHECK(std::abs(pos(u, f1).x - pos(u, f2).x) == Approx(30.0));
+
+    // The taper again, its left side broken at the rib (both pieces solid): nothing moves.
+    Sketch v;
+    const Id va = v.addPoint(-69, 0), vb = v.addPoint(-65, -26), vc = v.addPoint(-37, -26), vd = v.addPoint(-33, 0);
+    const Id vl = v.addLine(va, vb), vbot = v.addLine(vb, vc), vr = v.addLine(vc, vd);
+    v.addConstraint(ConstraintType::Horizontal, {vbot});
+    v.addConstraint(ConstraintType::Horizontal, {va, vd});
+    v.addConstraint(ConstraintType::Equal, {vl, vr});
+    const Id vrib = v.addLine(-80, -10, -60, -10);
+    v.entity(v.line(vrib).p1).fixed = v.entity(v.line(vrib).p2).fixed = true;
+    v.entity(va).fixed = v.entity(vb).fixed = true;
+    REQUIRE(solve(v).ok);
+    const Vec2 vwas = pos(v, vd);
+    mod::breakCurve(v, vl, {-68.5, -3});
+    requireClean(v, 1);
+    CHECK(pos(v, vd).x == Approx(vwas.x).margin(1e-6));
+    CHECK(pos(v, vd).y == Approx(vwas.y).margin(1e-6));
+
+    // Two pieces of one line made equal compare as themselves: the cut goes to the middle.
+    Sketch w;
+    const Id wl = w.addLine(0, 0, 30, 0);
+    w.entity(w.line(wl).p1).fixed = w.entity(w.line(wl).p2).fixed = true;
+    w.addLine(10, -5, 10, 5);
+    const std::vector<Id> halves = mod::breakCurve(w, wl, {5, 0});
+    REQUIRE(halves.size() == 2);
+    w.addConstraint(ConstraintType::Equal, {halves[0], halves[1]});
+    REQUIRE(solve(w).ok);
+    const Line half = w.line(halves[0]);
+    CHECK(std::abs(pos(w, half.p1).x - pos(w, half.p2).x) == Approx(15.0));
 }
 
 TEST_CASE("Trim a curve that crosses nothing removes it", "[modify][trim]")

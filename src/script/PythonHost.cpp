@@ -2100,6 +2100,17 @@ PYBIND11_EMBEDDED_MODULE(setsquare, m)
             return core::measuring::length(sketch(), ids);
         }, py::arg("curves"),
            "The length of a curve, or the total of a list of them, in mm (as the Measure tool shows).")
+        .def("measure_angle", [](const SketchH&, py::handle l1, py::handle l2) {
+            const Id a = idOf(l1), b = idOf(l2);
+            for (Id id : {a, b}) {
+                if (!sketch().hasEntity(id) || sketch().entity(id).kind() != core::EntityKind::Line) {
+                    throw py::value_error("measure_angle takes two lines");
+                }
+            }
+            return core::measuring::angle(sketch(), a, b).degrees;
+        }, py::arg("line1"), py::arg("line2"),
+           "The angle between two lines in degrees, as they're drawn (as the Measure tool shows): where they meet, "
+           "out along each; 0 if they're parallel.")
         .def("measure_between", [](const SketchH&, py::handle a, py::handle b) {
             const core::measuring::Separation d = core::measuring::between(vecArg(a), vecArg(b));
             return py::make_tuple(d.distance, d.dx, d.dy);

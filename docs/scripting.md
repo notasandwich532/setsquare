@@ -326,6 +326,7 @@ s.dimension_decimals = 1                               # the drawing's (2 to sta
 What the Measure tool shows. Nothing is changed.
 ```python
 s.measure_length(curve)            # mm; a list of curves: their total (exact for arcs, ellipses, splines)
+s.measure_angle(line1, line2)      # degrees between two lines as drawn (a corner's inside, a taper's narrow one); 0 if parallel
 s.measure_between(a, b)            # (distance, dx, dy) from a to b: points, or (x, y)
 s.measure_area(at=(x, y))          # mm^2 of the closed area there, its holes taken off; None if not enclosed
 ```

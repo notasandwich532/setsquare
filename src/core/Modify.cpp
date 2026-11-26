@@ -596,8 +596,8 @@ Id trimToConstruction(Sketch& s, Id curve, Vec2 near)
 std::pair<Id, Id> wholeLine(const Sketch& s, Id line)
 {
     const Line& own = s.line(line);
-    // The pieces: lines collinear with one already found, sharing an end with it, where one of
-    // the two is construction (pieces only Break split apart stay lines of their own).
+    // The pieces: lines collinear with one already found, sharing an end with it (as Break and
+    // Trim to construction leave them).
     std::vector<Id> pieces{line};
     for (size_t i = 0; i < pieces.size(); ++i) {
         const Id at = pieces[i];
@@ -609,8 +609,7 @@ std::pair<Id, Id> wholeLine(const Sketch& s, Id line)
             }
             const Id other = c.refs[0] == at ? c.refs[1] : c.refs[0];
             if (std::ranges::find(pieces, other) != pieces.end() || !s.hasEntity(other)
-                || s.entity(other).kind() != EntityKind::Line
-                || !(s.entity(at).construction || s.entity(other).construction)) {
+                || s.entity(other).kind() != EntityKind::Line) {
                 continue;
             }
             const Line& o = s.line(other);

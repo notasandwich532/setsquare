@@ -16,10 +16,11 @@
 class QLabel;
 
 // Measure: reads sizes off the drawing, changing nothing. Click a curve for its length
-// (Shift+click more to add them up), a point and then another for the distance between them and
-// the differences in x and y, or inside a closed area for its area (its holes taken off). The
-// results are in the tool's panel (selectable, to copy) and marked on the canvas, and follow the
-// drawing as it changes. Started with curves or two points selected, it measures them.
+// (Ctrl+click more to add them up; two lines also give the angle between them), a point and then
+// another for the distance between them and the differences in x and y, or inside a closed area
+// for its area (its holes taken off). The results are in the tool's panel (selectable, to copy)
+// and marked on the canvas, and follow the drawing as it changes. Started with curves or two
+// points selected, it measures them.
 class MeasureTool : public Tool
 {
 public:
@@ -29,7 +30,7 @@ public:
     enum class Mode
     {
         None,
-        Curves,  // their total length
+        Curves,  // their total length (two lines: and the angle between them)
         Points,  // the distance from the first to the second (just the first: waiting for another)
         Area,
     };
@@ -45,7 +46,7 @@ public:
     // --- for tests and scripts ---
     CommandPanel* panel() const { return m_panel; }
     Mode mode() const { return m_mode; }
-    // The panel's values, as shown ("" for rows not shown): Length, Distance, ΔX, ΔY, Area.
+    // The panel's values, as shown ("" for rows not shown): Length, Angle, Distance, ΔX, ΔY, Area.
     QString shown(const char* row) const;
 
 private:
@@ -56,6 +57,7 @@ private:
     void forgetMissing();  // after an edit: what's no longer there isn't measured
     void updatePanel();
     const core::regions::Arrangement& hoverArrangement();
+    bool twoLines() const;  // measuring exactly two lines: their angle too
 
     Mode m_mode = Mode::None;
     std::vector<core::Id> m_curves;
@@ -73,6 +75,7 @@ private:
     QPointer<CommandPanel> m_panel;
     QLabel* m_prompt = nullptr;
     QLabel* m_length = nullptr;
+    QLabel* m_angle = nullptr;
     QLabel* m_distance = nullptr;
     QLabel* m_dx = nullptr;
     QLabel* m_dy = nullptr;

@@ -8,10 +8,12 @@
 #include <core/Measure.h>
 
 #include <QLabel>
+#include <QLineF>
 #include <QPainter>
 #include <QPainterPath>
 
 #include <algorithm>
+#include <cmath>
 
 using core::Id;
 using core::kNoId;
@@ -41,6 +43,11 @@ QString mm(double v)
 QString mm2(double v)
 {
     return number(v) + QStringLiteral(" mm²");
+}
+
+QString degrees(double v)
+{
+    return number(v) + QStringLiteral("°");
 }
 
 QLabel* valueLabel(const char* name)
@@ -87,8 +94,17 @@ QString MeasureTool::hint() const
     if (m_mode == Mode::Points && m_b == kNoId) {
         return QObject::tr("Measure: click another point for the distance to it");
     }
-    return QObject::tr("Measure: click a curve for its length (Shift+click to add more), a point and then another "
-                       "for the distance between them, or inside a closed area for its area. Esc: done");
+    return QObject::tr("Measure: click a curve for its length (Ctrl+click to add more; two lines give their angle), "
+                       "a point and then another for the distance between them, or inside a closed area for its "
+                       "area. Esc: done");
+}
+
+bool MeasureTool::twoLines() const
+{
+    const core::Sketch& s = doc().sketch();
+    return m_mode == Mode::Curves && m_curves.size() == 2 && std::ranges::all_of(m_curves, [&](Id id) {
+               return s.hasEntity(id) && s.entity(id).kind() == core::EntityKind::Line;
+           });
 }
 
 void MeasureTool::activate()
@@ -101,6 +117,8 @@ void MeasureTool::activate()
     m_panel->addWidget(QString(), m_prompt);
     m_length = valueLabel("measureLength");
     m_panel->addWidget(QObject::tr("Length"), m_length);
+    m_angle = valueLabel("measureAngle");
+    m_panel->addWidget(QObject::tr("Angle"), m_angle);
     m_distance = valueLabel("measureDistance");
     m_panel->addWidget(QObject::tr("Distance"), m_distance);
     m_dx = valueLabel("measureDx");
@@ -154,7 +172,7 @@ void MeasureTool::clear()
 void MeasureTool::measureCurve(Id curve, bool add)
 {
     if (add && m_mode == Mode::Curves) {
-        // Shift+click: in the total, or out of it again.
+        // Ctrl+click: in the total, or out of it again.
         if (const auto it = std::ranges::find(m_curves, curve); it != m_curves.end()) {
             m_curves.erase(it);
             if (m_curves.empty()) {
@@ -207,7 +225,7 @@ void MeasureTool::press(const ToolEvent& e)
         measurePoint(hit);
     }
     else if (isCurve(s, hit)) {
-        measureCurve(hit, e.modifiers & Qt::ShiftModifier);
+        measureCurve(hit, e.modifiers & Qt::ControlModifier);
     }
     else {
         measureArea(e.world);
@@ -290,15 +308,21 @@ void MeasureTool::updatePanel()
         return;
     }
     const core::Sketch& s = doc().sketch();
-    QString prompt, length, distance, dx, dy, area;
+    QString prompt, length, angle, distance, dx, dy, area;
     switch (m_mode) {
         case Mode::None:
             prompt = QObject::tr("Click a curve, two points, or inside a closed area");
             break;
         case Mode::Curves:
-            prompt = m_curves.size() == 1 ? QObject::tr("1 curve (Shift+click to add more)")
+            prompt = m_curves.size() == 1 ? QObject::tr("1 curve (Ctrl+click to add more)")
                                           : QObject::tr("%1 curves, in all").arg(m_curves.size());
             length = mm(core::measuring::length(s, m_curves));
+            if (twoLines()) {
+                const core::measuring::Angle a = core::measuring::angle(s, m_curves[0], m_curves[1]);
+                prompt = QObject::tr("2 lines: the angle between them, and their length in all");
+                angle = a.parallel ? QObject::tr("0° (parallel)")
+                                   : QObject::tr("%1  (other side %2)").arg(degrees(a.degrees), degrees(a.other));
+            }
             break;
         case Mode::Points:
             if (m_b == kNoId) {
@@ -329,6 +353,7 @@ void MeasureTool::updatePanel()
     };
     set(m_prompt, prompt);
     set(m_length, length);
+    set(m_angle, angle);
     set(m_distance, distance);
     set(m_dx, dx);
     set(m_dy, dy);
@@ -411,6 +436,53 @@ void MeasureTool::paintOverlay(QPainter& painter)
             if (m_curves.size() == 1) {
                 const std::vector<core::Vec2> pts = core::sample(s, m_curves.front(), 128);
                 label(view().toScreen(pts[pts.size() / 2]) + QPointF(0, -16), mm(core::measuring::length(s, m_curves)));
+            }
+            if (twoLines()) {
+                // The angle: the lines carried on (dashed) to where they meet, an arc between
+                // them there, and its size; if they meet off screen, the size between the lines.
+                const core::measuring::Angle a = core::measuring::angle(s, m_curves[0], m_curves[1]);
+                auto middle = [&](Id id) {
+                    const core::Line& l = s.line(id);
+                    return (view().toScreen(at(s, l.p1)) + view().toScreen(at(s, l.p2))) / 2;
+                };
+                const QPointF between = (middle(m_curves[0]) + middle(m_curves[1])) / 2;
+                if (a.parallel) {
+                    label(between, QObject::tr("0° (parallel)"));
+                    break;
+                }
+                const QPointF v = view().toScreen(a.vertex);
+                if (!QRectF(view().rect()).adjusted(-40, -40, 40, 40).contains(v)) {
+                    label(between, degrees(a.degrees));
+                    break;
+                }
+                painter.setPen(QPen(accent, 1, Qt::DashLine));
+                for (Id id : m_curves) {
+                    const core::Line& l = s.line(id);
+                    const QPointF p = view().toScreen(at(s, l.p1)), q = view().toScreen(at(s, l.p2));
+                    const QPointF nearer = QLineF(v, p).length() <= QLineF(v, q).length() ? p : q;
+                    if (QLineF(v, nearer).length() > 1.0) {
+                        painter.drawLine(v, nearer);
+                    }
+                }
+                // (Screen y runs down: Qt's arc angles go anticlockwise as seen.)
+                auto screenAngle = [&](core::Vec2 d) {
+                    const QPointF e = view().toScreen({a.vertex.x + d.x, a.vertex.y + d.y});
+                    return std::atan2(-(e.y() - v.y()), e.x() - v.x()) * 180.0 / 3.141592653589793;
+                };
+                const double from = screenAngle(a.dir1);
+                double sweep = screenAngle(a.dir2) - from;
+                while (sweep > 180.0) {
+                    sweep -= 360.0;
+                }
+                while (sweep <= -180.0) {
+                    sweep += 360.0;
+                }
+                const double r = 36.0;
+                const QRectF box(v.x() - r, v.y() - r, 2 * r, 2 * r);
+                painter.setPen(QPen(accent, 2));
+                painter.drawArc(box, qRound(from * 16), qRound(sweep * 16));
+                const double mid = (from + sweep / 2) * 3.141592653589793 / 180.0;
+                label(v + QPointF(std::cos(mid), -std::sin(mid)) * (r + 26), degrees(a.degrees));
             }
             break;
         }

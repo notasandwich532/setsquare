@@ -1,4 +1,4 @@
-// The Measure tool: a curve's length (Shift+click adds more), the distance between two points
+// The Measure tool: a curve's length (Ctrl+click adds more; two lines: their angle), the distance between two points
 // with dx and dy, an area; starting from the selection; numbers that follow edits.
 
 #include "CommandPanel.h"
@@ -54,7 +54,7 @@ struct Fixture
 };
 }  // namespace
 
-TEST_CASE("Measure: a curve's length, and Shift+click adds more up", "[measure]")
+TEST_CASE("Measure: a curve's length, and Ctrl+click adds more up", "[measure]")
 {
     Fixture f;
     f.view.setTool(ToolKind::Measure);
@@ -64,12 +64,52 @@ TEST_CASE("Measure: a curve's length, and Shift+click adds more up", "[measure]"
     f.click(25, 10);  // the bottom side
     CHECK(f.shown("measureLength") == QStringLiteral("30 mm"));
     CHECK(f.shown("measureArea").isEmpty());
-    f.click(10, 20, Qt::ShiftModifier);  // and the left one
+    CHECK(f.shown("measureAngle").isEmpty());
+    f.click(10, 20, Qt::ShiftModifier);  // (Shift: starts again with that one)
+    CHECK(f.shown("measureLength") == QStringLiteral("20 mm"));
+    f.click(25, 10);
+    f.click(10, 20, Qt::ControlModifier);  // and the left one
     CHECK(f.shown("measureLength") == QStringLiteral("50 mm"));
-    f.click(10, 20, Qt::ShiftModifier);  // (out again)
+    CHECK(f.shown("measureAngle").startsWith(QStringLiteral("90°")));  // (two lines: their angle)
+    f.click(10, 20, Qt::ControlModifier);  // (out again)
     CHECK(f.shown("measureLength") == QStringLiteral("30 mm"));
+    CHECK(f.shown("measureAngle").isEmpty());
     f.click(24, 20);  // the circle
     CHECK(f.shown("measureLength") == QStringLiteral("25.133 mm"));  // 8 pi
+}
+
+TEST_CASE("Measure: two lines give the angle between them, as drawn", "[measure]")
+{
+    Fixture f;
+    // A tapered hole: sides that meet below it, beyond their ends.
+    Id left = kNoId, right = kNoId, bottom = kNoId;
+    f.doc.modify("taper", [&](Sketch& s) {
+        left = s.addLine(50, 30, 54, 4);
+        bottom = s.addLine(54, 4, 82, 4);
+        right = s.addLine(82, 4, 86, 30);
+    });
+    f.view.setTool(ToolKind::Measure);
+    f.click(52, 17);
+    f.click(84, 17, Qt::ControlModifier);
+    const double taper = core::measuring::angle(f.doc.sketch(), left, right).degrees;
+    CHECK(taper > 17.4);
+    CHECK(taper < 17.6);  // (2 atan(4/26))
+    CHECK(f.shown("measureAngle").startsWith(QStringLiteral("17.49")));
+    CHECK(f.shown("measureAngle").contains(QStringLiteral("162.5")));  // (the other side)
+    saveSnapshot(f.view, QStringLiteral(" (taper)"));
+
+    // Side and bottom: the corner's inside angle.
+    f.click(52, 17);
+    f.click(68, 4, Qt::ControlModifier);
+    CHECK(f.shown("measureAngle").startsWith(QStringLiteral("98.7")));
+
+    // Parallel: 0. And started with two lines selected, it measures them.
+    f.view.setTool(ToolKind::Select);
+    f.view.setSelection({f.box.sides[0], f.box.sides[2]});
+    f.view.setTool(ToolKind::Measure);
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);  // (the last panel gone)
+    CHECK(f.shown("measureAngle") == QStringLiteral("0° (parallel)"));
+    (void)bottom;
 }
 
 TEST_CASE("Measure: two points, the distance and the differences in x and y", "[measure]")

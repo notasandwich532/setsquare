@@ -1433,15 +1433,18 @@ void Solver::Impl::addConstraint(const Sketch& sketch, const Constraint& c)
                 sys.addConstraintEqualLength(pa, pb, tag);
             }
             else if (kind(0) == EntityKind::Line) {
-                // Each line whole: with any part trimmed to construction (modify::wholeLine).
-                auto whole = [&](Id id) {
-                    const auto [p1, p2] = modify::wholeLine(sketch, id);
-                    GCS::Line l;
-                    l.p1 = pt(p1);
-                    l.p2 = pt(p2);
-                    return l;
-                };
-                GCS::Line a = whole(r[0]), b = whole(r[1]);
+                // Each line whole, as drawn before Break or Trim to construction cut it up
+                // (modify::wholeLine); two pieces of one line compare as themselves.
+                std::pair<Id, Id> ea = modify::wholeLine(sketch, r[0]), eb = modify::wholeLine(sketch, r[1]);
+                if (std::minmax(ea.first, ea.second) == std::minmax(eb.first, eb.second)) {
+                    ea = {sketch.line(r[0]).p1, sketch.line(r[0]).p2};
+                    eb = {sketch.line(r[1]).p1, sketch.line(r[1]).p2};
+                }
+                GCS::Line a, b;
+                a.p1 = pt(ea.first);
+                a.p2 = pt(ea.second);
+                b.p1 = pt(eb.first);
+                b.p2 = pt(eb.second);
                 sys.addConstraintEqualLength(a, b, tag);
             }
             else {

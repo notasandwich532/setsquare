@@ -26,6 +26,20 @@ struct Separation
 Separation between(Vec2 a, Vec2 b);
 Separation between(const Sketch& sketch, Id a, Id b);  // two points of the sketch
 
+// The angle between two lines, as they're drawn: at the point where they meet (or would, made
+// longer), from one towards the other, each taken from there out along it (to its far end). So
+// a corner's inside angle, or a taper's narrow one. `other` is the rest of a half turn.
+// Parallel lines: 0, with no vertex.
+struct Angle
+{
+    double degrees = 0.0;  // 0 to 180
+    double other = 180.0;  // 180 - degrees
+    bool parallel = false;
+    Vec2 vertex;           // where they meet (not when parallel)
+    Vec2 dir1, dir2;       // unit directions from the vertex out along each line
+};
+Angle angle(const Sketch& sketch, Id line1, Id line2);
+
 // The closed area around p, of a layer's geometry (what a fill there would cover), its outline
 // following curves closely enough that its area is good to about a millionth.
 std::optional<regions::Region> areaAt(const Sketch& sketch, Id layer, Vec2 p);
